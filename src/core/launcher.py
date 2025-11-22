@@ -389,17 +389,18 @@ class Launcher:
             print(f"{Colors.YELLOW}Press Ctrl+C to stop{Colors.NC}")
             print()
 
-            # Step 9: Start FULL SYSTEM orchestrator (NOT minimal!)
-            print(f"{Colors.CYAN}🎯 Using FULL SYSTEM orchestrator{Colors.NC}")
+            # Step 9: Start CobaltGraph Main (Full Observatory)
+            print(f"{Colors.CYAN}🎯 Using CobaltGraph Main (Full Observatory){Colors.NC}")
+            print(f"{Colors.CYAN}🔬 Multi-Agent Consensus Threat Intelligence{Colors.NC}")
 
-            from src.core.orchestrator import CobaltGraphOrchestrator
+            from src.core.main import CobaltGraphMain
 
-            # Pass dashboard config to orchestrator
+            # Pass dashboard config to main
             config = self.config or {}
             config['dashboard_port'] = port
             config['dashboard_type'] = dashboard_config['type'] if dashboard_config else 'legacy'
 
-            self.watchfloor = CobaltGraphOrchestrator(
+            self.watchfloor = CobaltGraphMain(
                 mode=mode,
                 config=config
             )
