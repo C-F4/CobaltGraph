@@ -1,0 +1,16 @@
+{
+  "timestamp": 1763794831.897892,
+  "total_tests": 38,
+  "passed": 37,
+  "failed": 1,
+  "errors": 0,
+  "skipped": 0,
+  "success_rate": 97.36842105263158,
+  "execution_time_seconds": 0.009366273880004883,
+  "test_suites": {
+    "consensus": 0,
+    "export": 0,
+    "database": 0,
+    "dashboard": 0
+  }
+}
