@@ -1,0 +1,88 @@
+"""
+CobaltGraph Data Models
+Database table schemas and data structures
+
+Defines:
+- Connection model
+- Device model
+- Threat zone model
+- Data validation
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+from datetime import datetime
+
+@dataclass
+class Connection:
+    """
+    Network connection record
+
+    Represents a single network connection with geolocation
+    and threat intelligence data.
+    """
+    id: Optional[int] = None
+    timestamp: float = 0.0
+    src_mac: str = ""
+    src_ip: str = ""
+    dst_ip: str = ""
+    dst_port: int = 0
+    dst_country: Optional[str] = None
+    dst_lat: Optional[float] = None
+    dst_lon: Optional[float] = None
+    dst_org: Optional[str] = None
+    dst_hostname: Optional[str] = None
+    threat_score: float = 0.0
+    device_vendor: Optional[str] = None
+    protocol: str = "TCP"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp,
+            'src_mac': self.src_mac,
+            'src_ip': self.src_ip,
+            'dst_ip': self.dst_ip,
+            'dst_port': self.dst_port,
+            'dst_country': self.dst_country,
+            'dst_lat': self.dst_lat,
+            'dst_lon': self.dst_lon,
+            'dst_org': self.dst_org,
+            'dst_hostname': self.dst_hostname,
+            'threat_score': self.threat_score,
+            'device_vendor': self.device_vendor,
+            'protocol': self.protocol,
+        }
+
+@dataclass
+class Device:
+    """
+    Network device record
+
+    Represents a discovered device on the network with
+    MAC address, vendor, and activity tracking.
+    """
+    mac: str
+    ip_addresses: list
+    hostname: Optional[str] = None
+    vendor: Optional[str] = None
+    first_seen: float = 0.0
+    last_seen: float = 0.0
+    packet_count: int = 0
+    connection_count: int = 0
+    threat_score: float = 0.0
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary"""
+        return {
+            'mac': self.mac,
+            'ip_addresses': self.ip_addresses,
+            'hostname': self.hostname,
+            'vendor': self.vendor,
+            'first_seen': self.first_seen,
+            'last_seen': self.last_seen,
+            'packet_count': self.packet_count,
+            'connection_count': self.connection_count,
+            'threat_score': self.threat_score,
+        }

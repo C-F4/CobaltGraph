@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Device {{ mac_address }} - CobaltGraph{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">Home</a></li>
+                <li class="breadcrumb-item"><a href="/devices">Devices</a></li>
+                <li class="breadcrumb-item active">{{ mac_address }}</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- Device Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div id="device-header">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h2>
+                                <i class="bi bi-hdd-network"></i>
+                                <code id="device-mac">{{ mac_address }}</code>
+                            </h2>
+                            <p class="text-muted mb-0">
+                                <span id="device-ip">Loading...</span> •
+                                <span id="device-vendor" class="badge bg-secondary">-</span> •
+                                <span id="device-status" class="status-badge">-</span>
+                            </p>
+                        </div>
+                        <div>
+                            <button class="btn btn-outline-secondary" id="refresh-device-btn">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Total Connections</h6>
+                <h2 class="mb-0" id="connection-count">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Threat Connections</h6>
+                <h2 class="mb-0 text-danger" id="threat-count">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Unique Destinations</h6>
+                <h2 class="mb-0" id="unique-destinations">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Days Active</h6>
+                <h2 class="mb-0" id="days-active">-</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link active" data-bs-toggle="tab" href="#connections-tab">
+            <i class="bi bi-diagram-3"></i> Connections
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#events-tab">
+            <i class="bi bi-clock-history"></i> Events
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#timeline-tab">
+            <i class="bi bi-graph-up"></i> Timeline
+        </a>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- Connections Tab -->
+    <div class="tab-pane fade show active" id="connections-tab">
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm" id="connections-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Destination IP</th>
+                                <th>Port</th>
+                                <th>Protocol</th>
+                                <th>Country</th>
+                                <th>Organization</th>
+                                <th>Threat</th>
+                            </tr>
+                        </thead>
+                        <tbody id="connections-table-body">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted">
+                                    <div class="spinner-border spinner-border-sm me-2"></div>
+                                    Loading connections...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Events Tab -->
+    <div class="tab-pane fade" id="events-tab">
+        <div class="card">
+            <div class="card-body">
+                <div class="list-group" id="events-list">
+                    <div class="text-center text-muted">
+                        <div class="spinner-border spinner-border-sm me-2"></div>
+                        Loading events...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Timeline Tab -->
+    <div class="tab-pane fade" id="timeline-tab">
+        <div class="card">
+            <div class="card-body">
+                <p class="text-muted text-center">Activity timeline visualization (coming in Phase 1)</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/device-detail.js') }}"></script>
+{% endblock %}
