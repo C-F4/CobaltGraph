@@ -9,11 +9,11 @@ Approach:
 - Conservative scoring with uncertainty quantification
 """
 
-import time
 import statistics
+import time
 from typing import Dict
 
-from .scorer_base import ThreatScorer, ScorerAssessment
+from .scorer_base import ScorerAssessment, ThreatScorer
 
 
 class StatisticalScorer(ThreatScorer):
@@ -27,14 +27,10 @@ class StatisticalScorer(ThreatScorer):
     """
 
     def __init__(self):
-        super().__init__(scorer_id='statistical')
+        super().__init__(scorer_id="statistical")
 
     def assess(
-        self,
-        dst_ip: str,
-        threat_intel: Dict,
-        geo_data: Dict,
-        connection_metadata: Dict
+        self, dst_ip: str, threat_intel: Dict, geo_data: Dict, connection_metadata: Dict
     ) -> ScorerAssessment:
         """
         Statistical assessment of threat level
@@ -48,26 +44,26 @@ class StatisticalScorer(ThreatScorer):
         features = {}
 
         # Extract threat intelligence metrics
-        vt_data = threat_intel.get('virustotal', {})
-        abuseipdb_data = threat_intel.get('abuseipdb', {})
-        local_data = threat_intel.get('local', {})
+        vt_data = threat_intel.get("virustotal", {})
+        abuseipdb_data = threat_intel.get("abuseipdb", {})
+        threat_intel.get("local", {})
 
         # Feature 1: Vendor malicious count (VirusTotal)
-        vt_malicious = vt_data.get('malicious_vendors', 0)
-        vt_total = vt_data.get('total_vendors', 1)
+        vt_malicious = vt_data.get("malicious_vendors", 0)
+        vt_total = vt_data.get("total_vendors", 1)
         vt_ratio = vt_malicious / max(vt_total, 1)
-        features['vt_malicious_ratio'] = vt_ratio
+        features["vt_malicious_ratio"] = vt_ratio
 
         # Feature 2: AbuseIPDB confidence
-        abuseipdb_confidence = abuseipdb_data.get('confidence_score', 0) / 100.0
-        abuseipdb_reports = abuseipdb_data.get('total_reports', 0)
-        features['abuseipdb_confidence'] = abuseipdb_confidence
-        features['abuseipdb_reports'] = abuseipdb_reports
+        abuseipdb_confidence = abuseipdb_data.get("confidence_score", 0) / 100.0
+        abuseipdb_reports = abuseipdb_data.get("total_reports", 0)
+        features["abuseipdb_confidence"] = abuseipdb_confidence
+        features["abuseipdb_reports"] = abuseipdb_reports
 
         # Feature 3: Port analysis (statistical)
-        dst_port = connection_metadata.get('dst_port', 0)
+        dst_port = connection_metadata.get("dst_port", 0)
         is_common_port = dst_port in [80, 443, 22, 21, 25, 53, 110, 143]
-        features['is_common_port'] = is_common_port
+        features["is_common_port"] = is_common_port
 
         # Statistical scoring logic
         scores = []
@@ -104,11 +100,13 @@ class StatisticalScorer(ThreatScorer):
             weighted_score = 0.0
 
         # Calculate confidence (based on data availability)
-        data_sources = sum([
-            1 if vt_total > 0 else 0,
-            1 if abuseipdb_reports > 0 else 0,
-            1  # Always have port data
-        ])
+        data_sources = sum(
+            [
+                1 if vt_total > 0 else 0,
+                1 if abuseipdb_reports > 0 else 0,
+                1,  # Always have port data
+            ]
+        )
 
         confidence = min(1.0, data_sources / 3.0)
 
@@ -121,17 +119,13 @@ class StatisticalScorer(ThreatScorer):
         # Generate reasoning
         reasoning_parts = []
         if vt_total > 0:
-            reasoning_parts.append(
-                f"VT: {vt_malicious}/{vt_total} vendors flagged"
-            )
+            reasoning_parts.append(f"VT: {vt_malicious}/{vt_total} vendors flagged")
         if abuseipdb_reports > 0:
             reasoning_parts.append(
                 f"AbuseIPDB: {abuseipdb_confidence*100:.0f}% confidence, "
                 f"{abuseipdb_reports} reports"
             )
-        reasoning_parts.append(
-            f"Port {dst_port}: {'common' if is_common_port else 'uncommon'}"
-        )
+        reasoning_parts.append(f"Port {dst_port}: {'common' if is_common_port else 'uncommon'}")
         reasoning = "Statistical analysis: " + "; ".join(reasoning_parts)
 
         # Sign assessment
@@ -144,7 +138,7 @@ class StatisticalScorer(ThreatScorer):
             reasoning=reasoning,
             features=features,
             timestamp=timestamp,
-            signature=signature
+            signature=signature,
         )
 
         self._record_assessment(assessment)

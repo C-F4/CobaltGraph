@@ -9,25 +9,25 @@ Pure CLI/TUI for maximum security and minimal attack surface.
 This gives defenders a real cyber chance against foreign actors.
 """
 
-import sys
-import time
-import signal
 import logging
+import signal
+import sys
 import threading
-from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+import time
+from typing import Dict, Optional
 
 # Core CobaltGraph imports
 from src.capture.device_monitor import DeviceMonitor
-from src.services.ip_reputation import IPReputation
-from src.services.geo_lookup import GeoLookup
-from src.storage.database import Database
 from src.core.config import Config
+from src.services.geo_lookup import GeoLookup
+from src.services.ip_reputation import IPReputation
+from src.storage.database import Database
 
 # Observatory Mode: Multi-agent consensus
 try:
     from src.consensus import ConsensusThreatScorer
     from src.export import ConsensusExporter
+
     CONSENSUS_AVAILABLE = True
 except ImportError:
     CONSENSUS_AVAILABLE = False
@@ -68,12 +68,12 @@ class CobaltGraphPure:
 
         # Statistics
         self.stats = {
-            'total_connections': 0,
-            'consensus_assessments': 0,
-            'high_uncertainty_count': 0,
-            'consensus_failures': 0,
-            'legacy_fallbacks': 0,
-            'start_time': time.time()
+            "total_connections": 0,
+            "consensus_assessments": 0,
+            "high_uncertainty_count": 0,
+            "consensus_failures": 0,
+            "legacy_fallbacks": 0,
+            "start_time": time.time(),
         }
         self.stats_lock = threading.Lock()
 
@@ -94,9 +94,9 @@ class CobaltGraphPure:
         logger.info("🔧 Initializing components...")
 
         # Database
-        db_path = self.config.get('database_path', 'data/cobaltgraph.db')
+        db_path = self.config.get("database_path", "data/cobaltgraph.db")
         self.database = Database(db_path)
-        logger.info(f"✅ Database: {db_path}")
+        logger.info("✅ Database: %s", db_path)
 
         # Threat intelligence
         self.ip_reputation = IPReputation(self.config)
@@ -104,13 +104,13 @@ class CobaltGraphPure:
         logger.info("✅ Threat intelligence: VirusTotal + AbuseIPDB + Geo")
 
         # Observatory Mode: Multi-agent consensus
-        if CONSENSUS_AVAILABLE and self.config.get('consensus_enabled', True):
+        if CONSENSUS_AVAILABLE and self.config.get("consensus_enabled", True):
             try:
                 self.consensus_scorer = ConsensusThreatScorer(self.config)
                 self.consensus_exporter = ConsensusExporter(
-                    export_dir=self.config.get('export_directory', 'exports'),
-                    buffer_size=self.config.get('export_buffer_size', 100),
-                    csv_max_size_mb=self.config.get('csv_max_size_mb', 10)
+                    export_dir=self.config.get("export_directory", "exports"),
+                    buffer_size=self.config.get("export_buffer_size", 100),
+                    csv_max_size_mb=self.config.get("csv_max_size_mb", 10),
                 )
                 self.consensus_enabled = True
                 logger.info("🔬 Observatory Mode ENABLED - Multi-agent consensus active")
@@ -119,7 +119,7 @@ class CobaltGraphPure:
                 logger.info("   ├─ ML-Based Scorer: Trained weights")
                 logger.info("   └─ BFT Consensus: Byzantine fault tolerant voting")
             except Exception as e:
-                logger.warning(f"⚠️  Consensus system unavailable: {e}")
+                logger.warning("⚠️  Consensus system unavailable: %s", e)
                 logger.info("   Falling back to legacy scoring")
                 self.consensus_enabled = False
         else:
@@ -132,9 +132,9 @@ class CobaltGraphPure:
         This is the revolutionary core: multi-agent threat analysis
         with cryptographic verification, all in a terminal.
         """
-        dst_ip = connection.get('dst_ip')
-        dst_port = connection.get('dst_port')
-        protocol = connection.get('protocol', 'TCP')
+        dst_ip = connection.get("dst_ip")
+        dst_port = connection.get("dst_port")
+        protocol = connection.get("protocol", "TCP")
 
         if not dst_ip:
             return None
@@ -145,14 +145,14 @@ class CobaltGraphPure:
 
         # Connection metadata for consensus scorers
         connection_metadata = {
-            'dst_port': dst_port,
-            'protocol': protocol,
-            'timestamp': connection.get('timestamp', time.time())
+            "dst_port": dst_port,
+            "protocol": protocol,
+            "timestamp": connection.get("timestamp", time.time()),
         }
 
         # Multi-agent consensus scoring (Observatory Mode)
         threat_score = 0.2  # Default fallback
-        scoring_method = 'static_fallback'
+        scoring_method = "static_fallback"
         consensus_details = None
 
         if self.consensus_enabled and self.consensus_scorer:
@@ -162,26 +162,26 @@ class CobaltGraphPure:
                     dst_ip=dst_ip,
                     threat_intel=threat_intel,
                     geo_data=geo_data,
-                    connection_metadata=connection_metadata
+                    connection_metadata=connection_metadata,
                 )
-                scoring_method = 'consensus'
+                scoring_method = "consensus"
 
                 # Track statistics
                 with self.stats_lock:
-                    self.stats['consensus_assessments'] += 1
-                    if consensus_details.get('high_uncertainty'):
-                        self.stats['high_uncertainty_count'] += 1
+                    self.stats["consensus_assessments"] += 1
+                    if consensus_details.get("high_uncertainty"):
+                        self.stats["high_uncertainty_count"] += 1
 
                 # Export consensus assessment for research/analysis
                 if self.consensus_exporter:
                     self.consensus_exporter.export_assessment(
                         dst_ip=dst_ip,
                         consensus_result=consensus_details,
-                        connection_metadata=connection_metadata
+                        connection_metadata=connection_metadata,
                     )
 
                 # Terminal logging (no web UI needed!)
-                uncertainty_flag = "⚠️ HIGH" if consensus_details.get('high_uncertainty') else "LOW"
+                uncertainty_flag = "⚠️ HIGH" if consensus_details.get("high_uncertainty") else "LOW"
                 logger.info(
                     f"🤝 Consensus: {dst_ip}:{dst_port} "
                     f"score={threat_score:.3f}, "
@@ -190,43 +190,47 @@ class CobaltGraphPure:
                 )
 
             except Exception as e:
-                logger.error(f"❌ Consensus failed for {dst_ip}: {e}")
+                logger.error("❌ Consensus failed for {dst_ip}: %s", e)
                 # Fallback to legacy
-                threat_score = threat_intel.get('threat_score', 0.2)
-                scoring_method = 'legacy_fallback'
+                threat_score = threat_intel.get("threat_score", 0.2)
+                scoring_method = "legacy_fallback"
                 with self.stats_lock:
-                    self.stats['consensus_failures'] += 1
-                    self.stats['legacy_fallbacks'] += 1
+                    self.stats["consensus_failures"] += 1
+                    self.stats["legacy_fallbacks"] += 1
         else:
             # Legacy single-scorer mode
-            threat_score = threat_intel.get('threat_score', 0.2)
-            scoring_method = 'legacy'
+            threat_score = threat_intel.get("threat_score", 0.2)
+            scoring_method = "legacy"
 
         # Store in database
         if self.database:
             self.database.log_connection(
-                timestamp=connection_metadata['timestamp'],
-                src_ip=connection.get('src_ip'),
+                timestamp=connection_metadata["timestamp"],
+                src_ip=connection.get("src_ip"),
                 dst_ip=dst_ip,
                 dst_port=dst_port,
                 protocol=protocol,
                 threat_score=threat_score,
-                geo_country=geo_data.get('country'),
-                geo_city=geo_data.get('city'),
-                abuse_confidence=threat_intel.get('abuse_confidence_score', 0),
-                vt_detections=threat_intel.get('vt_positives', 0)
+                geo_country=geo_data.get("country"),
+                geo_city=geo_data.get("city"),
+                abuse_confidence=threat_intel.get("abuse_confidence_score", 0),
+                vt_detections=threat_intel.get("vt_positives", 0),
             )
 
         # Add to recent assessments for terminal display
         assessment = {
-            'timestamp': time.strftime('%H:%M:%S'),
-            'dst_ip': dst_ip,
-            'dst_port': dst_port,
-            'score': threat_score,
-            'confidence': consensus_details.get('confidence', 0.5) if consensus_details else 0.5,
-            'uncertainty': 'HIGH' if (consensus_details and consensus_details.get('high_uncertainty')) else 'LOW',
-            'method': scoring_method,
-            'country': geo_data.get('country', 'Unknown')
+            "timestamp": time.strftime("%H:%M:%S"),
+            "dst_ip": dst_ip,
+            "dst_port": dst_port,
+            "score": threat_score,
+            "confidence": consensus_details.get("confidence", 0.5) if consensus_details else 0.5,
+            "uncertainty": (
+                "HIGH"
+                if (consensus_details and consensus_details.get("high_uncertainty"))
+                else "LOW"
+            ),
+            "method": scoring_method,
+            "country": geo_data.get("country", "Unknown"),
         }
 
         self.recent_assessments.append(assessment)
@@ -234,7 +238,7 @@ class CobaltGraphPure:
             self.recent_assessments.pop(0)
 
         with self.stats_lock:
-            self.stats['total_connections'] += 1
+            self.stats["total_connections"] += 1
 
         # Terminal output (clean, concise, actionable)
         logger.info(
@@ -244,9 +248,9 @@ class CobaltGraphPure:
 
         return assessment
 
-    def start_capture(self, mode: str = 'device'):
+    def start_capture(self, mode: str = "device"):
         """Start network capture (device mode only - no root needed!)"""
-        if mode == 'device':
+        if mode == "device":
             logger.info("📡 Starting device-level network capture (NO ROOT REQUIRED)")
             self.device_monitor = DeviceMonitor(self.config)
 
@@ -265,35 +269,45 @@ class CobaltGraphPure:
     def print_status(self):
         """Print status to terminal (called periodically)"""
         with self.stats_lock:
-            uptime = time.time() - self.stats['start_time']
-            uptime_str = time.strftime('%H:%M:%S', time.gmtime(uptime))
+            uptime = time.time() - self.stats["start_time"]
+            uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
 
             # Calculate rates
-            cps = self.stats['total_connections'] / uptime if uptime > 0 else 0
-            uncertainty_rate = (self.stats['high_uncertainty_count'] /
-                              self.stats['consensus_assessments'] * 100
-                              if self.stats['consensus_assessments'] > 0 else 0)
+            cps = self.stats["total_connections"] / uptime if uptime > 0 else 0
+            uncertainty_rate = (
+                self.stats["high_uncertainty_count"] / self.stats["consensus_assessments"] * 100
+                if self.stats["consensus_assessments"] > 0
+                else 0
+            )
 
             print("\n" + "=" * 80)
             print(f"🔬 COBALTGRAPH OBSERVATORY - {time.strftime('%Y-%m-%d %H:%M:%S')}")
             print("=" * 80)
-            print(f"Uptime: {uptime_str} | Connections: {self.stats['total_connections']} | Rate: {cps:.2f}/sec")
+            print(
+                f"Uptime: {uptime_str} | Connections: {self.stats['total_connections']} | Rate: {cps:.2f}/sec"
+            )
 
             if self.consensus_enabled:
-                print(f"Consensus: {self.stats['consensus_assessments']} | "
-                      f"High Uncertainty: {self.stats['high_uncertainty_count']} ({uncertainty_rate:.1f}%) | "
-                      f"Failures: {self.stats['consensus_failures']}")
+                print(
+                    f"Consensus: {self.stats['consensus_assessments']} | "
+                    f"High Uncertainty: {self.stats['high_uncertainty_count']} ({uncertainty_rate:.1f}%) | "
+                    f"Failures: {self.stats['consensus_failures']}"
+                )
 
             # Recent assessments table
             if self.recent_assessments:
                 print("\nRECENT ASSESSMENTS (Last 10):")
-                print(f"{'Time':<10} {'Destination':<18} {'Port':<6} {'Score':<7} {'Confidence':<11} {'Uncertainty':<12} {'Country':<10}")
+                print(
+                    f"{'Time':<10} {'Destination':<18} {'Port':<6} {'Score':<7} {'Confidence':<11} {'Uncertainty':<12} {'Country':<10}"
+                )
                 print("-" * 80)
                 for a in self.recent_assessments[-10:]:
-                    uncertainty_mark = "⚠️ " if a['uncertainty'] == 'HIGH' else "  "
-                    print(f"{a['timestamp']:<10} {a['dst_ip']:<18} {a['dst_port']:<6} "
-                          f"{a['score']:<7.3f} {a['confidence']:<11.3f} "
-                          f"{uncertainty_mark}{a['uncertainty']:<10} {a['country']:<10}")
+                    uncertainty_mark = "⚠️ " if a["uncertainty"] == "HIGH" else "  "
+                    print(
+                        f"{a['timestamp']:<10} {a['dst_ip']:<18} {a['dst_port']:<6} "
+                        f"{a['score']:<7.3f} {a['confidence']:<11.3f} "
+                        f"{uncertainty_mark}{a['uncertainty']:<10} {a['country']:<10}"
+                    )
 
             print("=" * 80)
             print("Press Ctrl+C to stop")
@@ -306,7 +320,7 @@ class CobaltGraphPure:
             if self.running:
                 self.print_status()
 
-    def run(self, mode: str = 'device'):
+    def run(self, mode: str = "device"):
         """
         Main run loop - PURE TERMINAL
 
@@ -366,7 +380,7 @@ class CobaltGraphPure:
                 self.device_monitor.stop()
                 logger.info("✅ Device monitor stopped")
             except Exception as e:
-                logger.error(f"Error stopping device monitor: {e}")
+                logger.error("Error stopping device monitor: %s", e)
 
         # Flush exports
         if self.consensus_exporter:
@@ -375,7 +389,7 @@ class CobaltGraphPure:
                 stats = self.consensus_exporter.get_statistics()
                 logger.info(f"✅ Exports flushed: {stats['total_exported']} assessments")
             except Exception as e:
-                logger.error(f"Error flushing exports: {e}")
+                logger.error("Error flushing exports: %s", e)
 
         # Close database
         if self.database:
@@ -383,7 +397,7 @@ class CobaltGraphPure:
                 self.database.close()
                 logger.info("✅ Database closed")
             except Exception as e:
-                logger.error(f"Error closing database: {e}")
+                logger.error("Error closing database: %s", e)
 
         # Final statistics
         with self.stats_lock:
@@ -406,18 +420,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='CobaltGraph Pure Terminal - Revolutionary Blue-Team Defense'
+        description="CobaltGraph Pure Terminal - Revolutionary Blue-Team Defense"
     )
+    parser.add_argument("--config", help="Path to config file", default=None)
     parser.add_argument(
-        '--config',
-        help='Path to config file',
-        default=None
-    )
-    parser.add_argument(
-        '--mode',
-        help='Capture mode (device only)',
-        choices=['device'],
-        default='device'
+        "--mode", help="Capture mode (device only)", choices=["device"], default="device"
     )
 
     args = parser.parse_args()
@@ -425,11 +432,11 @@ def main():
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(message)s',
+        format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler('logs/cobaltgraph.log', mode='a')
-        ]
+            logging.FileHandler("logs/cobaltgraph.log", mode="a"),
+        ],
     )
 
     # Run
@@ -437,5 +444,5 @@ def main():
     cobaltgraph.run(mode=args.mode)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

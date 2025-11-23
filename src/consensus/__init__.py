@@ -9,13 +9,13 @@ This module implements distributed consensus for threat scoring:
 - Automated ground truth tracking
 """
 
-from .threat_scorer import ConsensusThreatScorer
 from .bft_consensus import BFTConsensus
-from .scorer_base import ThreatScorer, ScorerAssessment
+from .scorer_base import ScorerAssessment, ThreatScorer
+from .threat_scorer import ConsensusThreatScorer
 
 __all__ = [
-    'ConsensusThreatScorer',
-    'BFTConsensus',
-    'ThreatScorer',
-    'ScorerAssessment',
+    "ConsensusThreatScorer",
+    "BFTConsensus",
+    "ThreatScorer",
+    "ScorerAssessment",
 ]

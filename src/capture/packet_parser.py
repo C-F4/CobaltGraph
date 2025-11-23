@@ -10,9 +10,9 @@ Utilities:
 - Protocol identification
 """
 
-import struct
 import logging
-from typing import Dict, Tuple, Optional
+import struct
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 PROTO_ICMP = 1
 PROTO_TCP = 6
 PROTO_UDP = 17
+
 
 def parse_ethernet_frame(data: bytes) -> Tuple[str, str, int, bytes]:
     """
@@ -32,14 +33,10 @@ def parse_ethernet_frame(data: bytes) -> Tuple[str, str, int, bytes]:
         Tuple of (dst_mac, src_mac, eth_proto, payload)
     """
     # Ethernet header is 14 bytes
-    dst_mac, src_mac, eth_proto = struct.unpack('! 6s 6s H', data[:14])
+    dst_mac, src_mac, eth_proto = struct.unpack("! 6s 6s H", data[:14])
 
-    return (
-        format_mac(dst_mac),
-        format_mac(src_mac),
-        eth_proto,
-        data[14:]  # Payload
-    )
+    return (format_mac(dst_mac), format_mac(src_mac), eth_proto, data[14:])  # Payload
+
 
 def parse_ipv4_header(data: bytes) -> Tuple[str, str, int, bytes]:
     """
@@ -64,6 +61,7 @@ def parse_ipv4_header(data: bytes) -> Tuple[str, str, int, bytes]:
 
     return (src_ip, dst_ip, protocol, data[ihl:])
 
+
 def parse_tcp_header(data: bytes) -> Tuple[int, int]:
     """
     Parse TCP header
@@ -75,8 +73,9 @@ def parse_tcp_header(data: bytes) -> Tuple[int, int]:
         Tuple of (src_port, dst_port)
     """
     # TCP header starts with src port (2 bytes) and dst port (2 bytes)
-    src_port, dst_port = struct.unpack('! H H', data[:4])
+    src_port, dst_port = struct.unpack("! H H", data[:4])
     return (src_port, dst_port)
+
 
 def parse_udp_header(data: bytes) -> Tuple[int, int]:
     """
@@ -89,8 +88,9 @@ def parse_udp_header(data: bytes) -> Tuple[int, int]:
         Tuple of (src_port, dst_port)
     """
     # UDP header: src port (2 bytes), dst port (2 bytes)
-    src_port, dst_port = struct.unpack('! H H', data[:4])
+    src_port, dst_port = struct.unpack("! H H", data[:4])
     return (src_port, dst_port)
+
 
 def format_mac(mac_bytes: bytes) -> str:
     """
@@ -102,7 +102,8 @@ def format_mac(mac_bytes: bytes) -> str:
     Returns:
         String like "aa:bb:cc:dd:ee:ff"
     """
-    return ':'.join(f'{b:02x}' for b in mac_bytes)
+    return ":".join(f"{b:02x}" for b in mac_bytes)
+
 
 def format_ipv4(ip_bytes: bytes) -> str:
     """
@@ -114,7 +115,8 @@ def format_ipv4(ip_bytes: bytes) -> str:
     Returns:
         String like "192.168.1.1"
     """
-    return '.'.join(str(b) for b in ip_bytes)
+    return ".".join(str(b) for b in ip_bytes)
+
 
 def get_protocol_name(proto_num: int) -> str:
     """
@@ -127,11 +129,12 @@ def get_protocol_name(proto_num: int) -> str:
         Protocol name (TCP, UDP, ICMP, etc.)
     """
     protocols = {
-        PROTO_ICMP: 'ICMP',
-        PROTO_TCP: 'TCP',
-        PROTO_UDP: 'UDP',
+        PROTO_ICMP: "ICMP",
+        PROTO_TCP: "TCP",
+        PROTO_UDP: "UDP",
     }
-    return protocols.get(proto_num, f'PROTO_{proto_num}')
+    return protocols.get(proto_num, f"PROTO_{proto_num}")
+
 
 def parse_full_packet(data: bytes) -> Optional[Dict]:
     """
@@ -163,15 +166,15 @@ def parse_full_packet(data: bytes) -> Optional[Dict]:
             src_port, dst_port = 0, 0
 
         return {
-            'src_mac': src_mac,
-            'dst_mac': dst_mac,
-            'src_ip': src_ip,
-            'dst_ip': dst_ip,
-            'src_port': src_port,
-            'dst_port': dst_port,
-            'protocol': get_protocol_name(protocol),
+            "src_mac": src_mac,
+            "dst_mac": dst_mac,
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "src_port": src_port,
+            "dst_port": dst_port,
+            "protocol": get_protocol_name(protocol),
         }
 
     except Exception as e:
-        logger.debug(f"Packet parsing error: {e}")
+        logger.debug("Packet parsing error: %s", e)
         return None

@@ -4,9 +4,11 @@ Geo Lookup Service - Clean Minimal Version
 IP geolocation using free ip-api.com service
 """
 
-import requests
 import logging
-from typing import Dict, Optional
+from typing import Dict
+
+import requests
+from requests.exceptions import RequestException, Timeout
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ class GeoLookup:
         """Initialize geo lookup"""
         self.config = config
         self.session = requests.Session()
-        self.session.headers.update({'User-Agent': 'CobaltGraph/1.0'})
+        self.session.headers.update({"User-Agent": "CobaltGraph/1.0"})
         self.cache = {}  # Simple in-memory cache
 
     def lookup(self, ip_address: str) -> Dict:
@@ -42,13 +44,13 @@ class GeoLookup:
             return self.cache[ip_address]
 
         result = {
-            'country': 'Unknown',
-            'country_name': 'Unknown',
-            'city': 'Unknown',
-            'region': '',
-            'latitude': 0.0,
-            'longitude': 0.0,
-            'isp': 'Unknown'
+            "country": "Unknown",
+            "country_name": "Unknown",
+            "city": "Unknown",
+            "region": "",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "isp": "Unknown",
         }
 
         try:
@@ -58,21 +60,21 @@ class GeoLookup:
 
             if response.status_code == 200:
                 data = response.json()
-                if data.get('status') == 'success':
+                if data.get("status") == "success":
                     result = {
-                        'country': data.get('countryCode', 'Unknown'),
-                        'country_name': data.get('country', 'Unknown'),
-                        'city': data.get('city', 'Unknown'),
-                        'region': data.get('regionName', ''),
-                        'latitude': data.get('lat', 0.0),
-                        'longitude': data.get('lon', 0.0),
-                        'isp': data.get('isp', 'Unknown')
+                        "country": data.get("countryCode", "Unknown"),
+                        "country_name": data.get("country", "Unknown"),
+                        "city": data.get("city", "Unknown"),
+                        "region": data.get("regionName", ""),
+                        "latitude": data.get("lat", 0.0),
+                        "longitude": data.get("lon", 0.0),
+                        "isp": data.get("isp", "Unknown"),
                     }
 
                     # Cache result
                     self.cache[ip_address] = result
 
-        except Exception as e:
-            logger.debug(f"Geo lookup failed for {ip_address}: {e}")
+        except (RequestException, Timeout, KeyError, ValueError) as e:
+            logger.debug("Geo lookup failed for {ip_address}: %s", e)
 
         return result

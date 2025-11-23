@@ -13,11 +13,12 @@ Methods:
 """
 
 import logging
-import subprocess
 import platform
-from typing import List, Dict
+import subprocess
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
+
 
 class DeviceMonitor:
     """
@@ -30,7 +31,7 @@ class DeviceMonitor:
     def __init__(self):
         """Initialize device monitor"""
         self.os_type = platform.system().lower()
-        logger.info(f"📱 Device monitor initialized for {self.os_type}")
+        logger.info("📱 Device monitor initialized for %s", self.os_type)
 
     def get_connections(self) -> List[Dict]:
         """
@@ -39,14 +40,14 @@ class DeviceMonitor:
         Returns:
             List of connection dicts
         """
-        if self.os_type == 'linux':
+        if self.os_type == "linux":
             return self._get_connections_linux()
-        elif self.os_type == 'darwin':  # macOS
+        elif self.os_type == "darwin":  # macOS
             return self._get_connections_macos()
-        elif self.os_type == 'windows':
+        elif self.os_type == "windows":
             return self._get_connections_windows()
         else:
-            logger.warning(f"Unsupported OS: {self.os_type}")
+            logger.warning("Unsupported OS: %s", self.os_type)
             return []
 
     def _get_connections_linux(self) -> List[Dict]:
@@ -59,10 +60,11 @@ class DeviceMonitor:
         try:
             # Use ss command (socket statistics)
             result = subprocess.run(
-                ['ss', '-tunaH'],  # TCP/UDP, numeric, all, no header
+                ["ss", "-tunaH"],  # TCP/UDP, numeric, all, no header
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                check=True,
             )
 
             connections = []
@@ -73,7 +75,7 @@ class DeviceMonitor:
 
             return connections
         except Exception as e:
-            logger.error(f"Failed to get Linux connections: {e}")
+            logger.error("Failed to get Linux connections: %s", e)
             return []
 
     def _get_connections_macos(self) -> List[Dict]:

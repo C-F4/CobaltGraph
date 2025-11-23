@@ -4,9 +4,11 @@ IP Reputation Service - Clean Minimal Version
 Queries VirusTotal and AbuseIPDB for threat intelligence
 """
 
-import requests
 import logging
 from typing import Dict, Optional
+
+import requests
+from requests.exceptions import RequestException, Timeout
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +22,10 @@ class IPReputation:
     def __init__(self, config):
         """Initialize with API keys from config"""
         self.config = config
-        self.vt_api_key = config.get('virustotal_api_key')
-        self.abuseipdb_api_key = config.get('abuseipdb_api_key')
+        self.vt_api_key = config.get("virustotal_api_key")
+        self.abuseipdb_api_key = config.get("abuseipdb_api_key")
         self.session = requests.Session()
-        self.session.headers.update({'User-Agent': 'CobaltGraph/1.0'})
+        self.session.headers.update({"User-Agent": "CobaltGraph/1.0"})
 
     def check_ip(self, ip_address: str) -> Dict:
         """
@@ -36,11 +38,11 @@ class IPReputation:
         - sources_checked: List of sources queried
         """
         result = {
-            'threat_score': 0.2,  # Default fallback
-            'vt_positives': 0,
-            'vt_total': 0,
-            'abuse_confidence_score': 0,
-            'sources_checked': []
+            "threat_score": 0.2,  # Default fallback
+            "vt_positives": 0,
+            "vt_total": 0,
+            "abuse_confidence_score": 0,
+            "sources_checked": [],
         }
 
         # Query VirusTotal
@@ -48,51 +50,51 @@ class IPReputation:
             try:
                 vt_data = self._query_virustotal(ip_address)
                 if vt_data:
-                    result['vt_positives'] = vt_data.get('positives', 0)
-                    result['vt_total'] = vt_data.get('total', 0)
-                    result['sources_checked'].append('virustotal')
-            except Exception as e:
-                logger.debug(f"VirusTotal query failed: {e}")
+                    result["vt_positives"] = vt_data.get("positives", 0)
+                    result["vt_total"] = vt_data.get("total", 0)
+                    result["sources_checked"].append("virustotal")
+            except (RequestException, Timeout, KeyError, ValueError) as e:
+                logger.debug("VirusTotal query failed: %s", e)
 
         # Query AbuseIPDB
         if self.abuseipdb_api_key:
             try:
                 abuse_data = self._query_abuseipdb(ip_address)
                 if abuse_data:
-                    result['abuse_confidence_score'] = abuse_data.get('abuseConfidenceScore', 0)
-                    result['sources_checked'].append('abuseipdb')
-            except Exception as e:
-                logger.debug(f"AbuseIPDB query failed: {e}")
+                    result["abuse_confidence_score"] = abuse_data.get("abuseConfidenceScore", 0)
+                    result["sources_checked"].append("abuseipdb")
+            except (RequestException, Timeout, KeyError, ValueError) as e:
+                logger.debug("AbuseIPDB query failed: %s", e)
 
         # Calculate normalized threat score
-        result['threat_score'] = self._calculate_threat_score(result)
+        result["threat_score"] = self._calculate_threat_score(result)
 
         return result
 
     def _query_virustotal(self, ip_address: str) -> Optional[Dict]:
         """Query VirusTotal API"""
         url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip_address}"
-        headers = {'x-apikey': self.vt_api_key}
+        headers = {"x-apikey": self.vt_api_key}
 
         response = self.session.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
+            stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
             return {
-                'positives': stats.get('malicious', 0) + stats.get('suspicious', 0),
-                'total': sum(stats.values())
+                "positives": stats.get("malicious", 0) + stats.get("suspicious", 0),
+                "total": sum(stats.values()),
             }
         return None
 
     def _query_abuseipdb(self, ip_address: str) -> Optional[Dict]:
         """Query AbuseIPDB API"""
         url = "https://api.abuseipdb.com/api/v2/check"
-        headers = {'Key': self.abuseipdb_api_key}
-        params = {'ipAddress': ip_address, 'maxAgeInDays': 90}
+        headers = {"Key": self.abuseipdb_api_key}
+        params = {"ipAddress": ip_address, "maxAgeInDays": 90}
 
         response = self.session.get(url, headers=headers, params=params, timeout=5)
         if response.status_code == 200:
-            return response.json().get('data', {})
+            return response.json().get("data", {})
         return None
 
     def _calculate_threat_score(self, data: Dict) -> float:
@@ -100,12 +102,12 @@ class IPReputation:
         score = 0.0
 
         # VirusTotal contribution (0-5 detections = 0.0-0.5)
-        if data['vt_total'] > 0:
-            vt_ratio = data['vt_positives'] / data['vt_total']
+        if data["vt_total"] > 0:
+            vt_ratio = data["vt_positives"] / data["vt_total"]
             score += min(vt_ratio * 0.5, 0.5)
 
         # AbuseIPDB contribution (0-100 confidence = 0.0-0.5)
-        abuse_score = data['abuse_confidence_score'] / 200.0  # Normalize to 0-0.5
+        abuse_score = data["abuse_confidence_score"] / 200.0  # Normalize to 0-0.5
         score += abuse_score
 
         return min(score, 1.0)  # Cap at 1.0

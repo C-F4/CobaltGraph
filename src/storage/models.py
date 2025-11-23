@@ -11,7 +11,7 @@ Defines:
 
 from dataclasses import dataclass
 from typing import Optional
-from datetime import datetime
+
 
 @dataclass
 class Connection:
@@ -21,6 +21,7 @@ class Connection:
     Represents a single network connection with geolocation
     and threat intelligence data.
     """
+
     id: Optional[int] = None
     timestamp: float = 0.0
     src_mac: str = ""
@@ -39,21 +40,22 @@ class Connection:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
         return {
-            'id': self.id,
-            'timestamp': self.timestamp,
-            'src_mac': self.src_mac,
-            'src_ip': self.src_ip,
-            'dst_ip': self.dst_ip,
-            'dst_port': self.dst_port,
-            'dst_country': self.dst_country,
-            'dst_lat': self.dst_lat,
-            'dst_lon': self.dst_lon,
-            'dst_org': self.dst_org,
-            'dst_hostname': self.dst_hostname,
-            'threat_score': self.threat_score,
-            'device_vendor': self.device_vendor,
-            'protocol': self.protocol,
+            "id": self.id,
+            "timestamp": self.timestamp,
+            "src_mac": self.src_mac,
+            "src_ip": self.src_ip,
+            "dst_ip": self.dst_ip,
+            "dst_port": self.dst_port,
+            "dst_country": self.dst_country,
+            "dst_lat": self.dst_lat,
+            "dst_lon": self.dst_lon,
+            "dst_org": self.dst_org,
+            "dst_hostname": self.dst_hostname,
+            "threat_score": self.threat_score,
+            "device_vendor": self.device_vendor,
+            "protocol": self.protocol,
         }
+
 
 @dataclass
 class Device:
@@ -63,6 +65,7 @@ class Device:
     Represents a discovered device on the network with
     MAC address, vendor, and activity tracking.
     """
+
     mac: str
     ip_addresses: list
     hostname: Optional[str] = None
@@ -76,13 +79,13 @@ class Device:
     def to_dict(self) -> dict:
         """Convert to dictionary"""
         return {
-            'mac': self.mac,
-            'ip_addresses': self.ip_addresses,
-            'hostname': self.hostname,
-            'vendor': self.vendor,
-            'first_seen': self.first_seen,
-            'last_seen': self.last_seen,
-            'packet_count': self.packet_count,
-            'connection_count': self.connection_count,
-            'threat_score': self.threat_score,
+            "mac": self.mac,
+            "ip_addresses": self.ip_addresses,
+            "hostname": self.hostname,
+            "vendor": self.vendor,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "packet_count": self.packet_count,
+            "connection_count": self.connection_count,
+            "threat_score": self.threat_score,
         }

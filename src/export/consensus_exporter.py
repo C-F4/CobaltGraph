@@ -9,15 +9,14 @@ Design:
 - Async-safe buffering
 """
 
-import os
-import json
 import csv
-import time
+import json
 import logging
-from pathlib import Path
-from typing import Dict, List, Optional
-from threading import Lock
+import time
 from datetime import datetime
+from pathlib import Path
+from threading import Lock
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +37,7 @@ class ConsensusExporter:
     """
 
     def __init__(
-        self,
-        export_dir: str = "exports",
-        csv_max_size_mb: int = 10,
-        buffer_size: int = 100
+        self, export_dir: str = "exports", csv_max_size_mb: int = 10, buffer_size: int = 100
     ):
         """
         Initialize exporter
@@ -73,7 +69,7 @@ class ConsensusExporter:
         self.json_exports = 0
         self.csv_exports = 0
 
-        logger.info(f"📤 ConsensusExporter initialized: {self.export_dir}")
+        logger.info("📤 ConsensusExporter initialized: %s", self.export_dir)
 
     def _get_json_filename(self) -> Path:
         """Get current JSON filename with date"""
@@ -99,7 +95,7 @@ class ConsensusExporter:
             rotated_name = self.export_dir / f"consensus_summary_{timestamp}.csv"
 
             csv_path.rename(rotated_name)
-            logger.info(f"📁 Rotated CSV: {rotated_name.name}")
+            logger.info("📁 Rotated CSV: %s", rotated_name.name)
 
             # Close and reopen
             if self.csv_file:
@@ -120,8 +116,8 @@ class ConsensusExporter:
         # Open JSON file (append mode)
         if self.json_file is None or self.json_file.closed:
             json_path = self._get_json_filename()
-            self.json_file = open(json_path, 'a', encoding='utf-8')
-            logger.debug(f"📝 Opened JSON: {json_path.name}")
+            self.json_file = open(json_path, "a", encoding="utf-8")
+            logger.debug("📝 Opened JSON: %s", json_path.name)
 
         # Check CSV rotation
         self._rotate_csv_if_needed()
@@ -131,34 +127,31 @@ class ConsensusExporter:
             csv_path = self._get_csv_filename()
             is_new_file = not csv_path.exists()
 
-            self.csv_file = open(csv_path, 'a', newline='', encoding='utf-8')
+            self.csv_file = open(csv_path, "a", newline="", encoding="utf-8")
             self.csv_writer = csv.DictWriter(
                 self.csv_file,
                 fieldnames=[
-                    'timestamp',
-                    'iso_time',
-                    'dst_ip',
-                    'dst_port',
-                    'consensus_score',
-                    'confidence',
-                    'high_uncertainty',
-                    'num_scorers',
-                    'num_outliers',
-                    'method',
-                    'is_malicious',
-                ]
+                    "timestamp",
+                    "iso_time",
+                    "dst_ip",
+                    "dst_port",
+                    "consensus_score",
+                    "confidence",
+                    "high_uncertainty",
+                    "num_scorers",
+                    "num_outliers",
+                    "method",
+                    "is_malicious",
+                ],
             )
 
             # Write header if new file
             if is_new_file:
                 self.csv_writer.writeheader()
-                logger.debug(f"📊 Created CSV: {csv_path.name}")
+                logger.debug("📊 Created CSV: %s", csv_path.name)
 
     def export_assessment(
-        self,
-        dst_ip: str,
-        consensus_result: Dict,
-        connection_metadata: Optional[Dict] = None
+        self, dst_ip: str, consensus_result: Dict, connection_metadata: Optional[Dict] = None
     ):
         """
         Export a single consensus assessment
@@ -169,12 +162,14 @@ class ConsensusExporter:
             connection_metadata: Additional connection context
         """
         with self.buffer_lock:
-            self.assessment_buffer.append({
-                'dst_ip': dst_ip,
-                'consensus': consensus_result,
-                'metadata': connection_metadata or {},
-                'export_timestamp': time.time(),
-            })
+            self.assessment_buffer.append(
+                {
+                    "dst_ip": dst_ip,
+                    "consensus": consensus_result,
+                    "metadata": connection_metadata or {},
+                    "export_timestamp": time.time(),
+                }
+            )
 
             # Flush if buffer full
             if len(self.assessment_buffer) >= self.buffer_size:
@@ -190,44 +185,44 @@ class ConsensusExporter:
         for assessment in self.assessment_buffer:
             try:
                 # Extract data
-                dst_ip = assessment['dst_ip']
-                consensus = assessment['consensus']
-                metadata = assessment['metadata']
-                export_ts = assessment['export_timestamp']
+                dst_ip = assessment["dst_ip"]
+                consensus = assessment["consensus"]
+                metadata = assessment["metadata"]
+                export_ts = assessment["export_timestamp"]
 
                 # Write detailed JSON line
                 json_record = {
-                    'timestamp': export_ts,
-                    'iso_time': datetime.fromtimestamp(export_ts).isoformat(),
-                    'dst_ip': dst_ip,
-                    'dst_port': metadata.get('dst_port'),
-                    'protocol': metadata.get('protocol'),
-                    'consensus': consensus,
+                    "timestamp": export_ts,
+                    "iso_time": datetime.fromtimestamp(export_ts).isoformat(),
+                    "dst_ip": dst_ip,
+                    "dst_port": metadata.get("dst_port"),
+                    "protocol": metadata.get("protocol"),
+                    "consensus": consensus,
                 }
 
-                self.json_file.write(json.dumps(json_record) + '\n')
+                self.json_file.write(json.dumps(json_record) + "\n")
                 self.json_exports += 1
 
                 # Write summary CSV row
                 csv_record = {
-                    'timestamp': export_ts,
-                    'iso_time': datetime.fromtimestamp(export_ts).isoformat(),
-                    'dst_ip': dst_ip,
-                    'dst_port': metadata.get('dst_port', ''),
-                    'consensus_score': f"{consensus.get('consensus_score', 0):.3f}",
-                    'confidence': f"{consensus.get('confidence', 0):.3f}",
-                    'high_uncertainty': consensus.get('high_uncertainty', False),
-                    'num_scorers': consensus.get('metadata', {}).get('num_scorers', 0),
-                    'num_outliers': consensus.get('metadata', {}).get('num_outliers', 0),
-                    'method': consensus.get('method', ''),
-                    'is_malicious': consensus.get('is_malicious', False),
+                    "timestamp": export_ts,
+                    "iso_time": datetime.fromtimestamp(export_ts).isoformat(),
+                    "dst_ip": dst_ip,
+                    "dst_port": metadata.get("dst_port", ""),
+                    "consensus_score": f"{consensus.get('consensus_score', 0):.3f}",
+                    "confidence": f"{consensus.get('confidence', 0):.3f}",
+                    "high_uncertainty": consensus.get("high_uncertainty", False),
+                    "num_scorers": consensus.get("metadata", {}).get("num_scorers", 0),
+                    "num_outliers": consensus.get("metadata", {}).get("num_outliers", 0),
+                    "method": consensus.get("method", ""),
+                    "is_malicious": consensus.get("is_malicious", False),
                 }
 
                 self.csv_writer.writerow(csv_record)
                 self.csv_exports += 1
 
             except Exception as e:
-                logger.error(f"Export error for {dst_ip}: {e}")
+                logger.error("Export error for {dst_ip}: %s", e)
 
         # Flush to disk
         self.json_file.flush()
@@ -250,11 +245,11 @@ class ConsensusExporter:
     def get_statistics(self) -> Dict:
         """Get export statistics"""
         return {
-            'total_exported': self.total_exported,
-            'json_exports': self.json_exports,
-            'csv_exports': self.csv_exports,
-            'buffer_size': len(self.assessment_buffer),
-            'export_dir': str(self.export_dir),
+            "total_exported": self.total_exported,
+            "json_exports": self.json_exports,
+            "csv_exports": self.csv_exports,
+            "buffer_size": len(self.assessment_buffer),
+            "export_dir": str(self.export_dir),
         }
 
     def close(self):
@@ -272,9 +267,7 @@ class ConsensusExporter:
                 self.csv_file.close()
                 logger.info("📊 Closed CSV export file")
 
-        logger.info(
-            f"📤 ConsensusExporter shutdown: {self.total_exported} total exports"
-        )
+        logger.info("📤 ConsensusExporter shutdown: %s total exports", self.total_exported)
 
     def __enter__(self):
         """Context manager entry"""
