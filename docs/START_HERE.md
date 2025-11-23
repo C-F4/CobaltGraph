@@ -1,171 +1,76 @@
 # CobaltGraph - Start Here
-## Choose Your Platform
+
+**Pure Terminal Network Intelligence Platform**
 
 ---
 
-## 🪟 Windows
+## Quick Start
 
-### Method 1: Double-click (Easiest)
-```
-Double-click: cobaltgraph.bat
+### Linux / macOS / WSL
+
+```bash
+# Interactive mode (recommended)
+python3 start.py
+
+# Device-only monitoring (no root required)
+python3 start.py --mode device --no-disclaimer
+
+# Network-wide monitoring (requires root)
+sudo python3 start.py --mode network
+
+# Health check
+python3 start.py --health
 ```
 
-### Method 2: Command Prompt
-```cmd
-cobaltgraph.bat
-```
+### Windows
 
-### Method 3: PowerShell
 ```powershell
-python cobaltgraph.py
-```
+# Interactive mode
+python start.py
 
-### For Network-Wide Monitoring:
-```powershell
-# Run PowerShell as Administrator, then:
-python cobaltgraph.py
-```
-
----
-
-## 🐧 WSL (Windows Subsystem for Linux)
-
-### Device-Only Mode:
-```bash
-python3 cobaltgraph.py
-# OR
-bash bin/cobaltgraph
-# OR
-./bin/cobaltgraph
-```
-
-### Network-Wide Mode (Recommended):
-```bash
-sudo python3 cobaltgraph.py
-# OR
-sudo bash bin/cobaltgraph
-# OR
-sudo ./bin/cobaltgraph
+# For network monitoring (Run PowerShell as Administrator)
+python start.py --mode network
 ```
 
 ---
 
-## 🐧 Linux
+## System Requirements
 
-### Device-Only Mode:
-```bash
-python3 cobaltgraph.py
-# OR
-./bin/cobaltgraph
-```
-
-### Network-Wide Mode (Recommended):
-```bash
-sudo python3 cobaltgraph.py
-# OR
-sudo ./bin/cobaltgraph
-```
+- Python 3.8+
+- SQLite (included with Python)
+- Terminal/Command Prompt
+- Root/Admin privileges (only for network-wide mode)
 
 ---
 
-## 🍎 macOS
+## Features
 
-### Device-Only Mode:
-```bash
-python3 cobaltgraph.py
-# OR
-./bin/cobaltgraph
-```
-
-### Network-Wide Mode (Requires root):
-```bash
-sudo python3 cobaltgraph.py
-# OR
-sudo ./bin/cobaltgraph
-```
+✅ **Multi-Agent Consensus** - Byzantine Fault Tolerant threat intelligence
+✅ **Pure Terminal Interface** - No web server, no HTTP ports
+✅ **Device Monitoring** - No root required for device-level capture
+✅ **Export Functionality** - JSON Lines + CSV export
+✅ **Threat Intelligence** - VirusTotal, AbuseIPDB integration
+✅ **Geolocation** - IP geolocation tracking
 
 ---
 
-## ❓ Which Method Should I Use?
+## Documentation
 
-| Platform | Easiest Method | Network-Wide Method |
-|----------|---------------|---------------------|
-| **Windows** | `cobaltgraph.bat` | Admin PowerShell: `python cobaltgraph.py` |
-| **WSL** | `python3 cobaltgraph.py` | `sudo python3 cobaltgraph.py` |
-| **Linux** | `python3 cobaltgraph.py` | `sudo python3 cobaltgraph.py` |
-| **macOS** | `python3 cobaltgraph.py` | `sudo python3 cobaltgraph.py` |
-
----
-
-## 🔍 Health Check
-
-### Windows:
-```cmd
-python cobaltgraph.py --health
-```
-
-### WSL/Linux/macOS:
-```bash
-python3 cobaltgraph.py --health
-# OR
-./bin/cobaltgraph-health
-```
+- **Quick Start**: This file
+- **Consensus System**: `docs/consensus-transformation/`
+- **Configuration**: `docs/02-CONFIGURATION/`
+- **Testing**: `docs/03-TESTING/`
+- **Main README**: `README.md`
 
 ---
 
-## 🆘 Troubleshooting
+## Support
 
-### "python: command not found"
-**Solution**: Install Python 3.8+ from https://www.python.org/downloads/
-
-### "Permission denied" (Linux/WSL/macOS)
-**Solution**: Add sudo:
-```bash
-sudo python3 cobaltgraph.py
-```
-
-### "Port 8080 already in use"
-**Solution**: Kill existing CobaltGraph instance:
-```bash
-# Windows:
-taskkill /F /IM python.exe
-
-# WSL/Linux/macOS:
-pkill -f cobaltgraph
-```
-
-### "No module named 'requests'"
-**Solution**: Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+For issues or questions:
+- Check the health status: `python3 start.py --health`
+- Review logs in `logs/` directory
+- See `README.md` for detailed documentation
 
 ---
 
-## 📖 Next Steps
-
-After starting CobaltGraph:
-1. Read and accept the legal disclaimer
-2. Choose your monitoring mode (network or device)
-3. Select interface type (web dashboard or terminal)
-4. Access dashboard at: **http://localhost:8080**
-
----
-
-## 📚 More Information
-
-- **Full Documentation**: See `README.md`
-- **Quick Start Guide**: See `QUICKSTART.txt`
-- **Demo Guide**: See `SHOWCASE.md`
-- **Configuration**: See `config/README.md`
-
----
-
-**The easiest way to start on ANY platform:**
-```bash
-python cobaltgraph.py
-# OR (Windows only)
-cobaltgraph.bat
-```
-
-That's it! 🚀
+**CobaltGraph** - Revolutionary Blue-Team Network Intelligence

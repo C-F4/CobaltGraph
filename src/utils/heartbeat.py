@@ -42,9 +42,8 @@ class Heartbeat:
         self.components = {
             "database": {"health": 100, "last_beat": time.time()},
             "geo_engine": {"health": 100, "last_beat": time.time()},
-            "dashboard": {"health": 100, "last_beat": time.time()},
+            "terminal_interface": {"health": 100, "last_beat": time.time()},
             "connection_monitor": {"health": 0, "last_beat": 0},  # Starts offline
-            "orchestrator": {"health": 100, "last_beat": time.time()},
             "capture": {"health": 0, "last_beat": 0},  # Starts offline
             "processor": {"health": 0, "last_beat": 0},  # Starts offline
         }
@@ -59,7 +58,7 @@ class Heartbeat:
         Automatically registers new components if not present.
 
         Args:
-            component: Component name (e.g., 'database', 'dashboard')
+            component: Component name (e.g., 'database', 'terminal_interface')
         """
         if component not in self.components:
             # Auto-register new component
@@ -108,7 +107,7 @@ class Heartbeat:
 
     def get_status(self) -> Dict:
         """
-        Get detailed component status for dashboard
+        Get detailed component status for monitoring
 
         Returns:
             Dict mapping component name to status info:

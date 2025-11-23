@@ -61,12 +61,6 @@ class ConfigLoader:
             "buffer_size": 100,
             "enable_device_tracking": True,
             "device_timeout": 300,
-            # Dashboard
-            "web_port": 8080,
-            "api_port": 8080,  # API endpoint port (can be different from web_port)
-            "web_host": "127.0.0.1",
-            "enable_auth": False,
-            "refresh_interval": 5,
             # Terminal
             "terminal_refresh": 1,
             "terminal_theme": "dark",
@@ -314,24 +308,6 @@ class ConfigLoader:
                 "Network", "device_timeout", fallback=self.defaults["device_timeout"]
             )
 
-        # Dashboard
-        if parser.has_section("Dashboard"):
-            self.config["web_port"] = parser.getint(
-                "Dashboard", "web_port", fallback=self.defaults["web_port"]
-            )
-            self.config["api_port"] = parser.getint(
-                "Dashboard", "api_port", fallback=self.defaults["api_port"]
-            )
-            self.config["web_host"] = parser.get(
-                "Dashboard", "web_host", fallback=self.defaults["web_host"]
-            )
-            self.config["enable_auth"] = parser.getboolean(
-                "Dashboard", "enable_auth", fallback=self.defaults["enable_auth"]
-            )
-            self.config["refresh_interval"] = parser.getint(
-                "Dashboard", "refresh_interval", fallback=self.defaults["refresh_interval"]
-            )
-
         # Terminal
         if parser.has_section("Terminal"):
             self.config["terminal_refresh"] = parser.getint(
@@ -540,12 +516,6 @@ class ConfigLoader:
         """Load configuration overrides from environment variables"""
         env_mapping = {
             "COBALTGRAPH_CAPTURE_METHOD": "capture_method",
-            "COBALTGRAPH_WEB_PORT": ("web_port", int),
-            "COBALTGRAPH_API_PORT": ("api_port", int),
-            "COBALTGRAPH_WEB_HOST": "web_host",
-            "COBALTGRAPH_ENABLE_AUTH": ("enable_auth", lambda x: x.lower() in ["true", "1", "yes"]),
-            "COBALTGRAPH_AUTH_USERNAME": "auth_username",
-            "COBALTGRAPH_AUTH_PASSWORD": "auth_password",
             "COBALTGRAPH_ABUSEIPDB_KEY": "abuseipdb_api_key",
             "COBALTGRAPH_VIRUSTOTAL_KEY": "virustotal_api_key",
             "COBALTGRAPH_LOG_LEVEL": "log_level",
@@ -675,14 +645,6 @@ class ConfigLoader:
                 f"Invalid capture_method: {self.config['capture_method']} (must be: {', '.join(valid_capture_methods)})"
             )
 
-        # Validate web port
-        if not (1 <= self.config["web_port"] <= 65535):
-            self.errors.append(f"Invalid web_port: {self.config['web_port']} (must be 1-65535)")
-
-        # Validate API port
-        if not (1 <= self.config["api_port"] <= 65535):
-            self.errors.append(f"Invalid api_port: {self.config['api_port']} (must be 1-65535)")
-
         # Validate log level
         valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if self.config["log_level"] not in valid_log_levels:
@@ -696,20 +658,10 @@ class ConfigLoader:
                 f"Invalid alert_threshold: {self.config['alert_threshold']} (must be 0.0-1.0)"
             )
 
-        # Warn about default password
-        if self.config["enable_auth"] and self.config["auth_password"] == "changeme":
-            self.warnings.append("Using default password 'changeme' - CHANGE THIS FOR PRODUCTION!")
-
         # Warn about disabled threat intelligence
         if self.config["enable_ip_reputation"]:
             if not self.config["abuseipdb_api_key"] and not self.config["virustotal_api_key"]:
                 self.warnings.append("IP reputation enabled but no API keys configured")
-
-        # Warn about public web host
-        if self.config["web_host"] == "0.0.0.0" and not self.config["enable_auth"]:
-            self.warnings.append(
-                "Web dashboard exposed on all interfaces without authentication - SECURITY RISK!"
-            )
 
         # [SEC-001 PATCH] Validate file permissions on credential files
         self._validate_file_permissions()
@@ -792,23 +744,6 @@ class ConfigLoader:
             print(f"  ℹ️  Priority chain: {' → '.join(priority)}")
         print()
 
-        # Dashboard
-        print(f"{Colors.GREEN}Dashboard:{Colors.NC}")
-        host_display = (
-            "all interfaces" if self.config["web_host"] == "0.0.0.0" else self.config["web_host"]
-        )
-        print(f"  ✅ Web: http://{self.config['web_host']}:{self.config['web_port']}")
-        print(f"  ✅ API: http://{self.config['web_host']}:{self.config['api_port']}")
-
-        if self.config["enable_auth"]:
-            # [SEC-006 PATCH] Don't expose username in output
-            print(f"  ✅ Authentication: {Colors.GREEN}ENABLED{Colors.NC}")
-        else:
-            print(
-                f"  ⚠️  Authentication: {Colors.YELLOW}DISABLED{Colors.NC} (enable for production!)"
-            )
-        print()
-
         # Features
         print(f"{Colors.GREEN}Features:{Colors.NC}")
         if self.config["enable_ml_detection"]:
@@ -879,6 +814,10 @@ def load_config(config_dir: str = "config", verbose: bool = True) -> Dict[str, A
     return config
 
 
+# Backward compatibility alias
+Config = load_config
+
+
 if __name__ == "__main__":
     # Test configuration loading
     config = load_config()
@@ -886,4 +825,4 @@ if __name__ == "__main__":
     print(f"Sample values:")
     print(f"  - System: {config['system_name']}")
     print(f"  - Capture method: {config['capture_method']}")
-    print(f"  - Web port: {config['web_port']}")
+    print(f"  - Log level: {config['log_level']}")

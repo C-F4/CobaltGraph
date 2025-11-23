@@ -37,7 +37,7 @@ os.chdir(PROJECT_ROOT)
 def main():
     """Main entry point"""
     try:
-        # Import launcher from src
+        # Import unified launcher from src
         from src.core.launcher import main as launcher_main
 
         # Run launcher
