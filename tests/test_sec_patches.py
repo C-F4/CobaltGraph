@@ -68,12 +68,18 @@ def test_sec005_documentation():
 
 
 def test_sec008_dashboard_https():
-    """Test SEC-008: HTTPS/TLS enforcement in dashboard"""
-    logger.info("=" * 60)
-    logger.info("Testing SEC-008: Dashboard HTTPS/TLS Enforcement")
-    logger.info("=" * 60)
+    """Test SEC-008: HTTPS/TLS enforcement in dashboard
 
-    from src.dashboard.server import DashboardHandler
+    NOTE: Dashboard removed in clean prototype refactoring.
+    Test disabled - web dashboard no longer part of MVP.
+    """
+    logger.info("=" * 60)
+    logger.info("Testing SEC-008: Dashboard HTTPS/TLS Enforcement [SKIPPED]")
+    logger.info("=" * 60)
+    logger.info("SKIP: Dashboard removed from clean prototype")
+    return True  # Skip test
+
+    # from src.dashboard.server import DashboardHandler
     import inspect
 
     # Check enforce_https method exists
@@ -191,15 +197,18 @@ def test_sec008_config_settings():
 
 
 def test_ssl_imports():
-    """Test that SSL module imports work"""
+    """Test that SSL module imports work
+
+    NOTE: Dashboard and orchestrator removed in clean prototype.
+    Test simplified to only check SSL module availability.
+    """
     logger.info("=" * 60)
     logger.info("Testing SSL/TLS Module Imports")
     logger.info("=" * 60)
 
     try:
         import ssl as ssl_module
-        from src.dashboard.server import DashboardHandler
-        from src.core.orchestrator import CobaltGraphOrchestrator
+        # Dashboard and orchestrator removed - testing SSL module only
 
         # Verify ssl module is available
         assert hasattr(ssl_module, 'SSLContext')
@@ -215,12 +224,18 @@ def test_ssl_imports():
 
 
 def test_do_get_https_enforcement():
-    """Test do_GET calls enforce_https"""
-    logger.info("=" * 60)
-    logger.info("Testing do_GET HTTPS Enforcement Call")
-    logger.info("=" * 60)
+    """Test do_GET calls enforce_https
 
-    from src.dashboard.server import DashboardHandler
+    NOTE: Dashboard removed in clean prototype refactoring.
+    Test disabled - web dashboard no longer part of MVP.
+    """
+    logger.info("=" * 60)
+    logger.info("Testing do_GET HTTPS Enforcement Call [SKIPPED]")
+    logger.info("=" * 60)
+    logger.info("SKIP: Dashboard removed from clean prototype")
+    return True  # Skip test
+
+    # from src.dashboard.server import DashboardHandler
     import inspect
 
     source = inspect.getsource(DashboardHandler.do_GET)
