@@ -74,13 +74,14 @@ class SystemChecker:
         ))
 
     def _check_core_modules(self):
-        """Check Python standard library modules"""
-        required_modules = [
+        """Check Python standard library and external dependencies"""
+        # Standard library modules
+        stdlib_modules = [
             "logging", "json", "threading", "queue", "pathlib",
             "argparse", "subprocess", "socket", "sqlite3", "re"
         ]
 
-        for module_name in required_modules:
+        for module_name in stdlib_modules:
             try:
                 importlib.import_module(module_name)
                 self.results.append(CheckResult(
@@ -94,6 +95,29 @@ class SystemChecker:
                     name=f"Module: {module_name}",
                     passed=False,
                     message=f"{module_name} missing: {e}",
+                    critical=True
+                ))
+
+        # External dependencies (from requirements.txt)
+        external_deps = [
+            ("requests", "HTTP library for threat intelligence"),
+            ("scapy", "Network packet capture"),
+        ]
+
+        for module_name, description in external_deps:
+            try:
+                importlib.import_module(module_name)
+                self.results.append(CheckResult(
+                    name=f"Dependency: {module_name}",
+                    passed=True,
+                    message=f"{module_name} ({description}) ✓",
+                    critical=True
+                ))
+            except ImportError:
+                self.results.append(CheckResult(
+                    name=f"Dependency: {module_name}",
+                    passed=False,
+                    message=f"{module_name} missing - run: pip3 install {module_name}",
                     critical=True
                 ))
 
@@ -290,6 +314,37 @@ def run_health_check(mode: str = "device") -> bool:
     checker = SystemChecker()
     checker.check_all(mode=mode)
     return checker.print_results()
+
+
+def check_dependencies_only() -> bool:
+    """
+    Quick dependency check (Python version + critical imports)
+
+    Returns:
+        True if all critical dependencies are available
+    """
+    checker = SystemChecker()
+    checker._check_python_version()
+    checker._check_core_modules()
+
+    # Check if any critical checks failed
+    failed = [r for r in checker.results if not r.passed and r.critical]
+
+    if failed:
+        print("\n" + "="*70)
+        print("  MISSING DEPENDENCIES")
+        print("="*70 + "\n")
+
+        for result in failed:
+            print(f"\033[0;31m✗\033[0m {result.message}")
+
+        print("\n" + "-"*70)
+        print("Please install dependencies with:")
+        print("  pip3 install -r requirements.txt")
+        print("-"*70 + "\n")
+        return False
+
+    return True
 
 
 if __name__ == "__main__":

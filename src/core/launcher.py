@@ -335,6 +335,11 @@ For network-wide monitoring, root/sudo is required.
             healthy = self.run_health_check()
             return 0 if healthy else 1
 
+        # Check dependencies FIRST (before banner/disclaimer)
+        from src.core.system_check import check_dependencies_only
+        if not check_dependencies_only():
+            return 1
+
         # Show banner
         self.show_banner()
 
