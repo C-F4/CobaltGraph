@@ -42,12 +42,6 @@ python3 start.py --no-disclaimer --mode device
 
 ## 📋 **Features**
 
-### **✅ Network Monitoring**
-- **Network-wide capture**: Monitor entire network segment (requires root)
-- **Device-only mode**: Monitor current device without root access
-- **Protocol support**: TCP connections with extensible protocol support
-- **Real-time tracking**: Live connection monitoring and logging
-
 ### **✅ Geo-Intelligence**
 - **Geolocation**: Automatic IP-to-location mapping
 - **Country identification**: Identify connection destinations
@@ -65,12 +59,6 @@ python3 start.py --no-disclaimer --mode device
 - **Terminal UI**: ncurses-based terminal interface (experimental)
 - **Real-time Updates**: Live connection feed
 - **Export Capabilities**: CSV and JSON export
-
-### **✅ Device Tracking**
-- **MAC Address Tracking**: Identify devices by MAC address
-- **Vendor Identification**: Automatic device vendor lookup
-- **Connection History**: Per-device connection tracking
-- **Timeout Handling**: Automatic device cleanup
 
 ---
 
@@ -299,19 +287,9 @@ max_login_attempts = 5
 - For remote access: Set `web_host = 0.0.0.0` and enable authentication
 - Use firewall rules to restrict access
 - Consider running behind nginx/Apache reverse proxy
-
 ---
 
 ## 🐛 **Troubleshooting**
-
-### **"Permission denied" errors**
-```bash
-# Network-wide capture requires root
-sudo python3 start.py --mode network
-
-# Or use device-only mode
-python3 start.py --mode device
-```
 
 ### **"Port 8080 already in use"**
 ```bash
@@ -320,18 +298,6 @@ python3 start.py --port 9000
 
 # Or kill existing process
 lsof -ti:8080 | xargs kill
-```
-
-### **"Failed to import CobaltGraph modules"**
-```bash
-# Ensure you're in project directory
-cd /path/to/CobaltGraph
-
-# Check Python path
-python3 -c "import sys; print(sys.path)"
-
-# Reinstall dependencies
-pip install -r requirements.txt
 ```
 
 ### **Database errors**
@@ -361,28 +327,6 @@ python3 start.py
 
 ---
 
-## 🤝 **Contributing**
-
-### **Development Setup**
-```bash
-# Clone repository
-git clone https://github.com/yourusername/CobaltGraph.git
-cd CobaltGraph
-
-# Run tests
-python3 tests/run_all_tests.py
-
-# Run linter (if available)
-pylint src/
-```
-
-### **Code Style**
-- Follow PEP 8
-- Use type hints
-- Add docstrings
-- Include unit tests
-
----
 
 ## 📝 **License**
 
@@ -398,31 +342,3 @@ MIT License - See LICENSE file for details
 - **Icon**: CobaltGraph logo
 
 ---
-
-## 📞 **Support**
-
-- **Issues**: https://github.com/yourusername/CobaltGraph/issues
-- **Documentation**: See `docs/` directory
-- **Wiki**: https://github.com/yourusername/CobaltGraph/wiki
-
----
-
-## 🗺️ **Roadmap**
-
-### **Version 1.1 (Planned)**
-- [ ] Enhanced ML threat detection
-- [ ] Additional threat feeds
-- [ ] Historical analytics
-- [ ] Email/webhook alerts
-- [ ] Multi-interface support
-
-### **Version 2.0 (Future)**
-- [ ] Distributed deployment
-- [ ] Advanced correlation engine
-- [ ] REST API
-- [ ] Plugin system
-- [ ] Enterprise features
-
----
-
-**Built with ❤️ for security professionals and network administrators**
