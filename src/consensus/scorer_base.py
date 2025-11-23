@@ -3,13 +3,12 @@ Base classes for threat scorers
 Defines the interface all scorers must implement
 """
 
-import time
-import hmac
 import hashlib
+import hmac
 import secrets
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict
-from typing import Dict, Optional, Any
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -26,6 +25,7 @@ class ScorerAssessment:
         timestamp: When assessment was made
         signature: HMAC-SHA256 signature for verification
     """
+
     scorer_id: str
     score: float
     confidence: float
@@ -50,11 +50,7 @@ class ScorerAssessment:
         """
         # Recreate the message that was signed
         message = f"{self.scorer_id}:{self.score}:{self.confidence}:{self.timestamp}"
-        expected_sig = hmac.new(
-            secret_key,
-            message.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+        expected_sig = hmac.new(secret_key, message.encode("utf-8"), hashlib.sha256).hexdigest()
 
         return hmac.compare_digest(self.signature, expected_sig)
 
@@ -88,11 +84,7 @@ class ThreatScorer(ABC):
 
     @abstractmethod
     def assess(
-        self,
-        dst_ip: str,
-        threat_intel: Dict,
-        geo_data: Dict,
-        connection_metadata: Dict
+        self, dst_ip: str, threat_intel: Dict, geo_data: Dict, connection_metadata: Dict
     ) -> ScorerAssessment:
         """
         Assess threat level for a connection
@@ -108,14 +100,8 @@ class ThreatScorer(ABC):
         Returns:
             ScorerAssessment with signed threat score
         """
-        pass
 
-    def _sign_assessment(
-        self,
-        score: float,
-        confidence: float,
-        timestamp: float
-    ) -> str:
+    def _sign_assessment(self, score: float, confidence: float, timestamp: float) -> str:
         """
         Create HMAC-SHA256 signature for assessment
 
@@ -128,11 +114,7 @@ class ThreatScorer(ABC):
             Hex-encoded HMAC signature
         """
         message = f"{self.scorer_id}:{score}:{confidence}:{timestamp}"
-        signature = hmac.new(
-            self.secret_key,
-            message.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(self.secret_key, message.encode("utf-8"), hashlib.sha256).hexdigest()
 
         return signature
 

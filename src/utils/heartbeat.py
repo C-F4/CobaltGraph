@@ -11,8 +11,8 @@ Monitors:
 - System-wide health (0.0-1.0 overall score)
 """
 
-import time
 import logging
+import time
 from typing import Dict
 
 logger = logging.getLogger(__name__)
@@ -40,16 +40,16 @@ class Heartbeat:
         """
         self.timeout = timeout  # Seconds before component is considered DEAD
         self.components = {
-            'database': {'health': 100, 'last_beat': time.time()},
-            'geo_engine': {'health': 100, 'last_beat': time.time()},
-            'dashboard': {'health': 100, 'last_beat': time.time()},
-            'connection_monitor': {'health': 0, 'last_beat': 0},  # Starts offline
-            'orchestrator': {'health': 100, 'last_beat': time.time()},
-            'capture': {'health': 0, 'last_beat': 0},  # Starts offline
-            'processor': {'health': 0, 'last_beat': 0}  # Starts offline
+            "database": {"health": 100, "last_beat": time.time()},
+            "geo_engine": {"health": 100, "last_beat": time.time()},
+            "dashboard": {"health": 100, "last_beat": time.time()},
+            "connection_monitor": {"health": 0, "last_beat": 0},  # Starts offline
+            "orchestrator": {"health": 100, "last_beat": time.time()},
+            "capture": {"health": 0, "last_beat": 0},  # Starts offline
+            "processor": {"health": 0, "last_beat": 0},  # Starts offline
         }
 
-        logger.info(f"💓 Heartbeat monitor initialized (timeout: {timeout}s)")
+        logger.info("💓 Heartbeat monitor initialized (timeout: %ss)", timeout)
 
     def beat(self, component: str):
         """
@@ -63,12 +63,12 @@ class Heartbeat:
         """
         if component not in self.components:
             # Auto-register new component
-            self.components[component] = {'health': 100, 'last_beat': time.time()}
-            logger.debug(f"💓 Registered new component: {component}")
+            self.components[component] = {"health": 100, "last_beat": time.time()}
+            logger.debug("💓 Registered new component: %s", component)
         else:
-            self.components[component]['last_beat'] = time.time()
-            self.components[component]['health'] = 100
-            logger.debug(f"💓 Heartbeat: {component}")
+            self.components[component]["last_beat"] = time.time()
+            self.components[component]["health"] = 100
+            logger.debug("💓 Heartbeat: %s", component)
 
     def _update_health(self):
         """
@@ -84,14 +84,14 @@ class Heartbeat:
         now = time.time()
 
         for name, data in self.components.items():
-            age = now - data['last_beat']
+            age = now - data["last_beat"]
 
             if age > self.timeout:
                 # Component is DEAD (no heartbeat for timeout period)
-                data['health'] = 0
+                data["health"] = 0
             elif age > self.timeout / 2:
                 # Component is DEGRADED (approaching timeout)
-                data['health'] = 50
+                data["health"] = 50
             # Otherwise health stays at 100 (set by beat())
 
     def check_health(self) -> float:
@@ -103,7 +103,7 @@ class Heartbeat:
             (average of all component health scores)
         """
         self._update_health()
-        healths = [c['health'] for c in self.components.values()]
+        healths = [c["health"] for c in self.components.values()]
         return sum(healths) / (len(healths) * 100)
 
     def get_status(self) -> Dict:
@@ -125,12 +125,13 @@ class Heartbeat:
 
         return {
             name: {
-                'status': (
-                    'DEAD' if data['health'] == 0 else
-                    ('DEGRADED' if data['health'] < 100 else 'ACTIVE')
+                "status": (
+                    "DEAD"
+                    if data["health"] == 0
+                    else ("DEGRADED" if data["health"] < 100 else "ACTIVE")
                 ),
-                'health_percentage': data['health'],
-                'last_beat_age': int(now - data['last_beat'])
+                "health_percentage": data["health"],
+                "last_beat_age": int(now - data["last_beat"]),
             }
             for name, data in self.components.items()
         }
@@ -146,9 +147,9 @@ class Heartbeat:
             True if component health > 0, False otherwise
         """
         self._update_health()
-        return self.components.get(component, {}).get('health', 0) > 0
+        return self.components.get(component, {}).get("health", 0) > 0
 
-    def register_component(self, component: str, initial_state: str = 'offline'):
+    def register_component(self, component: str, initial_state: str = "offline"):
         """
         Register a new component for monitoring
 
@@ -156,18 +157,12 @@ class Heartbeat:
             component: Component name
             initial_state: 'online' (health=100) or 'offline' (health=0)
         """
-        if initial_state == 'online':
-            self.components[component] = {
-                'health': 100,
-                'last_beat': time.time()
-            }
+        if initial_state == "online":
+            self.components[component] = {"health": 100, "last_beat": time.time()}
         else:
-            self.components[component] = {
-                'health': 0,
-                'last_beat': 0
-            }
+            self.components[component] = {"health": 0, "last_beat": 0}
 
-        logger.info(f"📋 Registered component: {component} ({initial_state})")
+        logger.info("📋 Registered component: {component} (%s)", initial_state)
 
     def print_status(self):
         """Print human-readable status (for debugging)"""
@@ -177,15 +172,13 @@ class Heartbeat:
         print("=" * 50)
 
         for component, info in status.items():
-            symbol = {
-                'ACTIVE': '✅',
-                'DEGRADED': '⚠️ ',
-                'DEAD': '❌'
-            }.get(info['status'], '❓')
+            symbol = {"ACTIVE": "✅", "DEGRADED": "⚠️ ", "DEAD": "❌"}.get(info["status"], "❓")
 
-            print(f"{symbol} {component:20s} | {info['status']:8s} | "
-                  f"Health: {info['health_percentage']:3d}% | "
-                  f"Age: {info['last_beat_age']:3d}s")
+            print(
+                f"{symbol} {component:20s} | {info['status']:8s} | "
+                f"Health: {info['health_percentage']:3d}% | "
+                f"Age: {info['last_beat_age']:3d}s"
+            )
 
         overall = self.check_health()
         print("=" * 50)
