@@ -41,7 +41,10 @@ class ConfigLoader:
     3. Default values
     """
 
-    def __init__(self, config_dir: str = "config"):
+    def __init__(self, config_dir: str = None):
+        # Use default config directory if none provided
+        if config_dir is None:
+            config_dir = "config"
         self.config_dir = Path(config_dir)
         self.config = {}
         self.warnings = []
