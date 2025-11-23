@@ -1,6 +1,6 @@
 # CobaltGraph - Geo-Spatial Network Intelligence Platform
 
-**Passive Reconnaissance & Network Intelligence System**
+**Passive Reconnaissance & Network Intelligence Tool -- UNDER DEVELOPMENT **
 
 CobaltGraph is a comprehensive network monitoring and intelligence platform that provides real-time visualization of network connections with geolocation data, threat intelligence scoring, and device tracking.
 
