@@ -20,6 +20,10 @@ python-geoip>=1.2      # Fallback geolocation
 pandas>=2.0.0          # Efficient data analysis (limited to threat aggregation only)
 sqlite3                # Built-in, no install needed
 
+# Enhanced Terminal UI
+rich>=13.0.0           # Beautiful terminal formatting and tables
+textual>=0.40.0        # Modern TUI framework with widgets
+
 # Optional (for development)
 pytest>=7.0.0
 black>=22.0.0

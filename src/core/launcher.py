@@ -211,14 +211,35 @@ Type 'yes' to accept and continue, or anything else to exit: """
 
     def select_interface_interactive(self) -> str:
         """
-        Interface selection (Terminal-only in current version)
-        Returns 'terminal'
+        Interface selection
+        Returns 'terminal' or 'enhanced'
         """
-        print(f"\n{Colors.CYAN}Interface: Pure Terminal Mode{Colors.NC}")
-        print(f"  • No web server, no HTTP ports")
-        print(f"  • Maximum security, minimal attack surface")
-        print(f"  • Real-time terminal display\n")
-        return 'terminal'
+        print(f"\n{Colors.BOLD}Select Terminal Interface:{Colors.NC}\n")
+        print(f"  {Colors.GREEN}1){Colors.NC} Enhanced Terminal UI (recommended)")
+        print(f"     • Beautiful interactive interface with Textual")
+        print(f"     • Live data tables, charts, and sparklines")
+        print(f"     • Color-coded threat levels")
+        print(f"     • Keyboard navigation\n")
+
+        print(f"  {Colors.GREEN}2){Colors.NC} Classic Terminal (simple text output)")
+        print(f"     • Simple text logging")
+        print(f"     • Minimal dependencies")
+        print(f"     • Maximum compatibility\n")
+
+        try:
+            choice = input(f"{Colors.BOLD}Enter choice (1-2):{Colors.NC} ").strip()
+
+            if choice == '1':
+                return 'enhanced'
+            elif choice == '2':
+                return 'terminal'
+            else:
+                print(f"{Colors.YELLOW}Invalid choice. Using enhanced terminal.{Colors.NC}")
+                return 'enhanced'
+
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n{Colors.YELLOW}Cancelled. Using enhanced terminal.{Colors.NC}")
+            return 'enhanced'
 
     def run_health_check(self) -> bool:
         """
@@ -230,11 +251,38 @@ Type 'yes' to accept and continue, or anything else to exit: """
         print(f"\n{Colors.CYAN}Running system health check...{Colors.NC}\n")
         return run_health_check(mode=self.mode or 'device')
 
+    def launch_enhanced_terminal(self):
+        """Launch Enhanced Terminal UI with Textual"""
+        from src.ui.enhanced_terminal import EnhancedTerminalUI
+
+        print(f"\n{Colors.GREEN}🚀 Launching CobaltGraph Enhanced Terminal UI...{Colors.NC}")
+        print(f"{Colors.CYAN}Mode: {self.mode}{Colors.NC}")
+        print(f"{Colors.CYAN}Config: {self.config_path or 'default'}{Colors.NC}")
+        print(f"{Colors.CYAN}Features: Live tables, charts, interactive navigation{Colors.NC}\n")
+
+        # Determine database path
+        db_path = "database/cobaltgraph.db"
+        if self.config_path:
+            db_path = str(Path(self.config_path).parent.parent / "database" / "cobaltgraph.db")
+
+        # Launch Enhanced Terminal UI
+        try:
+            ui = EnhancedTerminalUI(database_path=db_path)
+            ui.run()
+            return 0
+        except KeyboardInterrupt:
+            print(f"\n{Colors.YELLOW}⏹️  Stopped by user{Colors.NC}")
+            return 130
+        except Exception as e:
+            print(f"\n{Colors.RED}✗ Error: {e}{Colors.NC}")
+            print(f"{Colors.YELLOW}Falling back to classic terminal mode...{Colors.NC}\n")
+            return self.launch_terminal_interface()
+
     def launch_terminal_interface(self):
-        """Launch pure terminal interface"""
+        """Launch classic pure terminal interface"""
         from src.core.main_terminal_pure import main as terminal_main
 
-        print(f"\n{Colors.GREEN}🚀 Launching CobaltGraph in Pure Terminal Mode...{Colors.NC}")
+        print(f"\n{Colors.GREEN}🚀 Launching CobaltGraph in Classic Terminal Mode...{Colors.NC}")
         print(f"{Colors.CYAN}Mode: {self.mode}{Colors.NC}")
         print(f"{Colors.CYAN}Config: {self.config_path or 'default'}{Colors.NC}\n")
 
@@ -280,9 +328,9 @@ For network-wide monitoring, root/sudo is required.
 
         parser.add_argument(
             '--interface',
-            choices=['terminal'],
-            default='terminal',
-            help='User interface type (terminal only in current version)'
+            choices=['enhanced', 'terminal'],
+            default='enhanced',
+            help='User interface type: enhanced (interactive TUI) or terminal (classic text)'
         )
 
         parser.add_argument(
@@ -378,9 +426,13 @@ For network-wide monitoring, root/sudo is required.
             print(f"{Colors.YELLOW}Fix the issues above and try again.{Colors.NC}\n")
             return 1
 
-        # Launch terminal interface
+        # Launch appropriate interface
         print(f"\n{Colors.GREEN}✓ All systems ready{Colors.NC}\n")
-        return self.launch_terminal_interface()
+
+        if self.interface == 'enhanced':
+            return self.launch_enhanced_terminal()
+        else:
+            return self.launch_terminal_interface()
 
 
 def main() -> int:
