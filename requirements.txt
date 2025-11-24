@@ -1,34 +1,81 @@
 # CobaltGraph - Network Security Platform
-# GPU-Accelerated 3D Threat Visualization
+# Terminal-Only Mode with Enhanced UI (clean-prototype branch)
+#
+# Installation: pip3 install -r requirements.txt
+# Minimal Install: pip3 install -r requirements-minimal.txt
 
-# Core Networking & Data
-requests>=2.28.0        # HTTP API calls for threat intelligence
-scapy>=2.5.0           # Network packet capture and analysis
+# ============================================================================
+# CORE DEPENDENCIES (Required)
+# ============================================================================
 
-# GPU-Accelerated GUI & 3D Visualization
-dearpygui>=1.10.0      # GPU-accelerated GUI framework
-panda3d>=1.10.14       # 3D rendering engine for globe visualization
-numpy>=1.24.0          # High-performance arrays for geo/threat data
-pillow>=10.0.0         # Image processing for textures
+# HTTP requests for threat intelligence APIs
+requests>=2.32.0
 
-# Geographic & Threat Intelligence
-geoip2>=4.7.0          # MaxMind GeoIP2 database reader
-maxminddb>=2.4.0       # Fast IP geolocation lookups
-python-geoip>=1.2      # Fallback geolocation
+# Network packet capture (requires root for network-wide mode)
+# Note: scapy can be skipped for device-only mode
+scapy>=2.5.0
 
-# Data Processing (Memory-Efficient)
-pandas>=2.0.0          # Efficient data analysis (limited to threat aggregation only)
-sqlite3                # Built-in, no install needed
+# ============================================================================
+# ENHANCED TERMINAL UI (Recommended)
+# ============================================================================
 
-# Enhanced Terminal UI
-rich>=13.0.0           # Beautiful terminal formatting and tables
-textual>=0.40.0        # Modern TUI framework with widgets
+# Beautiful terminal formatting, tables, and panels
+rich>=13.9.0
 
-# Optional (for development)
-pytest>=7.0.0
-black>=22.0.0
+# Modern TUI framework with reactive widgets
+textual>=0.86.0
 
-# System Requirements:
-# - GPU: OpenGL 3.3+ compatible (NVIDIA/AMD/Intel)
-# - RAM: 2GB target (1.5GB for data, 512MB for GPU buffers)
-# - CPU: Minimal usage, offload to GPU shaders
+# ============================================================================
+# GEOLOCATION (Optional but Recommended)
+# ============================================================================
+
+# MaxMind GeoIP2 database reader (requires database file)
+geoip2>=4.8.0
+
+# Fast IP geolocation lookups
+maxminddb>=2.6.0
+
+# ============================================================================
+# DATA PROCESSING (Optional)
+# ============================================================================
+
+# High-performance arrays for consensus calculations
+# Using 1.26.x for Python 3.8+ compatibility
+numpy>=1.26.0,<2.0.0
+
+# Efficient data analysis for export processing
+pandas>=2.2.0
+
+# ============================================================================
+# DEVELOPMENT TOOLS (Optional)
+# ============================================================================
+
+# Testing framework
+pytest>=8.3.0
+
+# Code formatter
+black>=24.10.0
+
+# Code linter
+pylint>=3.3.0
+
+# ============================================================================
+# NOTES
+# ============================================================================
+#
+# Python Version: 3.8+ required, 3.10+ recommended
+# SQLite: Built-in to Python (no install needed)
+#
+# For minimal installation (terminal UI only):
+#   pip3 install -r requirements-minimal.txt
+#
+# For development:
+#   pip3 install -r requirements.txt
+#
+# Removed packages (archived dashboard only):
+#   - dearpygui (GPU GUI framework)
+#   - panda3d (3D rendering)
+#   - pillow (image processing)
+#   - python-geoip (deprecated)
+#
+# ============================================================================

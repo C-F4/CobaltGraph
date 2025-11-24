@@ -99,12 +99,12 @@ class SystemChecker:
                 ))
 
         # External dependencies (from requirements.txt)
-        external_deps = [
+        # Core dependencies (critical)
+        core_deps = [
             ("requests", "HTTP library for threat intelligence"),
-            ("scapy", "Network packet capture"),
         ]
 
-        for module_name, description in external_deps:
+        for module_name, description in core_deps:
             try:
                 importlib.import_module(module_name)
                 self.results.append(CheckResult(
@@ -119,6 +119,30 @@ class SystemChecker:
                     passed=False,
                     message=f"{module_name} missing - run: pip3 install {module_name}",
                     critical=True
+                ))
+
+        # Optional dependencies (non-critical)
+        optional_deps = [
+            ("scapy", "Network packet capture (for network-wide mode)"),
+            ("rich", "Beautiful terminal formatting"),
+            ("textual", "Enhanced Terminal UI framework"),
+        ]
+
+        for module_name, description in optional_deps:
+            try:
+                importlib.import_module(module_name)
+                self.results.append(CheckResult(
+                    name=f"Optional: {module_name}",
+                    passed=True,
+                    message=f"{module_name} ({description}) ✓",
+                    critical=False
+                ))
+            except ImportError:
+                self.results.append(CheckResult(
+                    name=f"Optional: {module_name}",
+                    passed=False,
+                    message=f"{module_name} not installed - install with: pip3 install {module_name}",
+                    critical=False
                 ))
 
     def _check_cobaltgraph_modules(self):
