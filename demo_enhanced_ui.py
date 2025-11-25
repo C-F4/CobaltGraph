@@ -4,7 +4,7 @@ Quick Demo Launcher for Enhanced Terminal UI
 
 Run this to test the Enhanced Terminal UI without going through the full launcher.
 """
-
+print("hello world");
 import sys
 from pathlib import Path
 
