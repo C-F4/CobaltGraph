@@ -27,7 +27,6 @@ CobaltGraph is a revolutionary blue-team network monitoring system that uses mul
 - **NO Ports**: Pure terminal operation
 - **Air-Gap Compatible**: Runs in isolated environments
 - **Minimal Dependencies**: Smaller threat model, easier to audit
-- **Comprehensive .gitignore**: No credential leaks
 
 ### ⚡ Performance
 - **<2ms Latency**: 100x faster than target (200ms)
