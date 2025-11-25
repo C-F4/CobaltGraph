@@ -11,8 +11,8 @@ Key features:
 
 import logging
 import statistics
-from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 from .scorer_base import ScorerAssessment
 
@@ -33,6 +33,7 @@ class ConsensusResult:
         method: How consensus was achieved
         metadata: Additional consensus details
     """
+
     consensus_score: float
     confidence: float
     high_uncertainty: bool
@@ -44,13 +45,13 @@ class ConsensusResult:
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
         return {
-            'consensus_score': self.consensus_score,
-            'confidence': self.confidence,
-            'high_uncertainty': self.high_uncertainty,
-            'votes': self.votes,
-            'outliers': self.outliers,
-            'method': self.method,
-            'metadata': self.metadata,
+            "consensus_score": self.consensus_score,
+            "confidence": self.confidence,
+            "high_uncertainty": self.high_uncertainty,
+            "votes": self.votes,
+            "outliers": self.outliers,
+            "method": self.method,
+            "metadata": self.metadata,
         }
 
 
@@ -66,7 +67,7 @@ class BFTConsensus:
         self,
         min_scorers: int = 2,
         outlier_threshold: float = 0.3,
-        uncertainty_threshold: float = 0.25
+        uncertainty_threshold: float = 0.25,
     ):
         """
         Initialize BFT consensus
@@ -80,10 +81,7 @@ class BFTConsensus:
         self.outlier_threshold = outlier_threshold
         self.uncertainty_threshold = uncertainty_threshold
 
-    def achieve_consensus(
-        self,
-        assessments: List[ScorerAssessment]
-    ) -> Optional[ConsensusResult]:
+    def achieve_consensus(self, assessments: List[ScorerAssessment]) -> Optional[ConsensusResult]:
         """
         Achieve consensus from multiple scorer assessments
 
@@ -101,9 +99,7 @@ class BFTConsensus:
         """
         # Validate inputs
         if len(assessments) < self.min_scorers:
-            logger.warning(
-                f"Insufficient scorers: {len(assessments)} < {self.min_scorers}"
-            )
+            logger.warning("Insufficient scorers: {len(assessments)} < %s", self.min_scorers)
             return None
 
         # Extract scores and confidences
@@ -171,15 +167,15 @@ class BFTConsensus:
             high_uncertainty=high_uncertainty,
             votes=[a.to_dict() for a in assessments],
             outliers=outliers,
-            method='median_bft',
+            method="median_bft",
             metadata={
-                'num_scorers': len(assessments),
-                'num_outliers': len(outliers),
-                'score_spread': score_spread,
-                'median_score': median_score,
-                'min_score': min(scores),
-                'max_score': max(scores),
-            }
+                "num_scorers": len(assessments),
+                "num_outliers": len(outliers),
+                "score_spread": score_spread,
+                "median_score": median_score,
+                "min_score": min(scores),
+                "max_score": max(scores),
+            },
         )
 
         logger.info(
@@ -192,9 +188,7 @@ class BFTConsensus:
         return result
 
     def verify_assessments(
-        self,
-        assessments: List[ScorerAssessment],
-        secret_keys: Dict[str, bytes]
+        self, assessments: List[ScorerAssessment], secret_keys: Dict[str, bytes]
     ) -> Tuple[List[ScorerAssessment], List[str]]:
         """
         Verify cryptographic signatures on assessments
@@ -213,7 +207,7 @@ class BFTConsensus:
             scorer_id = assessment.scorer_id
 
             if scorer_id not in secret_keys:
-                logger.warning(f"No secret key for scorer: {scorer_id}")
+                logger.warning("No secret key for scorer: %s", scorer_id)
                 failed.append(scorer_id)
                 continue
 
@@ -222,10 +216,10 @@ class BFTConsensus:
             if assessment.verify_signature(secret_key):
                 valid.append(assessment)
             else:
-                logger.error(f"Invalid signature from scorer: {scorer_id}")
+                logger.error("Invalid signature from scorer: %s", scorer_id)
                 failed.append(scorer_id)
 
         if failed:
-            logger.warning(f"Failed signature verification: {failed}")
+            logger.warning("Failed signature verification: %s", failed)
 
         return valid, failed

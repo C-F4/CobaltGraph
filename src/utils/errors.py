@@ -44,7 +44,6 @@ class ConfigurationError(CobaltGraphError):
     - Required configuration keys are missing
     - Configuration validation fails
     """
-    pass
 
 
 class DatabaseError(CobaltGraphError):
@@ -58,7 +57,6 @@ class DatabaseError(CobaltGraphError):
     - Database migration issues
     - Integrity constraint violations
     """
-    pass
 
 
 class CaptureError(CobaltGraphError):
@@ -72,7 +70,6 @@ class CaptureError(CobaltGraphError):
     - Packet parsing errors
     - Capture buffer overflows
     """
-    pass
 
 
 class IntegrationError(CobaltGraphError):
@@ -86,7 +83,6 @@ class IntegrationError(CobaltGraphError):
     - Timeout errors
     - Invalid API responses
     """
-    pass
 
 
 class DashboardError(CobaltGraphError):
@@ -100,7 +96,6 @@ class DashboardError(CobaltGraphError):
     - Template rendering errors
     - Request/response processing fails
     """
-    pass
 
 
 class GeolocationError(CobaltGraphError):
@@ -113,7 +108,6 @@ class GeolocationError(CobaltGraphError):
     - Invalid IP address format
     - Database corruption
     """
-    pass
 
 
 class SupervisorError(CobaltGraphError):
@@ -126,7 +120,6 @@ class SupervisorError(CobaltGraphError):
     - Health check failures
     - Resource limit violations
     """
-    pass
 
 
 # Convenience function for creating errors with context

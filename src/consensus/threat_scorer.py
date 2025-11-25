@@ -6,16 +6,16 @@ This is the replacement for ip_reputation.check_ip() in orchestrator.py
 Coordinates multiple scorers with BFT consensus
 """
 
-import time
 import logging
-from typing import Dict, Tuple, List, Optional
+import time
 from collections import deque
+from typing import Dict, List, Optional, Tuple
 
-from .scorer_base import ThreatScorer, ScorerAssessment
-from .bft_consensus import BFTConsensus, ConsensusResult
-from .statistical_scorer import StatisticalScorer
-from .rule_scorer import RuleScorer
+from .bft_consensus import BFTConsensus
 from .ml_scorer import MLScorer
+from .rule_scorer import RuleScorer
+from .scorer_base import ScorerAssessment, ThreatScorer
+from .statistical_scorer import StatisticalScorer
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +31,7 @@ class ConsensusThreatScorer:
     - In-memory cache + disk persistence
     """
 
-    def __init__(
-        self,
-        config: Optional[Dict] = None,
-        enable_persistence: bool = True
-    ):
+    def __init__(self, config: Optional[Dict] = None, enable_persistence: bool = True):
         """
         Initialize consensus threat scorer
 
@@ -53,25 +49,21 @@ class ConsensusThreatScorer:
             RuleScorer(),
             MLScorer(),
         ]
-        logger.info(f"Initialized {len(self.scorers)} scorers: "
-                   f"{[s.scorer_id for s in self.scorers]}")
+        logger.info(
+            f"Initialized {len(self.scorers)} scorers: " f"{[s.scorer_id for s in self.scorers]}"
+        )
 
         # Initialize consensus algorithm
         self.consensus = BFTConsensus(
-            min_scorers=2,
-            outlier_threshold=0.3,
-            uncertainty_threshold=0.25
+            min_scorers=2, outlier_threshold=0.3, uncertainty_threshold=0.25
         )
 
         # In-memory cache for recent assessments
-        self.cache_size = self.config.get('consensus_cache_size', 1000)
+        self.cache_size = self.config.get("consensus_cache_size", 1000)
         self.assessment_cache = deque(maxlen=self.cache_size)
 
         # Secret keys for signature verification
-        self.secret_keys = {
-            scorer.scorer_id: scorer.secret_key
-            for scorer in self.scorers
-        }
+        self.secret_keys = {scorer.scorer_id: scorer.secret_key for scorer in self.scorers}
 
         # Statistics
         self.total_assessments = 0
@@ -85,7 +77,7 @@ class ConsensusThreatScorer:
         dst_ip: str,
         threat_intel: Optional[Dict] = None,
         geo_data: Optional[Dict] = None,
-        connection_metadata: Optional[Dict] = None
+        connection_metadata: Optional[Dict] = None,
     ) -> Tuple[float, Dict]:
         """
         Assess threat level for IP address using consensus
@@ -120,15 +112,12 @@ class ConsensusThreatScorer:
                     dst_ip=dst_ip,
                     threat_intel=threat_intel,
                     geo_data=geo_data,
-                    connection_metadata=connection_metadata
+                    connection_metadata=connection_metadata,
                 )
                 assessments.append(assessment)
 
             except Exception as e:
-                logger.error(
-                    f"Scorer {scorer.scorer_id} failed for {dst_ip}: {e}",
-                    exc_info=True
-                )
+                logger.error("Scorer {scorer.scorer_id} failed for {dst_ip}: %s", e, exc_info=True)
                 # Continue with other scorers
 
         # Check if we got enough assessments
@@ -140,9 +129,9 @@ class ConsensusThreatScorer:
             self.consensus_failures += 1
             # Fallback to safe default
             return 0.5, {
-                'error': 'insufficient_scorers',
-                'available_scorers': len(assessments),
-                'required_scorers': 2,
+                "error": "insufficient_scorers",
+                "available_scorers": len(assessments),
+                "required_scorers": 2,
             }
 
         # Verify signatures
@@ -151,26 +140,25 @@ class ConsensusThreatScorer:
         )
 
         if failed_scorers:
-            logger.warning(f"Signature verification failed for: {failed_scorers}")
+            logger.warning("Signature verification failed for: %s", failed_scorers)
 
         if len(valid_assessments) < 2:
             logger.error(
-                f"Insufficient valid assessments for {dst_ip} "
-                f"after signature verification"
+                f"Insufficient valid assessments for {dst_ip} " f"after signature verification"
             )
             self.consensus_failures += 1
             return 0.5, {
-                'error': 'signature_verification_failed',
-                'failed_scorers': failed_scorers,
+                "error": "signature_verification_failed",
+                "failed_scorers": failed_scorers,
             }
 
         # Achieve consensus
         consensus_result = self.consensus.achieve_consensus(valid_assessments)
 
         if consensus_result is None:
-            logger.error(f"Consensus failed for {dst_ip}")
+            logger.error("Consensus failed for %s", dst_ip)
             self.consensus_failures += 1
-            return 0.5, {'error': 'consensus_failed'}
+            return 0.5, {"error": "consensus_failed"}
 
         # Track high uncertainty
         if consensus_result.high_uncertainty:
@@ -182,12 +170,12 @@ class ConsensusThreatScorer:
 
         # Cache assessment
         cache_entry = {
-            'timestamp': time.time(),
-            'dst_ip': dst_ip,
-            'consensus': consensus_result.to_dict(),
-            'threat_intel': threat_intel,
-            'geo_data': geo_data,
-            'connection_metadata': connection_metadata,
+            "timestamp": time.time(),
+            "dst_ip": dst_ip,
+            "consensus": consensus_result.to_dict(),
+            "threat_intel": threat_intel,
+            "geo_data": geo_data,
+            "connection_metadata": connection_metadata,
         }
         self.assessment_cache.append(cache_entry)
 
@@ -198,15 +186,15 @@ class ConsensusThreatScorer:
         # Format return value to match ip_reputation.check_ip() interface
         threat_score = consensus_result.consensus_score
         details = {
-            'source': 'consensus',
-            'is_malicious': threat_score >= 0.7,
-            'threat_score': threat_score,
-            'confidence': consensus_result.confidence,
-            'high_uncertainty': consensus_result.high_uncertainty,
-            'votes': consensus_result.votes,
-            'outliers': consensus_result.outliers,
-            'method': consensus_result.method,
-            'metadata': consensus_result.metadata,
+            "source": "consensus",
+            "is_malicious": threat_score >= 0.7,
+            "threat_score": threat_score,
+            "confidence": consensus_result.confidence,
+            "high_uncertainty": consensus_result.high_uncertainty,
+            "votes": consensus_result.votes,
+            "outliers": consensus_result.outliers,
+            "method": consensus_result.method,
+            "metadata": consensus_result.metadata,
         }
 
         logger.debug(
@@ -221,10 +209,7 @@ class ConsensusThreatScorer:
         """Persist in-memory cache to disk"""
         # TODO: Implement periodic flush to SQLite
         # This will be added in the next iteration with storage integration
-        logger.debug(
-            f"Cache flush triggered: {len(self.assessment_cache)} assessments"
-        )
-        pass
+        logger.debug(f"Cache flush triggered: {len(self.assessment_cache)} assessments")
 
     def get_statistics(self) -> Dict:
         """
@@ -234,22 +219,22 @@ class ConsensusThreatScorer:
             Dictionary with performance metrics
         """
         stats = {
-            'total_assessments': self.total_assessments,
-            'consensus_failures': self.consensus_failures,
-            'high_uncertainty_count': self.high_uncertainty_count,
-            'failure_rate': self.consensus_failures / max(self.total_assessments, 1),
-            'uncertainty_rate': self.high_uncertainty_count / max(self.total_assessments, 1),
-            'cache_size': len(self.assessment_cache),
-            'scorers': {},
+            "total_assessments": self.total_assessments,
+            "consensus_failures": self.consensus_failures,
+            "high_uncertainty_count": self.high_uncertainty_count,
+            "failure_rate": self.consensus_failures / max(self.total_assessments, 1),
+            "uncertainty_rate": self.high_uncertainty_count / max(self.total_assessments, 1),
+            "cache_size": len(self.assessment_cache),
+            "scorers": {},
         }
 
         # Per-scorer statistics
         for scorer in self.scorers:
-            stats['scorers'][scorer.scorer_id] = {
-                'assessments_made': scorer.assessments_made,
-                'avg_confidence': scorer.get_avg_confidence(),
-                'accuracy': scorer.get_accuracy(),
-                'ground_truth_total': scorer.ground_truth_total,
+            stats["scorers"][scorer.scorer_id] = {
+                "assessments_made": scorer.assessments_made,
+                "avg_confidence": scorer.get_avg_confidence(),
+                "accuracy": scorer.get_accuracy(),
+                "ground_truth_total": scorer.ground_truth_total,
             }
 
         return stats

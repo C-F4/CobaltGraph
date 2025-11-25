@@ -12,10 +12,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 # Default log format
-DEFAULT_FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-DETAILED_FORMAT = '%(asctime)s [%(levelname)s] %(name)s (%(filename)s:%(lineno)d): %(message)s'
+DEFAULT_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+DETAILED_FORMAT = "%(asctime)s [%(levelname)s] %(name)s (%(filename)s:%(lineno)d): %(message)s"
 
 
 class ColoredFormatter(logging.Formatter):
@@ -27,17 +26,17 @@ class ColoredFormatter(logging.Formatter):
 
     # ANSI color codes
     COLORS = {
-        'DEBUG': '\033[0;36m',     # Cyan
-        'INFO': '\033[0;32m',      # Green
-        'WARNING': '\033[1;33m',   # Yellow
-        'ERROR': '\033[0;31m',     # Red
-        'CRITICAL': '\033[1;31m',  # Bold Red
+        "DEBUG": "\033[0;36m",  # Cyan
+        "INFO": "\033[0;32m",  # Green
+        "WARNING": "\033[1;33m",  # Yellow
+        "ERROR": "\033[0;31m",  # Red
+        "CRITICAL": "\033[1;31m",  # Bold Red
     }
-    RESET = '\033[0m'
+    RESET = "\033[0m"
 
     def __init__(self, fmt=None, datefmt=None, use_color=True):
         super().__init__(fmt, datefmt)
-        self.use_color = use_color and hasattr(sys.stderr, 'isatty') and sys.stderr.isatty()
+        self.use_color = use_color and hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
 
     def format(self, record):
         if self.use_color and record.levelname in self.COLORS:
@@ -61,13 +60,13 @@ class ColoredFormatter(logging.Formatter):
 def setup_logging(
     log_level: int = logging.INFO,
     log_file: Optional[str] = None,
-    log_dir: str = 'logs',
+    log_dir: str = "logs",
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
     console_level: Optional[int] = None,
     file_level: Optional[int] = None,
     use_color: bool = True,
-    detailed_file_logs: bool = True
+    detailed_file_logs: bool = True,
 ) -> None:
     """
     Configure comprehensive logging for CobaltGraph.
@@ -98,7 +97,7 @@ def setup_logging(
 
     # Determine log file path
     if log_file is None:
-        log_file = log_path / 'cobaltgraph.log'
+        log_file = log_path / "cobaltgraph.log"
     else:
         log_file = log_path / log_file
 
@@ -118,19 +117,14 @@ def setup_logging(
     # Console handler (with color)
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(console_level)
-    console_formatter = ColoredFormatter(
-        fmt=DEFAULT_FORMAT,
-        use_color=use_color
-    )
+    console_formatter = ColoredFormatter(fmt=DEFAULT_FORMAT, use_color=use_color)
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
     # File handler (rotating, with detailed format)
     try:
         file_handler = logging.handlers.RotatingFileHandler(
-            str(log_file),
-            maxBytes=max_bytes,
-            backupCount=backup_count
+            str(log_file), maxBytes=max_bytes, backupCount=backup_count
         )
         file_handler.setLevel(file_level)
 
@@ -144,12 +138,14 @@ def setup_logging(
 
     except Exception as e:
         # If file logging fails, log to console only
-        root_logger.warning(f"Failed to setup file logging: {e}")
+        root_logger.warning("Failed to setup file logging: %s", e)
         root_logger.warning("Continuing with console logging only")
 
     # Log the logging configuration
-    root_logger.debug(f"Logging configured: console={logging.getLevelName(console_level)}, "
-                      f"file={logging.getLevelName(file_level)} → {log_file}")
+    root_logger.debug(
+        f"Logging configured: console={logging.getLevelName(console_level)}, "
+        f"file={logging.getLevelName(file_level)} → {log_file}"
+    )
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -176,10 +172,10 @@ def silence_noisy_loggers():
     Call this after setup_logging() to reduce noise from dependencies.
     """
     # Common noisy loggers
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-    logging.getLogger('requests').setLevel(logging.WARNING)
-    logging.getLogger('werkzeug').setLevel(logging.WARNING)  # Flask
-    logging.getLogger('scapy').setLevel(logging.ERROR)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)  # Flask
+    logging.getLogger("scapy").setLevel(logging.ERROR)
 
 
 # Convenience function for quick setup
@@ -202,11 +198,7 @@ def quick_setup(verbose: bool = False, debug: bool = False):
     else:
         log_level = logging.WARNING
 
-    setup_logging(
-        log_level=log_level,
-        use_color=True,
-        detailed_file_logs=debug
-    )
+    setup_logging(log_level=log_level, use_color=True, detailed_file_logs=debug)
 
     if not verbose:
         silence_noisy_loggers()

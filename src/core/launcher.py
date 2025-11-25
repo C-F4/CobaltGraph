@@ -1,575 +1,456 @@
+#!/usr/bin/env python3
 """
-CobaltGraph Core Launcher
-Handles CLI argument parsing, initialization, and orchestration
-
-Responsibilities:
-- Parse command-line arguments
-- Show legal disclaimer
-- Load and validate configuration
-- Detect platform capabilities
-- Initialize watchfloor
-- Handle supervisor mode
-- Graceful shutdown
+CobaltGraph Unified Launcher
+Comprehensive entry point supporting multiple modes and interfaces
 """
 
 import argparse
-import sys
 import os
 import platform
 import signal
-import logging
+import subprocess
+import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
-logger = logging.getLogger(__name__)
-
-
+# ANSI color codes for terminal output
 class Colors:
-    """ANSI color codes for terminal output"""
     RED = '\033[0;31m'
     GREEN = '\033[0;32m'
     YELLOW = '\033[1;33m'
     BLUE = '\033[0;34m'
-    MAGENTA = '\033[0;35m'
     CYAN = '\033[0;36m'
+    MAGENTA = '\033[0;35m'
     BOLD = '\033[1m'
     NC = '\033[0m'  # No Color
 
 
-class Launcher:
+class CobaltGraphMain:
     """
-    Main launcher for CobaltGraph
-
-    Handles initialization, configuration, and starting the watchfloor
-    with appropriate options based on CLI arguments.
+    Main launcher class for CobaltGraph
+    Handles initialization, mode selection, and orchestration
     """
 
-    def __init__(self, args=None, config_path: Optional[str] = None):
+    VERSION = "1.0.0-MVP"
+    DISCLAIMER_FILE = Path.home() / ".cobaltgraph" / "disclaimer_accepted"
+
+    def __init__(self):
+        self.mode = None
+        self.interface = None
+        self.config_path = None
+        self.running = True
+        self.pure_terminal_instance = None
+
+        # Setup signal handlers
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals gracefully"""
+        print(f"\n{Colors.YELLOW}⏹️  Shutting down gracefully...{Colors.NC}")
+        self.running = False
+        if self.pure_terminal_instance:
+            self.pure_terminal_instance.running = False
+        sys.exit(0)
+
+    def show_banner(self):
+        """Display CobaltGraph banner"""
+        print(f"\n{Colors.BLUE}{'='*76}{Colors.NC}")
+        print(f"{Colors.BLUE}{'='*76}{Colors.NC}")
+        print(f"{Colors.BOLD}                      COBALTGRAPH GEO-SPATIAL WATCHFLOOR{Colors.NC}")
+        print(f"{Colors.CYAN}                   Passive Reconnaissance & Network Intelligence{Colors.NC}")
+        print(f"{Colors.CYAN}                              Version {self.VERSION}{Colors.NC}")
+        print(f"{Colors.BLUE}{'='*76}{Colors.NC}")
+        print(f"{Colors.BLUE}{'='*76}{Colors.NC}\n")
+
+    def show_disclaimer(self) -> bool:
         """
-        Initialize launcher with parsed arguments
-
-        Args:
-            args: argparse.Namespace from argument parser (or None for defaults)
-            config_path: Optional path to configuration file
+        Display legal disclaimer and get user acceptance
+        Returns True if accepted
         """
-        self.args = args if args is not None else argparse.Namespace()
-        self.config_path = config_path
-        self.config = None
-        self.watchfloor = None
-        self.supervisor = None
-        self.platform_info = None
+        disclaimer_text = f"""
+{Colors.YELLOW}╔══════════════════════════════════════════════════════════════════════════╗
+║                          ⚠️  LEGAL NOTICE ⚠️                              ║
+║                                                                          ║
+║  CobaltGraph performs network monitoring and traffic analysis.          ║
+║                                                                          ║
+║  UNAUTHORIZED MONITORING IS ILLEGAL. You must have explicit permission  ║
+║  to monitor any network or system you do not own or operate.            ║
+║                                                                          ║
+║  Applicable Laws:                                                        ║
+║  • Computer Fraud and Abuse Act (CFAA) - United States                  ║
+║  • Computer Misuse Act - United Kingdom                                 ║
+║  • Equivalent laws in your jurisdiction                                 ║
+║                                                                          ║
+║  By using this tool, you acknowledge:                                   ║
+║  1. You have authorization to monitor the target network                ║
+║  2. You will comply with all applicable laws and regulations            ║
+║  3. You assume full responsibility for your use of this tool            ║
+║  4. The authors are not liable for any misuse or damages                ║
+║                                                                          ║
+╚══════════════════════════════════════════════════════════════════════════╝{Colors.NC}
 
-    def show_legal_disclaimer(self) -> bool:
-        """
-        Display legal disclaimer and require acceptance
+{Colors.BOLD}Do you understand and accept these terms?{Colors.NC}
 
-        Returns:
-            bool: True if accepted, False otherwise
-        """
-        # Skip if --no-disclaimer flag set
-        if hasattr(self.args, 'no_disclaimer') and self.args.no_disclaimer:
-            print(f"{Colors.YELLOW}⚠️  Legal disclaimer skipped (--no-disclaimer flag){Colors.NC}")
-            return True
+Type 'yes' to accept and continue, or anything else to exit: """
 
-        # Show disclaimer
-        print()
-        print(f"{Colors.BLUE}{'━' * 70}{Colors.NC}")
-        print(f"{Colors.BLUE}{'  ⚖️  LEGAL DISCLAIMER':^70}{Colors.NC}")
-        print(f"{Colors.BLUE}{'━' * 70}{Colors.NC}")
-        print()
-        print(f"{Colors.YELLOW}{Colors.BOLD}IMPORTANT: READ BEFORE PROCEEDING{Colors.NC}")
-        print()
-        print(f"{Colors.RED}This tool is designed for AUTHORIZED network monitoring ONLY.{Colors.NC}")
-        print()
-        print("You may ONLY use CobaltGraph to monitor networks where you have:")
-        print(f"  • {Colors.GREEN}Explicit written authorization from the network owner{Colors.NC}")
-        print(f"  • {Colors.GREEN}Legal ownership of the network{Colors.NC}")
-        print(f"  • {Colors.GREEN}Proper consent from all parties being monitored{Colors.NC}")
-        print()
-        print(f"{Colors.RED}Unauthorized network monitoring may violate:{Colors.NC}")
-        print("  • Computer Fraud and Abuse Act (CFAA) - United States")
-        print("  • Computer Misuse Act - United Kingdom")
-        print("  • Similar laws in other jurisdictions")
-        print()
-        print(f"{Colors.YELLOW}The authors and contributors of CobaltGraph:")
-        print("  • Assume NO liability for misuse")
-        print("  • Do NOT condone illegal activity")
-        print(f"  • Are NOT responsible for your actions{Colors.NC}")
-        print()
-        print(f"{Colors.BOLD}By proceeding, you acknowledge that:{Colors.NC}")
-        print("  1. You have legal authorization to monitor this network")
-        print("  2. You understand the legal implications")
-        print("  3. You accept full responsibility for your actions")
-        print()
-
-        # Require explicit acceptance
         try:
-            response = input(f"{Colors.GREEN}Do you accept these terms? [yes/no]: {Colors.NC}").strip().lower()
+            response = input(disclaimer_text).strip().lower()
             if response in ['yes', 'y']:
-                print()
-                print(f"{Colors.GREEN}✅ Terms accepted. Proceeding with startup...{Colors.NC}")
-                print()
+                # Save acceptance
+                self.DISCLAIMER_FILE.parent.mkdir(parents=True, exist_ok=True)
+                self.DISCLAIMER_FILE.write_text(
+                    f"Accepted on {platform.node()} at {__import__('datetime').datetime.now()}\n"
+                )
+                print(f"\n{Colors.GREEN}✓ Terms accepted. Proceeding...{Colors.NC}\n")
                 return True
             else:
-                print()
-                print(f"{Colors.RED}❌ Terms not accepted. Exiting.{Colors.NC}")
+                print(f"\n{Colors.RED}✗ Terms not accepted. Exiting.{Colors.NC}\n")
                 return False
-        except (KeyboardInterrupt, EOFError):
-            print()
-            print(f"{Colors.RED}❌ Cancelled by user. Exiting.{Colors.NC}")
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n{Colors.RED}✗ Cancelled. Exiting.{Colors.NC}\n")
             return False
 
-    def detect_platform(self) -> Dict:
+    def check_disclaimer(self, skip: bool = False) -> bool:
         """
-        Detect platform capabilities (network mode, terminal support, etc.)
-
-        Returns:
-            dict: Platform capabilities
+        Check if disclaimer has been accepted
+        Returns True if can proceed
         """
-        system = platform.system()
-        uname = platform.uname()
+        if skip:
+            return True
 
-        # Detect WSL
-        is_wsl = False
-        if system == 'Linux':
+        if self.DISCLAIMER_FILE.exists():
+            return True
+
+        return self.show_disclaimer()
+
+    def detect_platform_capabilities(self) -> dict:
+        """
+        Detect platform and available capabilities
+        Returns dict with platform info
+        """
+        caps = {
+            'os': platform.system(),
+            'is_wsl': False,
+            'is_root': False,
+            'can_network_mode': False,
+            'supports_terminal_ui': True,
+            'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        }
+
+        # Check for WSL
+        if caps['os'] == 'Linux':
             try:
                 with open('/proc/version', 'r') as f:
-                    version = f.read().lower()
-                    is_wsl = 'microsoft' in version or 'wsl' in version
+                    caps['is_wsl'] = 'microsoft' in f.read().lower()
             except:
                 pass
 
-        # Detect root/admin
-        is_root = False
+        # Check for root/admin privileges
         if hasattr(os, 'geteuid'):
-            is_root = os.geteuid() == 0
-        elif system == 'Windows':
+            caps['is_root'] = os.geteuid() == 0
+        else:
+            # Windows - check if admin
             try:
                 import ctypes
-                is_root = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                caps['is_root'] = ctypes.windll.shell32.IsUserAnAdmin() != 0
             except:
-                is_root = False
+                caps['is_root'] = False
 
-        # Detect raw socket capability
-        can_raw_socket = is_root  # Simplified check
+        # Network mode requires root
+        caps['can_network_mode'] = caps['is_root']
 
-        # Detect ncurses support
-        supports_ncurses = system in ['Linux', 'Darwin']  # Unix-like systems
+        return caps
 
-        platform_info = {
-            'os': system,
-            'os_version': uname.release,
-            'is_wsl': is_wsl,
-            'is_root': is_root,
-            'can_raw_socket': can_raw_socket,
-            'supports_ncurses': supports_ncurses,
-            'supports_network_capture': can_raw_socket,
-            'python_version': platform.python_version(),
-        }
-
-        self.platform_info = platform_info
-        return platform_info
-
-    def show_platform_info(self):
-        """Display detected platform information"""
-        if not self.platform_info:
-            self.detect_platform()
-
-        info = self.platform_info
-
-        print(f"{Colors.CYAN}🔍 Platform Detection:{Colors.NC}")
-        print(f"  OS: {info['os']}")
-        if info['is_wsl']:
-            print(f"  Environment: WSL2")
-        print(f"  Python: {info['python_version']}")
-
-        # Capabilities
-        print()
-        print(f"{Colors.CYAN}Capabilities:{Colors.NC}")
-
-        if info['is_root']:
-            print(f"  ✅ Root/Admin access: Available")
-        else:
-            print(f"  ⚠️  Root/Admin access: Not available (some features limited)")
-
-        if info['supports_network_capture']:
-            print(f"  ✅ Network-wide capture: Supported")
-        else:
-            print(f"  ⚠️  Network-wide capture: Not supported (use device-only mode)")
-
-        if info['supports_ncurses']:
-            print(f"  ✅ Terminal UI: Supported")
-        else:
-            print(f"  ⚠️  Terminal UI: Not supported on {info['os']}")
-
+    def select_mode_interactive(self, capabilities: dict) -> str:
+        """
+        Interactive mode selection
+        Returns selected mode (device/network)
+        """
+        print(f"\n{Colors.CYAN}🔍 Platform Detection:{Colors.NC}")
+        print(f"   OS: {capabilities['os']}")
+        print(f"   Python: {capabilities['python_version']}")
+        print(f"   Root/Admin: {'Yes' if capabilities['is_root'] else 'No'}")
+        if capabilities['is_wsl']:
+            print(f"   Environment: WSL (Windows Subsystem for Linux)")
         print()
 
-    def select_mode(self, requested: Optional[str] = None) -> str:
-        """
-        Select monitoring mode (network/device/auto)
+        print(f"{Colors.BOLD}Select Monitoring Mode:{Colors.NC}\n")
+        print(f"  {Colors.GREEN}1){Colors.NC} Device-Only Mode (recommended)")
+        print(f"     • Monitors connections from this device only")
+        print(f"     • No special privileges required")
+        print(f"     • Lower resource usage\n")
 
-        Args:
-            requested: Requested mode (or None for interactive)
+        if capabilities['can_network_mode']:
+            print(f"  {Colors.GREEN}2){Colors.NC} Network-Wide Mode")
+            print(f"     • Monitors entire network traffic")
+            print(f"     • Requires root/sudo privileges")
+            print(f"     • Higher resource usage\n")
+        else:
+            print(f"  {Colors.YELLOW}2){Colors.NC} Network-Wide Mode {Colors.RED}[UNAVAILABLE]{Colors.NC}")
+            print(f"     • Requires root privileges")
+            print(f"     • Run with: sudo python3 start.py\n")
 
-        Returns:
-            str: Selected mode ('network' or 'device')
-        """
-        # If mode explicitly requested via CLI
-        if requested and requested in ['network', 'device']:
-            return requested
+        try:
+            choice = input(f"{Colors.BOLD}Enter choice (1-2):{Colors.NC} ").strip()
 
-        # Auto-detect
-        if requested == 'auto' or requested is None:
-            if self.platform_info and self.platform_info['supports_network_capture']:
-                # If running interactively without explicit mode, ask
-                if not requested:
-                    print(f"{Colors.CYAN}📡 Monitoring Mode:{Colors.NC}")
-                    print("  1. Network-wide (full capture - requires root)")
-                    print("  2. Device-only (no root required)")
-                    print("  3. Auto-detect (recommended)")
-                    print()
-
-                    try:
-                        choice = input(f"{Colors.GREEN}Choose mode [1-3]: {Colors.NC}").strip()
-                        if choice == '1':
-                            return 'network'
-                        elif choice == '2':
-                            return 'device'
-                        elif choice == '3' or choice == '':
-                            return 'network' if self.platform_info['is_root'] else 'device'
-                    except (KeyboardInterrupt, EOFError):
-                        print()
-                        return 'device'
-
-                # Auto-detect based on capabilities
-                return 'network' if self.platform_info['is_root'] else 'device'
+            if choice == '1':
+                return 'device'
+            elif choice == '2' and capabilities['can_network_mode']:
+                return 'network'
+            elif choice == '2':
+                print(f"{Colors.RED}✗ Network mode requires root. Falling back to device mode.{Colors.NC}")
+                return 'device'
             else:
+                print(f"{Colors.YELLOW}Invalid choice. Using device mode.{Colors.NC}")
                 return 'device'
 
-        return 'device'  # Safe default
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n{Colors.YELLOW}Cancelled. Using device mode.{Colors.NC}")
+            return 'device'
 
-    def select_interface(self, requested: Optional[str] = None) -> str:
+    def select_interface_interactive(self) -> str:
         """
-        Select UI interface (web/terminal)
-
-        Args:
-            requested: Requested interface (or None for interactive)
-
-        Returns:
-            str: Selected interface ('web' or 'terminal')
+        Interface selection
+        Returns 'terminal' or 'enhanced'
         """
-        # If interface explicitly requested
-        if requested and requested in ['web', 'terminal']:
-            # Check if terminal is supported
-            if requested == 'terminal' and not self.platform_info.get('supports_ncurses'):
-                print(f"{Colors.YELLOW}⚠️  Terminal UI not supported on {self.platform_info['os']}, using web{Colors.NC}")
-                return 'web'
-            return requested
+        print(f"\n{Colors.BOLD}Select Terminal Interface:{Colors.NC}\n")
+        print(f"  {Colors.GREEN}1){Colors.NC} Enhanced Terminal UI (recommended)")
+        print(f"     • Beautiful interactive interface with Textual")
+        print(f"     • Live data tables, charts, and sparklines")
+        print(f"     • Color-coded threat levels")
+        print(f"     • Keyboard navigation\n")
 
-        # Interactive selection
-        if not requested:
-            print(f"{Colors.CYAN}🖥️  Interface:{Colors.NC}")
-            print("  1. Web Dashboard (port 8080)")
-            if self.platform_info.get('supports_ncurses'):
-                print("  2. Terminal UI (experimental)")
-                print()
+        print(f"  {Colors.GREEN}2){Colors.NC} Classic Terminal (simple text output)")
+        print(f"     • Simple text logging")
+        print(f"     • Minimal dependencies")
+        print(f"     • Maximum compatibility\n")
 
-                try:
-                    choice = input(f"{Colors.GREEN}Choose interface [1-2]: {Colors.NC}").strip()
-                    if choice == '2':
-                        return 'terminal'
-                except (KeyboardInterrupt, EOFError):
-                    print()
-
-            else:
-                print("  (Terminal UI not supported on this platform)")
-                print()
-
-        return 'web'  # Default
-
-    def load_configuration(self):
-        """
-        Load and validate configuration files
-
-        Returns:
-            Config: Loaded configuration object
-        """
         try:
-            from src.core.config import load_config
+            choice = input(f"{Colors.BOLD}Enter choice (1-2):{Colors.NC} ").strip()
 
-            config_path = self.config_path or 'config'
-            self.config = load_config(config_dir=config_path, verbose=False)
+            if choice == '1':
+                return 'enhanced'
+            elif choice == '2':
+                return 'terminal'
+            else:
+                print(f"{Colors.YELLOW}Invalid choice. Using enhanced terminal.{Colors.NC}")
+                return 'enhanced'
 
-            logger.info(f"✅ Configuration loaded from {config_path}")
-            return self.config
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n{Colors.YELLOW}Cancelled. Using enhanced terminal.{Colors.NC}")
+            return 'enhanced'
 
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to load configuration: {e}")
-            logger.warning("⚠️  Using default configuration")
-            return {}
-
-    def start(self):
+    def run_health_check(self) -> bool:
         """
-        Main entry point - start CobaltGraph
-
-        Orchestrates:
-        1. Legal disclaimer
-        2. Platform detection
-        3. Configuration loading
-        4. Mode selection
-        5. Interface selection
-        6. Watchfloor initialization
-        7. Supervisor (if requested)
+        Run system health check
+        Returns True if system is healthy
         """
+        from src.core.system_check import run_health_check
+
+        print(f"\n{Colors.CYAN}Running system health check...{Colors.NC}\n")
+        return run_health_check(mode=self.mode or 'device')
+
+    def launch_enhanced_terminal(self):
+        """Launch Enhanced Terminal UI with Textual"""
+        from src.ui.enhanced_terminal import EnhancedTerminalUI
+
+        print(f"\n{Colors.GREEN}🚀 Launching CobaltGraph Enhanced Terminal UI...{Colors.NC}")
+        print(f"{Colors.CYAN}Mode: {self.mode}{Colors.NC}")
+        print(f"{Colors.CYAN}Config: {self.config_path or 'default'}{Colors.NC}")
+        print(f"{Colors.CYAN}Features: Live tables, charts, interactive navigation{Colors.NC}\n")
+
+        # Determine database path
+        db_path = "database/cobaltgraph.db"
+        if self.config_path:
+            db_path = str(Path(self.config_path).parent.parent / "database" / "cobaltgraph.db")
+
+        # Launch Enhanced Terminal UI
         try:
-            # Show banner
-            print()
-            print(f"{Colors.BLUE}{'━' * 70}{Colors.NC}")
-            print(f"{Colors.BLUE}{'  CobaltGraph Geo-Spatial Watchfloor':^70}{Colors.NC}")
-            print(f"{Colors.BLUE}{'━' * 70}{Colors.NC}")
-            print()
-            print(f"{Colors.CYAN}Passive Reconnaissance & Network Intelligence System{Colors.NC}")
-            print(f"{Colors.CYAN}Version: 1.0.0-MVP{Colors.NC}")
-            print()
-
-            # Step 1: Legal disclaimer
-            if not self.show_legal_disclaimer():
-                return False
-
-            # Step 2: Platform detection
-            self.detect_platform()
-            self.show_platform_info()
-
-            # Step 3: System Initialization & Verification
-            print(f"{Colors.CYAN}🔧 System Initialization & Verification{Colors.NC}")
-            print()
-
-            from src.core.initialization import initialize_cobaltgraph
-
-            init_success, initializer = initialize_cobaltgraph(verbose=True)
-
-            if not init_success:
-                print(f"{Colors.RED}❌ System initialization failed{Colors.NC}")
-                print(f"{Colors.RED}   Cannot start CobaltGraph{Colors.NC}")
-                return False
-
-            # Step 4: Load configuration
-            print(f"{Colors.CYAN}📋 Loading additional configuration...{Colors.NC}")
-            self.load_configuration()
-            print()
-
-            # Step 5: Select mode
-            mode = self.select_mode(getattr(self.args, 'mode', None))
-            print(f"  Mode: {Colors.GREEN}{mode}{Colors.NC}")
-
-            # Step 6: Select interface
-            interface = self.select_interface(getattr(self.args, 'interface', None))
-            print(f"  Interface: {Colors.GREEN}{interface}{Colors.NC}")
-            print()
-
-            # Step 7: Dashboard configuration
-            dashboard_config = initializer.get_dashboard_config()
-            if dashboard_config:
-                print(f"  Dashboard: {Colors.GREEN}{dashboard_config['type']}{Colors.NC}")
-                port = getattr(self.args, 'port', dashboard_config.get('port', 5000))
-                print(f"  Port: {Colors.GREEN}{port}{Colors.NC}")
-            else:
-                print(f"  Dashboard: {Colors.YELLOW}Disabled{Colors.NC}")
-                port = getattr(self.args, 'port', 8080)
-
-            print()
-
-            # Step 8: Start watchfloor
-            print(f"{Colors.GREEN}🚀 Starting CobaltGraph...{Colors.NC}")
-
-            if interface == 'web':
-                print(f"  Dashboard URL: {Colors.CYAN}http://localhost:{port}{Colors.NC}")
-
-            print()
-            print(f"{Colors.YELLOW}Press Ctrl+C to stop{Colors.NC}")
-            print()
-
-            # Step 9: Start CobaltGraph Main (Full Observatory)
-            print(f"{Colors.CYAN}🎯 Using CobaltGraph Main (Full Observatory){Colors.NC}")
-            print(f"{Colors.CYAN}🔬 Multi-Agent Consensus Threat Intelligence{Colors.NC}")
-
-            from src.core.main import CobaltGraphMain
-
-            # Pass dashboard config to main
-            config = self.config or {}
-            config['dashboard_port'] = port
-            config['dashboard_type'] = dashboard_config['type'] if dashboard_config else 'legacy'
-
-            self.watchfloor = CobaltGraphMain(
-                mode=mode,
-                config=config
-            )
-
-            # Step 7: Supervisor mode (if requested)
-            if hasattr(self.args, 'supervised') and self.args.supervised:
-                print(f"{Colors.CYAN}🤖 Starting with supervisor (auto-restart enabled){Colors.NC}")
-                from src.core.supervisor import Supervisor
-                self.supervisor = Supervisor(
-                    target_func=self.watchfloor.run,
-                    max_restarts=10,
-                    restart_delay=5
-                )
-                self.supervisor.start()
-            else:
-                self.watchfloor.run()
-
-            return True
-
+            ui = EnhancedTerminalUI(database_path=db_path)
+            ui.run()
+            return 0
         except KeyboardInterrupt:
-            print()
-            print(f"{Colors.YELLOW}⏹️  Shutdown requested by user{Colors.NC}")
-            self.shutdown()
-            return True
-
+            print(f"\n{Colors.YELLOW}⏹️  Stopped by user{Colors.NC}")
+            return 130
         except Exception as e:
-            print()
-            print(f"{Colors.RED}❌ Fatal error: {e}{Colors.NC}")
-            logger.exception("Fatal error during startup")
-            self.shutdown()
-            return False
+            print(f"\n{Colors.RED}✗ Error: {e}{Colors.NC}")
+            print(f"{Colors.YELLOW}Falling back to classic terminal mode...{Colors.NC}\n")
+            return self.launch_terminal_interface()
 
-    def shutdown(self):
-        """Graceful shutdown"""
-        print()
-        print(f"{Colors.CYAN}🛑 Shutting down CobaltGraph...{Colors.NC}")
+    def launch_terminal_interface(self):
+        """Launch classic pure terminal interface"""
+        from src.core.main_terminal_pure import main as terminal_main
 
-        if self.watchfloor:
-            try:
-                self.watchfloor.shutdown()
-                print(f"{Colors.GREEN}✅ Watchfloor stopped{Colors.NC}")
-            except Exception as e:
-                print(f"{Colors.RED}⚠️  Error stopping watchfloor: {e}{Colors.NC}")
+        print(f"\n{Colors.GREEN}🚀 Launching CobaltGraph in Classic Terminal Mode...{Colors.NC}")
+        print(f"{Colors.CYAN}Mode: {self.mode}{Colors.NC}")
+        print(f"{Colors.CYAN}Config: {self.config_path or 'default'}{Colors.NC}\n")
 
-        if self.supervisor:
-            try:
-                self.supervisor.stop()
-                print(f"{Colors.GREEN}✅ Supervisor stopped{Colors.NC}")
-            except Exception as e:
-                print(f"{Colors.RED}⚠️  Error stopping supervisor: {e}{Colors.NC}")
+        # Build arguments for terminal launcher
+        sys.argv = ['cobaltgraph']
+        if self.config_path:
+            sys.argv.extend(['--config', str(self.config_path)])
+        if self.mode:
+            sys.argv.extend(['--mode', self.mode])
 
-        print()
-        print(f"{Colors.GREEN}👋 CobaltGraph shutdown complete{Colors.NC}")
-        print()
+        # Launch terminal interface
+        try:
+            return terminal_main()
+        except KeyboardInterrupt:
+            print(f"\n{Colors.YELLOW}⏹️  Stopped by user{Colors.NC}")
+            return 130
 
 
-def create_argument_parser() -> argparse.ArgumentParser:
-    """
-    Create and configure argument parser for CobaltGraph
-
-    Returns:
-        argparse.ArgumentParser: Configured parser
-    """
-    parser = argparse.ArgumentParser(
-        description='CobaltGraph - Geo-Spatial Network Intelligence Platform',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+    def parse_arguments(self):
+        """Parse command-line arguments"""
+        parser = argparse.ArgumentParser(
+            description="CobaltGraph - Geo-Spatial Network Intelligence Platform",
+            epilog="""
 Examples:
   python start.py                           # Interactive mode
-  python start.py --mode network            # Network-wide capture
-  python start.py --mode device             # Device-only mode
-  python start.py --interface terminal      # Terminal UI
-  python start.py --supervised              # Auto-restart on crash
-  python start.py --no-disclaimer           # Skip legal disclaimer (accept terms)
+  python start.py --mode device             # Device-only monitoring
+  sudo python start.py --mode network       # Network-wide monitoring
+  python start.py --interface terminal      # Force terminal interface
+  python start.py --health                  # Run health check
+  python start.py --show-disclaimer         # Display legal terms
 
-For network-wide monitoring (requires root/admin):
-  Linux/WSL:  sudo python3 start.py
-  macOS:      sudo python3 start.py
-  Windows:    Run as Administrator
+For network-wide monitoring, root/sudo is required.
+            """,
+            formatter_class=argparse.RawDescriptionHelpFormatter
+        )
 
-Dashboard will be available at: http://localhost:8080
+        parser.add_argument(
+            '--mode',
+            choices=['device', 'network', 'auto'],
+            default='auto',
+            help='Monitoring mode (default: auto-detect based on privileges)'
+        )
+
+        parser.add_argument(
+            '--interface',
+            choices=['enhanced', 'terminal'],
+            default='enhanced',
+            help='User interface type: enhanced (interactive TUI) or terminal (classic text)'
+        )
+
+        parser.add_argument(
+            '--config',
+            type=str,
+            help='Path to configuration directory'
+        )
+
+        parser.add_argument(
+            '--health',
+            action='store_true',
+            help='Run system health check and exit'
+        )
+
+        parser.add_argument(
+            '--show-disclaimer',
+            action='store_true',
+            help='Display legal disclaimer and exit'
+        )
+
+        parser.add_argument(
+            '--no-disclaimer',
+            action='store_true',
+            help='Skip disclaimer (use only for automated/CI environments)'
+        )
+
+        parser.add_argument(
+            '--version',
+            action='version',
+            version=f'CobaltGraph {self.VERSION}'
+        )
+
+        return parser.parse_args()
+
+    def main(self) -> int:
         """
-    )
+        Main entry point
+        Returns exit code
+        """
+        # Parse arguments
+        args = self.parse_arguments()
 
-    parser.add_argument(
-        '--mode',
-        choices=['network', 'device', 'auto'],
-        default='auto',
-        help='Monitoring mode (default: auto)'
-    )
+        # Handle special modes
+        if args.show_disclaimer:
+            self.show_disclaimer()
+            return 0
 
-    parser.add_argument(
-        '--interface',
-        choices=['web', 'terminal'],
-        default='web',
-        help='User interface (default: web)'
-    )
+        if args.health:
+            self.mode = args.mode if args.mode != 'auto' else 'device'
+            healthy = self.run_health_check()
+            return 0 if healthy else 1
 
-    parser.add_argument(
-        '--port',
-        type=int,
-        default=8080,
-        help='Dashboard port (default: 8080)'
-    )
+        # Check dependencies FIRST (before banner/disclaimer)
+        from src.core.system_check import check_dependencies_only
+        if not check_dependencies_only():
+            return 1
 
-    parser.add_argument(
-        '--config',
-        help='Path to configuration directory (default: config/)'
-    )
+        # Show banner
+        self.show_banner()
 
-    parser.add_argument(
-        '--supervised',
-        action='store_true',
-        help='Run in supervised mode (auto-restart on crash)'
-    )
+        # Check disclaimer acceptance
+        if not self.check_disclaimer(skip=args.no_disclaimer):
+            return 1
 
-    parser.add_argument(
-        '--no-disclaimer',
-        action='store_true',
-        help='Skip legal disclaimer (you accept all terms)'
-    )
+        # Detect platform capabilities
+        capabilities = self.detect_platform_capabilities()
 
-    parser.add_argument(
-        '--show-disclaimer',
-        action='store_true',
-        help='Show legal disclaimer and exit'
-    )
+        # Determine mode
+        if args.mode == 'auto':
+            # Interactive mode selection
+            self.mode = self.select_mode_interactive(capabilities)
+        elif args.mode == 'network' and not capabilities['can_network_mode']:
+            print(f"{Colors.RED}✗ Network mode requires root privileges{Colors.NC}")
+            print(f"{Colors.CYAN}Run with: sudo python3 start.py --mode network{Colors.NC}\n")
+            return 1
+        else:
+            self.mode = args.mode
 
-    parser.add_argument(
-        '--health',
-        action='store_true',
-        help='Run health check and exit'
-    )
+        # Determine interface
+        if args.interface:
+            self.interface = args.interface
+        else:
+            # Interactive interface selection
+            self.interface = self.select_interface_interactive()
 
-    parser.add_argument(
-        '--version',
-        action='version',
-        version='CobaltGraph 1.0.0-MVP'
-    )
+        # Set config path
+        self.config_path = args.config
 
-    return parser
+        # Run health check before launch
+        print(f"\n{Colors.CYAN}Running pre-flight checks...{Colors.NC}")
+        if not self.run_health_check():
+            print(f"\n{Colors.RED}✗ System health check failed{Colors.NC}")
+            print(f"{Colors.YELLOW}Fix the issues above and try again.{Colors.NC}\n")
+            return 1
+
+        # Launch appropriate interface
+        print(f"\n{Colors.GREEN}✓ All systems ready{Colors.NC}\n")
+
+        if self.interface == 'enhanced':
+            return self.launch_enhanced_terminal()
+        else:
+            return self.launch_terminal_interface()
 
 
-def main():
-    """Entry point for start.py"""
-    parser = create_argument_parser()
-    args = parser.parse_args()
-
-    # Handle --show-disclaimer
-    if args.show_disclaimer:
-        launcher = Launcher(args)
-        launcher.show_legal_disclaimer()
-        return 0
-
-    # Handle --health
-    if args.health:
-        print("🏥 CobaltGraph Health Check")
-        print("=" * 50)
-        # TODO: Implement health check
-        print("✅ System: OK")
-        print("✅ Configuration: OK")
-        print("✅ Dependencies: OK")
-        return 0
-
-    # Normal startup
-    launcher = Launcher(args, config_path=args.config)
-    success = launcher.start()
-
-    return 0 if success else 1
+def main() -> int:
+    """
+    Entry point for launcher
+    Returns exit code
+    """
+    try:
+        launcher = CobaltGraphMain()
+        return launcher.main()
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}⏹️  Cancelled by user{Colors.NC}")
+        return 130
+    except Exception as e:
+        print(f"\n{Colors.RED}✗ Fatal error: {e}{Colors.NC}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == '__main__':

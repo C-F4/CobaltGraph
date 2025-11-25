@@ -1,0 +1,55 @@
+# CobaltGraph - Minimal Installation
+# Essential packages for Enhanced Terminal UI
+#
+# Installation: pip3 install -r requirements-minimal.txt
+#
+# This installs only the bare minimum needed to run CobaltGraph
+# with the Enhanced Terminal UI.
+
+# ============================================================================
+# ESSENTIAL PACKAGES ONLY
+# ============================================================================
+
+# HTTP requests for threat intelligence APIs (VirusTotal, AbuseIPDB)
+requests>=2.32.0
+
+# Beautiful terminal formatting and tables
+rich>=13.9.0
+
+# Modern TUI framework for Enhanced Terminal UI
+textual>=0.86.0
+
+# ============================================================================
+# OPTIONAL BUT RECOMMENDED
+# ============================================================================
+#
+# For network packet capture (requires root):
+#   pip3 install scapy>=2.5.0
+#
+# For IP geolocation:
+#   pip3 install geoip2>=4.8.0 maxminddb>=2.6.0
+#
+# For data processing:
+#   pip3 install numpy>=1.26.0 pandas>=2.2.0
+#
+# For full installation:
+#   pip3 install -r requirements.txt
+#
+# ============================================================================
+# WHAT YOU GET
+# ============================================================================
+#
+# With this minimal install, you can run:
+#   - Enhanced Terminal UI (full interactive interface)
+#   - Device-only monitoring (no root required)
+#   - Threat intelligence (VirusTotal, AbuseIPDB APIs)
+#   - Real-time consensus scoring
+#   - Live data tables and charts
+#   - SQLite database (built-in to Python)
+#
+# What's NOT included (install full requirements.txt for these):
+#   - Network-wide monitoring (needs scapy)
+#   - IP geolocation (needs geoip2/maxminddb)
+#   - Advanced data processing (needs numpy/pandas)
+#
+# ============================================================================

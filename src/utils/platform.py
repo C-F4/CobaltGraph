@@ -10,10 +10,10 @@ Detects:
 """
 
 import os
-import sys
 import platform
-import subprocess
+import sys
 from typing import Dict
+
 
 def get_platform_info() -> Dict[str, any]:
     """
@@ -23,13 +23,13 @@ def get_platform_info() -> Dict[str, any]:
         Dict with platform details
     """
     return {
-        'os': get_os_type(),
-        'is_wsl': is_wsl(),
-        'is_root': is_root(),
-        'has_raw_sockets': can_create_raw_socket(),
-        'has_tty': has_terminal(),
-        'python_version': sys.version,
-        'platform': platform.platform(),
+        "os": get_os_type(),
+        "is_wsl": is_wsl(),
+        "is_root": is_root(),
+        "has_raw_sockets": can_create_raw_socket(),
+        "has_tty": has_terminal(),
+        "python_version": sys.version,
+        "platform": platform.platform(),
     }
 
 
@@ -51,8 +51,8 @@ def is_wsl() -> bool:
         True if WSL, False otherwise
     """
     try:
-        with open('/proc/version', 'r') as f:
-            return 'microsoft' in f.read().lower()
+        with open("/proc/version", "r", encoding="utf-8") as f:
+            return "microsoft" in f.read().lower()
     except:
         return False
 
@@ -64,10 +64,11 @@ def is_root() -> bool:
     Returns:
         True if root/admin, False otherwise
     """
-    if get_os_type() == 'win32':
+    if get_os_type() == "win32":
         # Windows admin check
         try:
             import ctypes
+
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except:
             return False
@@ -85,6 +86,7 @@ def can_create_raw_socket() -> bool:
     """
     try:
         import socket
+
         # Try to create AF_PACKET raw socket (Linux)
         s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
         s.close()
@@ -110,7 +112,7 @@ def get_terminal_type() -> str:
     Returns:
         Terminal type string (e.g., 'xterm-256color')
     """
-    return os.environ.get('TERM', 'dumb')
+    return os.environ.get("TERM", "dumb")
 
 
 def supports_ncurses() -> bool:
@@ -124,12 +126,11 @@ def supports_ncurses() -> bool:
         return False
 
     term = get_terminal_type()
-    if term in ('dumb', ''):
+    if term in ("dumb", ""):
         return False
 
     # Try to import curses
     try:
-        import curses
         return True
     except ImportError:
         return False

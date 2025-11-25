@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""
+CobaltGraph - Revolutionary Blue-Team Defense System
+Pure Terminal | Multi-Agent Consensus | Cryptographically Verified
+
+NO web server. NO HTTP. NO ports.
+Just terminal, consensus, and exports.
+
+Giving defenders a cyber chance.
+"""
+
+if __name__ == '__main__':
+    from src.core.main_terminal_pure import main
+    main()
