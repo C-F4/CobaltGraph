@@ -1,0 +1,81 @@
+# CobaltGraph - Network Security Platform
+# Terminal-Only Mode with Enhanced UI (clean-prototype branch)
+#
+# Installation: pip3 install -r requirements.txt
+# Minimal Install: pip3 install -r requirements-minimal.txt
+
+# ============================================================================
+# CORE DEPENDENCIES (Required)
+# ============================================================================
+
+# HTTP requests for threat intelligence APIs
+requests>=2.32.0
+
+# Network packet capture (requires root for network-wide mode)
+# Note: scapy can be skipped for device-only mode
+scapy>=2.5.0
+
+# ============================================================================
+# ENHANCED TERMINAL UI (Recommended)
+# ============================================================================
+
+# Beautiful terminal formatting, tables, and panels
+rich>=13.9.0
+
+# Modern TUI framework with reactive widgets
+textual>=0.86.0
+
+# ============================================================================
+# GEOLOCATION (Optional but Recommended)
+# ============================================================================
+
+# MaxMind GeoIP2 database reader (requires database file)
+geoip2>=4.8.0
+
+# Fast IP geolocation lookups
+maxminddb>=2.6.0
+
+# ============================================================================
+# DATA PROCESSING (Optional)
+# ============================================================================
+
+# High-performance arrays for consensus calculations
+# Using 1.26.x for Python 3.8+ compatibility
+numpy>=1.26.0,<2.0.0
+
+# Efficient data analysis for export processing
+pandas>=2.2.0
+
+# ============================================================================
+# DEVELOPMENT TOOLS (Optional)
+# ============================================================================
+
+# Testing framework
+pytest>=8.3.0
+
+# Code formatter
+black>=24.10.0
+
+# Code linter
+pylint>=3.3.0
+
+# ============================================================================
+# NOTES
+# ============================================================================
+#
+# Python Version: 3.8+ required, 3.10+ recommended
+# SQLite: Built-in to Python (no install needed)
+#
+# For minimal installation (terminal UI only):
+#   pip3 install -r requirements-minimal.txt
+#
+# For development:
+#   pip3 install -r requirements.txt
+#
+# Removed packages (archived dashboard only):
+#   - dearpygui (GPU GUI framework)
+#   - panda3d (3D rendering)
+#   - pillow (image processing)
+#   - python-geoip (deprecated)
+#
+# ============================================================================
