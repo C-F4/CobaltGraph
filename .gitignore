@@ -1,4 +1,5 @@
 # SUARON .gitignore
+.gitignore
 
 # Runtime Data
 data/*.db
