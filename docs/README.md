@@ -1,8 +1,8 @@
 # CobaltGraph
 
-**Revolutionary Blue-Team Network Intelligence System**
+**Prototype Blue-Team Network Intelligence System**
 
-Multi-Agent Consensus | Byzantine Fault Tolerant | Cryptographically Verified | Pure Terminal
+Pure Terminal
 
 ---
 
