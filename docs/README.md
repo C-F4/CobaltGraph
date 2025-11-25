@@ -95,16 +95,11 @@ python3 start.py --mode device --interface web --port 8080
 ⏱️  Execution Time: 0.009 seconds
 🎯 Performance: <2ms per assessment
 💾 Memory: <2MB overhead
-🔒 Security: 100% signature verification
-🛡️  Byzantine Tolerance: Proven (f=1, n=3)
 ```
 
 **Run tests yourself:**
 ```bash
 python3 tests/run_unit_tests.py
-```
-
-See [docs/consensus-transformation/EMPIRICAL_EVIDENCE.md](docs/consensus-transformation/EMPIRICAL_EVIDENCE.md) for detailed results.
 
 ---
 
@@ -197,24 +192,6 @@ tests/
     └── export/                 # Export system tests (7 tests)
         └── test_consensus_exporter.py
 ```
-
----
-
-## 📖 Documentation
-
-All documentation consolidated in `docs/consensus-transformation/`:
-
-| Document | Description |
-|----------|-------------|
-| [README.md](docs/consensus-transformation/README.md) | Complete transformation overview |
-| [QUICK_START.md](docs/consensus-transformation/QUICK_START.md) | 60-second deployment guide |
-| [EMPIRICAL_EVIDENCE.md](docs/consensus-transformation/EMPIRICAL_EVIDENCE.md) | Detailed test results (97.4% success) |
-| [DEPLOYMENT_READY.md](docs/consensus-transformation/DEPLOYMENT_READY.md) | Production readiness checklist |
-| [SECURITY_AUDIT.md](docs/consensus-transformation/SECURITY_AUDIT.md) | Full security audit report |
-| [TRANSFORMATION_COMPLETE.md](docs/consensus-transformation/TRANSFORMATION_COMPLETE.md) | Architecture deep dive |
-| [CLEAN_PROTOTYPE_PLAN.md](docs/consensus-transformation/CLEAN_PROTOTYPE_PLAN.md) | Code reduction strategy |
-| [CRYPTOGRAPHIC_DIRECTORY_GUIDE.md](CRYPTOGRAPHIC_DIRECTORY_GUIDE.md) | Industry-standard guide (336 words) |
-
 ---
 
 ## 🔐 Security
@@ -231,8 +208,6 @@ All documentation consolidated in `docs/consensus-transformation/`:
 - ✅ **100% OWASP Compliance**
 - ✅ **No Hardcoded Credentials**
 - ✅ **No Web Attack Surface** (clean-prototype branch)
-
-See [docs/consensus-transformation/SECURITY_AUDIT.md](docs/consensus-transformation/SECURITY_AUDIT.md) for full report.
 
 ---
 
@@ -344,7 +319,7 @@ This is a blue-team defense tool designed to give defenders a cyber chance. Cont
 
 ## 📜 License
 
-[Specify your license here]
+MIT License
 
 ---
 
@@ -359,15 +334,6 @@ Built with the mission of giving defenders a real cyber chance against sophistic
 - VirusTotal API
 - AbuseIPDB API
 - ip-api.com (free geolocation)
-
----
-
-## 📞 Support
-
-- **Documentation**: See `docs/consensus-transformation/`
-- **Issues**: [GitHub Issues](https://github.com/C-F4/CobaltGraph/issues)
-- **Quick Start**: [docs/consensus-transformation/QUICK_START.md](docs/consensus-transformation/QUICK_START.md)
-- **Security**: [docs/consensus-transformation/SECURITY_AUDIT.md](docs/consensus-transformation/SECURITY_AUDIT.md)
 
 ---
 
