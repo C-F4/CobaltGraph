@@ -389,5 +389,3 @@ Built with the mission of giving defenders a real cyber chance against sophistic
 ---
 
 **Ready to deploy. Ready to give defenders a cyber chance. 🛡️**
-
-**Happy hunting! 🎯🔬**
