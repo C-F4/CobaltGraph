@@ -1,5 +1,5 @@
 # CobaltGraph - Network Security Platform
-# Terminal-Only Mode with Enhanced UI (clean-prototype branch)
+# Terminal-Only Mode with Multi-Dimensional Visualization
 #
 # Installation: pip3 install -r requirements.txt
 # Minimal Install: pip3 install -r requirements-minimal.txt
@@ -9,61 +9,82 @@
 # ============================================================================
 
 # HTTP requests for threat intelligence APIs
-requests>=2.32.0
+requests>=2.32.3
 
 # Network packet capture (requires root for network-wide mode)
 # Note: scapy can be skipped for device-only mode
-scapy>=2.5.0
+scapy>=2.6.1
 
 # ============================================================================
 # ENHANCED TERMINAL UI (Recommended)
 # ============================================================================
 
 # Beautiful terminal formatting, tables, and panels
-rich>=13.9.0
+rich>=13.9.4
 
 # Modern TUI framework with reactive widgets
-textual>=0.86.0
+textual>=1.0.0
 
 # ============================================================================
 # GEOLOCATION (Optional but Recommended)
 # ============================================================================
 
 # MaxMind GeoIP2 database reader (requires database file)
-geoip2>=4.8.0
+geoip2>=4.8.1
 
 # Fast IP geolocation lookups
-maxminddb>=2.6.0
+maxminddb>=2.6.2
 
 # ============================================================================
-# DATA PROCESSING (Optional)
+# DATA PROCESSING & ANALYTICS (Required for full functionality)
 # ============================================================================
 
-# High-performance arrays for consensus calculations
-# Using 1.26.x for Python 3.8+ compatibility
-numpy>=1.26.0,<2.0.0
+# High-performance arrays for consensus calculations and threat vectors
+numpy>=2.1.3
 
 # Efficient data analysis for export processing
-pandas>=2.2.0
+pandas>=2.2.3
+
+# Scientific computing for statistical analysis
+scipy>=1.14.1
+
+# Network graph analysis for connection topology
+networkx>=3.4.2
+
+# Visualization and plotting
+matplotlib>=3.9.2
+
+# ============================================================================
+# MULTI-DIMENSIONAL VISUALIZATION ENGINE
+# ============================================================================
+
+# Terminal graphics and Unicode support
+wcwidth>=0.2.13
+
+# Color manipulation for threat visualization
+colorama>=0.4.6
 
 # ============================================================================
 # DEVELOPMENT TOOLS (Optional)
 # ============================================================================
 
 # Testing framework
-pytest>=8.3.0
+pytest>=8.3.4
 
 # Code formatter
 black>=24.10.0
 
 # Code linter
-pylint>=3.3.0
+pylint>=3.3.2
+
+# Import sorting
+isort>=5.13.2
 
 # ============================================================================
 # NOTES
 # ============================================================================
 #
-# Python Version: 3.8+ required, 3.10+ recommended
+# Python Version: 3.10+ required, 3.12+ recommended
 # SQLite: Built-in to Python (no install needed)
 #
 # For minimal installation (terminal UI only):
@@ -72,10 +93,12 @@ pylint>=3.3.0
 # For development:
 #   pip3 install -r requirements.txt
 #
-# Removed packages (archived dashboard only):
-#   - dearpygui (GPU GUI framework)
-#   - panda3d (3D rendering)
-#   - pillow (image processing)
-#   - python-geoip (deprecated)
+# Visualization Features:
+#   - N-dimensional threat vector projection
+#   - Heatmap rendering
+#   - Organization triage with trust scoring
+#   - Hop count network topology visualization
+#   - Time-series anomaly detection
+#   - Parallel coordinate threat analysis
 #
 # ============================================================================
