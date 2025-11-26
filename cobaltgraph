@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-CobaltGraph - Revolutionary Blue-Team Defense System
-Pure Terminal | Multi-Agent Consensus | Cryptographically Verified
+CobaltGraph 4D Reconnaissance Mode
+Unified Threat Monitoring & Network Intelligence
 
-NO web server. NO HTTP. NO ports.
-Just terminal, consensus, and exports.
-
-Giving defenders a cyber chance.
+Features:
+- Adaptive data density based on threat levels
+- Combined globe visualization (heat zones + connection arcs)
+- Real-time alert feed for blue team monitoring
+- Full security telemetry: ASN, Org, Trust scores, IOCs
 """
 
 if __name__ == '__main__':
-    from src.core.main_terminal_pure import main
-    main()
+    from src.core.launcher import main
+    import sys
+    sys.exit(main())

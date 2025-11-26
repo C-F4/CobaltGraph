@@ -126,6 +126,11 @@ class SystemChecker:
             ("scapy", "Network packet capture (for network-wide mode)"),
             ("rich", "Beautiful terminal formatting"),
             ("textual", "Enhanced Terminal UI framework"),
+            ("numpy", "High-performance arrays for consensus calculations"),
+            ("pandas", "Data analysis for export processing"),
+            ("scipy", "Scientific computing for statistical analysis"),
+            ("networkx", "Network graph analysis for connection topology"),
+            ("matplotlib", "Visualization and plotting"),
         ]
 
         for module_name, description in optional_deps:
@@ -149,7 +154,7 @@ class SystemChecker:
         """Check CobaltGraph components"""
         components = [
             ("src.core.config", "Configuration System"),
-            ("src.core.main_terminal_pure", "Terminal Interface"),
+            ("src.ui.dashboard", "Dashboard"),
             ("src.capture.device_monitor", "Device Monitor"),
             ("src.storage.database", "Database Layer"),
             ("src.services.geo_lookup", "Geolocation Service"),
@@ -275,6 +280,23 @@ class SystemChecker:
                 name="Consensus System",
                 passed=False,
                 message="Consensus system not available (degraded mode)",
+                critical=False
+            ))
+
+        # Check ASN/Organization lookup service
+        try:
+            from src.services.asn_lookup import ASNLookup, TTLAnalyzer
+            self.results.append(CheckResult(
+                name="ASN Lookup Service",
+                passed=True,
+                message="ASN/Organization lookup with TTL hop detection available ✓",
+                critical=False
+            ))
+        except ImportError:
+            self.results.append(CheckResult(
+                name="ASN Lookup Service",
+                passed=False,
+                message="ASN lookup service not available (reduced intelligence)",
                 critical=False
             ))
 
