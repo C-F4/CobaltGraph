@@ -150,22 +150,34 @@ class VisualizationManager:
 
 class BaseDashboard(App):
     """
-    Abstract base dashboard class for CobaltGraph
-
-    Features:
-    - Unified database access with caching via DataManager
-    - Component orchestration via VisualizationManager
-    - Mode detection (device vs network)
-    - Real-time pipeline event handling
-    - Consistent refresh intervals (2s data, 1s UI)
+    Unified Base Dashboard for CobaltGraph
+    Implements comprehensive threat monitoring model for device and network modes
 
     Architecture:
-    - Uses DataManager for all database access
-    - Uses VisualizationManager for component coordination
-    - Delegates rendering to mode-specific implementations
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Header                                                          │
+    ├──────────────────────┬──────────────────────┬──────────────────┤
+    │ Threat Posture (TL)  │ Temporal Trends      │ Geo + Alerts (TR)│
+    │ Current, Baseline    │ 60-min history       │ Heatmap, Counts  │
+    │ Active, Monitored    │ Volume, Anomalies    │ Alert Summary    │
+    ├──────────────────────┼──────────────────────┼──────────────────┤
+    │ Organization Intel   │ Connection Table     │ Threat Globe     │
+    │ Risk Matrix          │ PRIMARY DATA FOCUS   │ ASCII Rendering  │
+    │ Top Orgs by Risk     │ Full enrichment      │ Heatmap + Trails │
+    │ Click to filter      │ Color-coded threats  │ Geo-spatial      │
+    └──────────────────────┴──────────────────────┴──────────────────┘
+    │ Status Bar | Keyboard Shortcuts                            │
+    └─────────────────────────────────────────────────────────────────┘
+
+    Features:
+    - Unified layout for device and network modes
+    - Real-time data updates via DataManager + VisualizationManager
+    - Mode-aware component display (device focuses on personal, network on topology)
+    - Comprehensive threat visualization with multiple dimensions
+    - Interactive filtering and inspection
     """
 
-    # CSS styling
+    # CSS styling - Unified 6-cell grid layout
     CSS = """
     Screen {
         layout: vertical;
@@ -185,6 +197,66 @@ class BaseDashboard(App):
         background: $surface;
         color: $text;
         border: solid $primary;
+    }
+
+    #main_grid {
+        height: 1fr;
+        width: 100%;
+        layout: vertical;
+    }
+
+    #top_row {
+        height: 50%;
+        width: 100%;
+        layout: horizontal;
+    }
+
+    #bottom_row {
+        height: 50%;
+        width: 100%;
+        layout: horizontal;
+    }
+
+    #top_left {
+        width: 20%;
+        height: 100%;
+        border: solid $primary;
+        padding: 1;
+    }
+
+    #top_center {
+        width: 50%;
+        height: 100%;
+        border: solid $primary;
+        padding: 1;
+    }
+
+    #top_right {
+        width: 30%;
+        height: 100%;
+        border: solid $primary;
+        padding: 1;
+    }
+
+    #bottom_left {
+        width: 20%;
+        height: 100%;
+        border: solid $primary;
+        padding: 1;
+    }
+
+    #bottom_center {
+        width: 50%;
+        height: 100%;
+        border: solid $primary;
+        padding: 1;
+    }
+
+    #bottom_right {
+        width: 30%;
+        height: 100%;
+        border: solid $primary;
+        padding: 1;
     }
     """
 
@@ -230,10 +302,27 @@ class BaseDashboard(App):
 
     def compose(self) -> ComposeResult:
         """
-        Layout method - must be implemented by subclasses
-        Should yield Header, Footer, and mode-specific widgets
+        Unified grid layout implementing the comprehensive threat monitoring model
+        6-cell grid (2 rows x 3 columns) with Header and Footer
         """
+        from textual.widgets import Static
+
         yield Header()
+
+        # Main content grid with 2 rows
+        with Vertical(id="main_grid"):
+            # Top row (50% height): Threat Context + Trends + Alerts
+            with Horizontal(id="top_row"):
+                yield Static(id="top_left")      # Threat Posture (20%)
+                yield Static(id="top_center")    # Temporal Trends (50%)
+                yield Static(id="top_right")     # Geographic + Alerts (30%)
+
+            # Bottom row (50% height): Organization + Connections + Globe
+            with Horizontal(id="bottom_row"):
+                yield Static(id="bottom_left")   # Organization Intelligence (20%)
+                yield Static(id="bottom_center") # Connection Table (50%)
+                yield Static(id="bottom_right")  # Threat Globe (30%)
+
         yield Footer()
 
     def on_mount(self) -> None:
