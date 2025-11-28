@@ -37,6 +37,12 @@ os.chdir(PROJECT_ROOT)
 def main():
     """Main entry point"""
     try:
+        # Show tactical boot sequence
+        from src.ui.boot_sequence import boot_sequence
+
+        if not boot_sequence():
+            return 1
+
         # Import unified launcher from src
         from src.core.launcher import main as launcher_main
 
