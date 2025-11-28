@@ -1,48 +1,26 @@
 #!/usr/bin/env python3
 """
 CobaltGraph Device Mode Dashboard
-Personal security focused - "What am I connecting to?"
+Personal device security focused - "What am I connecting to?"
+
+Uses unified DataManager and VisualizationManager from BaseDashboard.
+Components register with viz_manager for automatic data updates.
 
 Layout:
-┌──────────────┬────────────────────────────────┬──────────────────────┐
-│              │   THREAT GLOBE (Geographic)    │ Threat Posture       │
-│              │   Real-time connection mapper  │ Current: 0.32        │
-│ Left Panels  │   Spinning visualization       │ 24h Base: 0.28       │
-│              │                                │ Trend: ↑ 14%         │
-│ Threat Data  │ ╔══════════════════════════╗   │                      │
-│ Stats        │ ║    ThreatGlobe Widget    ║   │ Active Threats       │
-│ Filters      │ ║                          ║   │ Monitored IPs        │
-│              │ ║  (Geo-spatial mapping)   ║   │ Anomalies            │
-│              │ ║  Rotating coordinates    ║   │                      │
-│              │ ╚══════════════════════════╝   ├──────────────────────┤
-├──────────────┼────────────────────────────────┤ Recent Alerts        │
-│              │                                │ [No alerts]          │
-│              │ Connection Intelligence Table  │                      │
-│              │ Time|IP|Port|Protocol|Score|Org├──────────────────────┤
-│              │ Detailed enrichment display    │ 60-Min Trends        │
-│              │ [F]ilter [I]nspect [E]xport   │ Threat sparkline     │
-│              │                                │                      │
-│              │ Showing high-value analysis    │                      │
-│              │                                │                      │
-└──────────────┴────────────────────────────────┴──────────────────────┘
-
-Features:
-- ThreatGlobe visualization: Top-right geographic threat mapping
-- Connection table: Primary data focus with full enrichment
-- Left sidebar: Threat posture, stats, filter controls
-- Right sidebar: Alerts, trends, historical data
-- Responsive layout with proper spacing for future enhancements
-- Smart column management for readability
+├─ Header
+├─ Main Content
+│  ├─ Top (30%): ThreatGlobePanel + ThreatPosturePanel
+│  └─ Bottom (70%): SmartConnectionTable + (AlertsPanel + TrendsPanel)
+└─ Footer
 """
 
 import logging
 from collections import deque
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from rich.text import Text
 from rich.panel import Panel
-from rich.table import Table as RichTable
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, Container
@@ -487,6 +465,9 @@ class DeviceDashboard(DeviceDashboardBase):
         self.trends_panel = None
         self.threat_history = deque(maxlen=60)
 
+        # Register components with visualization manager
+        self.viz_manager.register_component("connections", self._on_connections_update)
+
     def compose(self) -> ComposeResult:
         """Create optimized layout with globe visualization"""
         yield Header()
@@ -517,54 +498,52 @@ class DeviceDashboard(DeviceDashboardBase):
     def on_mount(self) -> None:
         """Initialize after mount"""
         super().on_mount()
-        self.title = "CobaltGraph - Device Mode (Threat Intelligence)"
-        self._update_panels()
+        self.title = "CobaltGraph - Device Mode"
 
-    def _on_live_connection(self, conn_dict: Dict) -> None:
-        """Handle live connection events from pipeline"""
-        threat = conn_dict.get('threat_score', 0) or 0
-        self.threat_history.append(threat)
-
-        # Generate alert for high-threat connections
-        if threat >= 0.7:
-            ip = conn_dict.get('dst_ip', 'Unknown')
-            org = conn_dict.get('dst_org', 'Unknown')
-            if self.alerts_panel:
-                self.alerts_panel.add_alert(f"[red]{ip}[/red] → {org}", "high")
-
-        self._update_panels()
-
-    def _refresh_data(self) -> None:
-        """Refresh data from database"""
-        super()._refresh_data()
-        self._update_panels()
-
-    def _update_panels(self) -> None:
-        """Update all dashboard panels with current data"""
-        if not self.is_connected:
+    def _on_connections_update(self, connections: List[Dict]) -> None:
+        """Called by viz_manager when connections update"""
+        if not connections:
             return
 
         # Update connection table
-        if self.connection_table and self._connection_cache:
-            self.connection_table.update_connections(self._connection_cache)
+        if self.connection_table:
+            self.connection_table.update_connections(connections)
 
         # Update threat globe
-        if self.threat_globe and self._connection_cache:
-            self.threat_globe.update_with_connections(self._connection_cache)
+        if self.threat_globe:
+            self.threat_globe.update_with_connections(connections)
 
-        # Calculate and update threat posture
-        threat_data = self._calculate_threat_posture()
+        # Update threats and posture
+        threats = [c.get('threat_score', 0) or 0 for c in connections]
+        if threats:
+            current_threat = sum(threats) / len(threats)
+            self.threat_history.append(current_threat)
+
+        # Generate alerts for high-threat connections
+        for conn in connections:
+            threat = conn.get('threat_score', 0) or 0
+            if threat >= 0.7 and self.alerts_panel:
+                ip = conn.get('dst_ip', 'Unknown')
+                org = conn.get('dst_org', 'Unknown')
+                self.alerts_panel.add_alert(f"[red]{ip}[/red] → {org}", "high")
+
+        # Update panels
+        threat_data = self._calculate_threat_posture(connections)
         if self.threat_posture_panel:
             self.threat_posture_panel.threat_data = threat_data
 
-        # Update trends
         if self.trends_panel and self.threat_history:
             for threat in list(self.threat_history)[-1:]:
                 self.trends_panel.update_history(threat)
 
-    def _calculate_threat_posture(self) -> Dict:
-        """Calculate threat posture metrics"""
-        if not self._connection_cache:
+    def _on_live_connection(self, conn_dict: Dict) -> None:
+        """Handle live connection from pipeline"""
+        # Delegated to _on_connections_update via viz_manager
+        pass
+
+    def _calculate_threat_posture(self, connections: List[Dict]) -> Dict:
+        """Calculate threat posture metrics from connections"""
+        if not connections:
             return {
                 'current_threat': 0.0,
                 'baseline_threat': 0.0,
@@ -573,20 +552,17 @@ class DeviceDashboard(DeviceDashboardBase):
                 'total_connections': 0,
             }
 
-        threats = [c.get('threat_score', 0) or 0 for c in self._connection_cache]
+        threats = [c.get('threat_score', 0) or 0 for c in connections]
         current = sum(threats) / len(threats) if threats else 0
         high_count = sum(1 for t in threats if t >= 0.7)
 
-        # Calculate trend
+        # Calculate trend from history
         if len(self.threat_history) >= 2:
-            recent_avg = sum(list(self.threat_history)[-10:]) / min(10, len(self.threat_history))
-            old_avg = sum(list(self.threat_history)[:10]) / min(10, len(self.threat_history))
-            if recent_avg > old_avg:
-                trend = '↑'
-            elif recent_avg < old_avg:
-                trend = '↓'
-            else:
-                trend = '→'
+            recent = list(self.threat_history)[-10:]
+            old = list(self.threat_history)[:10]
+            recent_avg = sum(recent) / len(recent) if recent else 0
+            old_avg = sum(old) / len(old) if old else 0
+            trend = '↑' if recent_avg > old_avg else ('↓' if recent_avg < old_avg else '→')
         else:
             trend = '→'
 
