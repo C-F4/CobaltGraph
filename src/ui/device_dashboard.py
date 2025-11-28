@@ -240,7 +240,7 @@ class ThreatPosturePanel(Static):
     ThreatPosturePanel {
         height: 100%;
         width: 100%;
-        border: solid $cyan;
+        border: solid $primary;
         padding: 1;
     }
     """
@@ -297,7 +297,7 @@ class AlertsPanel(Static):
     AlertsPanel {
         height: 100%;
         width: 100%;
-        border: solid $warning;
+        border: solid $accent;
         padding: 1;
     }
     """
