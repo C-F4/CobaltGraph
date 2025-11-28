@@ -98,41 +98,27 @@ fi
 # Clear screen for clean experience
 clear
 
-# Show banner
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}                    CobaltGraph Geo-Spatial Watchfloor                      ${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+# Show pre-boot system info (minimal)
+echo -e "${CYAN}${BOLD}┌─────────────────────────────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}${BOLD}│         COBALTGRAPH TACTICAL INITIALIZATION                     │${NC}"
+echo -e "${CYAN}${BOLD}└─────────────────────────────────────────────────────────────────┘${NC}"
 echo ""
-echo -e "${CYAN}Passive Reconnaissance & Network Intelligence System${NC}"
-echo -e "${CYAN}Version: 1.0.0-MVP${NC}"
-echo ""
+echo -e "${CYAN}System Information:${NC}"
+echo -e "  Python: ${GREEN}$PYTHON_VERSION${NC} | Platform: ${GREEN}$(uname -s)${NC}"
 
-# Quick system info
-echo -e "${CYAN}🔍 System Information:${NC}"
-echo -e "  Python: ${GREEN}$PYTHON_VERSION${NC}"
-echo -e "  Platform: ${GREEN}$(uname -s)${NC}"
 if [ "$USING_VENV" = true ]; then
-    echo -e "  Environment: ${GREEN}venv activated${NC}"
+    echo -e "  Env: ${GREEN}venv${NC} | Privileges: $([ "$EUID" -eq 0 ] && echo -e "${GREEN}root${NC}" || echo -e "${YELLOW}user${NC}")"
 else
-    echo -e "  Environment: ${YELLOW}system Python (no venv found)${NC}"
-fi
-
-# Check if running as root
-if [ "$EUID" -eq 0 ]; then
-    echo -e "  Privileges: ${GREEN}root/sudo (network-wide capture available)${NC}"
-else
-    echo -e "  Privileges: ${YELLOW}user (device-only mode)${NC}"
-    echo -e "  ${CYAN}ℹ️  For network-wide capture: sudo ./start.sh${NC}"
+    echo -e "  Env: ${YELLOW}system${NC} | Privileges: $([ "$EUID" -eq 0 ] && echo -e "${GREEN}root${NC}" || echo -e "${YELLOW}user${NC}")"
 fi
 
 echo ""
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}Starting CobaltGraph in interactive mode...${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}Launching tactical boot sequence...${NC}"
 echo ""
 
 # Give user a moment to read
 sleep 1
 
 # Launch start.py in interactive mode (no arguments)
+# The Python boot_sequence will handle all the fancy ASCII art
 exec "$VENV_PYTHON" start.py
