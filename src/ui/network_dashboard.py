@@ -44,13 +44,18 @@ from rich.panel import Panel
 from rich.table import Table as RichTable
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, Container
 from textual.widgets import Header, Footer, DataTable, Static
 
 try:
     from src.ui.base_dashboard import NetworkDashboardBase
 except ImportError:
     from base_dashboard import NetworkDashboardBase
+
+try:
+    from src.ui.viz_engine import ThreatGlobe
+except ImportError:
+    ThreatGlobe = None
 
 logger = logging.getLogger(__name__)
 
@@ -295,30 +300,230 @@ class ConnectionTableNetwork(Static):
 
 
 
-class SimpleNetworkThreatPanel(Static):
-    """Simple threat posture for network"""
+class NetworkThreatGlobePanel(Static):
+    """
+    Threat Globe Visualization for Network Mode
+    Shows real-time geographic threat mapping with spinning animation
+    """
+
+    DEFAULT_CSS = """
+    NetworkThreatGlobePanel {
+        height: 100%;
+        width: 100%;
+        border: solid $primary;
+        padding: 0;
+    }
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.globe = None
+
+    def render(self):
+        """Render threat globe visualization"""
+        if ThreatGlobe is None:
+            return Panel(
+                "[yellow]ThreatGlobe requires viz_engine module[/yellow]",
+                title="[bold cyan]Network Threat Globe[/bold cyan]",
+                border_style="cyan"
+            )
+
+        try:
+            if self.globe is None:
+                self.globe = ThreatGlobe(width=50, height=12)
+            return self.globe.render()
+        except Exception as e:
+            logger.debug(f"Globe render error: {e}")
+            return Panel(
+                f"[red]Globe initialization: {str(e)[:50]}[/red]",
+                title="[bold cyan]Network Threat Globe[/bold cyan]",
+                border_style="cyan"
+            )
+
+    def update_with_connections(self, connections: List[Dict]) -> None:
+        """Update globe with new connection data"""
+        if self.globe and connections:
+            try:
+                for conn in connections[:20]:  # Limit updates
+                    lat = conn.get('dst_lat', 0) or 0
+                    lon = conn.get('dst_lon', 0) or 0
+                    threat = conn.get('threat_score', 0) or 0
+                    self.globe.add_connection(lat, lon, threat)
+            except Exception as e:
+                logger.debug(f"Globe update error: {e}")
+
+
+class NetworkThreatPosturePanel(Static):
+    """
+    Network-Wide Threat Posture Status Panel
+    Shows aggregate threat assessment across all devices
+    """
+
+    DEFAULT_CSS = """
+    NetworkThreatPosturePanel {
+        height: 100%;
+        width: 100%;
+        border: solid $primary;
+        padding: 1;
+    }
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.threat_data = {}
 
     def render(self):
+        """Render network threat posture information"""
+        current = self.threat_data.get('current_threat', 0)
+        baseline = self.threat_data.get('baseline_threat', 0)
+        active_threats = self.threat_data.get('active_threats', 0)
+        monitored_ips = self.threat_data.get('monitored_ips', 0)
+        anomaly_count = self.threat_data.get('anomaly_count', 0)
+
+        # Color based on threat level
+        if current >= 0.7:
+            current_style = "[bold red]"
+        elif current >= 0.3:
+            current_style = "[bold yellow]"
+        else:
+            current_style = "[green]"
+
+        content = f"""{current_style}Network Threat[/]
+{current:.2f} ({(current*100):.0f}%)
+
+[cyan]24h Baseline[/]
+{baseline:.2f}
+
+[red]Active Threats[/]
+{active_threats}
+
+[magenta]Monitored IPs[/]
+{monitored_ips}
+
+[yellow]Anomalies[/]
+{anomaly_count}
+"""
+
         return Panel(
-            "Network Threat Level\n[Loading...]",
-            title="[bold cyan]Network Posture[/bold cyan]",
+            content,
+            title="[bold cyan]Network Status[/bold cyan]",
             border_style="cyan"
         )
 
 
+class NetworkTrendsPanel(Static):
+    """
+    Network Threat Trends Visualization
+    Shows 60-minute threat score history across network
+    """
+
+    DEFAULT_CSS = """
+    NetworkTrendsPanel {
+        height: 100%;
+        width: 100%;
+        border: solid $accent;
+        padding: 1;
+    }
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.history = deque(maxlen=60)
+
+    def render(self):
+        """Render threat trends"""
+        if not self.history:
+            return Panel(
+                "[dim]Loading trends...[/dim]",
+                title="[bold green]60-Min Trends[/bold green]",
+                border_style="green"
+            )
+
+        # Create sparkline-style visualization
+        max_val = max(self.history) if self.history else 1.0
+        sparkline_chars = "▁▂▃▄▅▆▇█"
+
+        sparkline = ""
+        for val in self.history:
+            idx = int((val / max(max_val, 0.01)) * (len(sparkline_chars) - 1))
+            sparkline += sparkline_chars[min(idx, len(sparkline_chars) - 1)]
+
+        avg_threat = sum(self.history) / len(self.history) if self.history else 0
+        peak = max(self.history) if self.history else 0
+
+        trend_text = f"""[dim]Avg: {avg_threat:.2f} | Peak: {peak:.2f}[/dim]
+
+{sparkline}
+
+[cyan]Last 60 minutes[/cyan]
+"""
+
+        return Panel(
+            trend_text,
+            title="[bold green]60-Min Network Trends[/bold green]",
+            border_style="green"
+        )
+
+    def update_history(self, threat_score: float) -> None:
+        """Add new threat score to history"""
+        self.history.append(threat_score)
+
+
 class SimpleOrgPanel(Static):
-    """Simple organization intelligence"""
+    """Organization intelligence with top organizations"""
+
+    DEFAULT_CSS = """
+    SimpleOrgPanel {
+        height: 100%;
+        width: 100%;
+        border: solid $accent;
+        padding: 1;
+    }
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.org_data = {}
 
     def render(self):
+        """Render organization intelligence"""
+        org_dict = self.org_data.get('organizations', {})
+
+        if not org_dict:
+            return Panel(
+                "[dim]No organization data[/dim]",
+                title="[bold magenta]Organization Intel[/bold magenta]",
+                border_style="magenta"
+            )
+
+        lines = []
+        # Sort by connection count
+        sorted_orgs = sorted(
+            org_dict.items(),
+            key=lambda x: x[1].get('count', 0),
+            reverse=True
+        )
+
+        for org_name, org_info in sorted_orgs[:5]:  # Top 5 orgs
+            count = org_info.get('count', 0)
+            threat_avg = org_info.get('threat_sum', 0) / max(count, 1)
+            trust = org_info.get('trust_sum', 0) / max(count, 1)
+
+            # Color by threat
+            if threat_avg >= 0.7:
+                color = "bold red"
+            elif threat_avg >= 0.3:
+                color = "bold yellow"
+            else:
+                color = "green"
+
+            org_short = org_name[:20] if org_name else "Unknown"
+            lines.append(f"[{color}]{org_short}[/{color}] ({count}x) {threat_avg:.2f}")
+
+        content = "\n".join(lines) if lines else "[dim]No organizations[/dim]"
         return Panel(
-            "Top Organizations\n[Loading...]",
-            title="[bold magenta]Organization Intel[/bold magenta]",
+            content,
+            title="[bold magenta]Top Organizations[/bold magenta]",
             border_style="magenta"
         )
 
@@ -345,90 +550,122 @@ class NetworkDashboard(NetworkDashboardBase):
     }
 
     #main_content {
+        layout: vertical;
+        height: 1fr;
+    }
+
+    #top_section {
         layout: horizontal;
-        height: 1fr;
+        height: 35%;
+        width: 1fr;
     }
 
-    #left_section {
-        width: 20%;
+    #globe_container {
+        width: 60%;
+        height: 100%;
+    }
+
+    #top_right {
+        width: 40%;
+        height: 100%;
         layout: vertical;
-        height: 1fr;
     }
 
-    #center_section {
-        width: 30%;
-        height: 1fr;
+    #threat_container {
+        height: 50%;
+        width: 100%;
     }
 
-    #right_section {
-        width: 50%;
+    #trends_container {
+        height: 50%;
+        width: 100%;
+    }
+
+    #bottom_section {
+        layout: horizontal;
+        height: 65%;
+        width: 1fr;
+    }
+
+    #left_panels {
+        width: 25%;
+        height: 100%;
         layout: vertical;
-        height: 1fr;
     }
 
     #topology_panel {
         height: 50%;
+        width: 100%;
     }
 
-    #threat_panel {
+    #org_panel {
         height: 50%;
+        width: 100%;
     }
 
-    #globe_section {
-        height: 35%;
+    #center_panel {
+        width: 35%;
+        height: 100%;
+    }
+
+    #right_panels {
+        width: 40%;
+        height: 100%;
+        layout: vertical;
     }
 
     #devices_section {
-        height: 35%;
-    }
-
-    #org_section {
-        height: 30%;
+        height: 100%;
+        width: 100%;
     }
     """
 
     def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None, **kwargs):
         super().__init__(db_path=db_path, pipeline=pipeline)
-        self.topology_panel = None
+        self.threat_globe = None
         self.threat_posture_panel = None
+        self.trends_panel = None
+        self.topology_panel = None
         self.connection_table = None
         self.devices_panel = None
         self.org_panel = None
         self.threat_history = deque(maxlen=60)  # 60-minute trend
 
     def compose(self) -> ComposeResult:
-        """Create layout"""
+        """Create optimized network mode layout with globe and threat visualization"""
         yield Header()
 
-        with Horizontal(id="main_content"):
-            # Left section: Topology + Threat (20%)
-            with Vertical(id="left_section"):
-                self.topology_panel = NetworkTopologyPanel(id="topology_panel")
-                yield self.topology_panel
+        with Container(id="main_content"):
+            # Top section: ThreatGlobe (60%) + Threat Status (40%)
+            with Horizontal(id="top_section"):
+                self.threat_globe = NetworkThreatGlobePanel(id="globe_container")
+                yield self.threat_globe
 
-                self.threat_posture_panel = SimpleNetworkThreatPanel(id="threat_panel")
-                yield self.threat_posture_panel
+                with Vertical(id="top_right"):
+                    self.threat_posture_panel = NetworkThreatPosturePanel(id="threat_container")
+                    yield self.threat_posture_panel
 
-            # Center section: Connections (30%)
-            self.connection_table = ConnectionTableNetwork(id="center_section")
-            yield self.connection_table
+                    self.trends_panel = NetworkTrendsPanel(id="trends_container")
+                    yield self.trends_panel
 
-            # Right section: Globe + Devices + Org (50%)
-            with Vertical(id="right_section"):
-                # Placeholder for globe
-                globe_placeholder = Static(
-                    "[dim]Globe visualization[/dim]\n(5-10 FPS optimized)\n\nPress [G] to toggle",
-                    id="globe_section"
-                )
-                yield globe_placeholder
+            # Bottom section: Topology + Connections + Devices
+            with Horizontal(id="bottom_section"):
+                # Left: Topology + Organization (25%)
+                with Vertical(id="left_panels"):
+                    self.topology_panel = NetworkTopologyPanel(id="topology_panel")
+                    yield self.topology_panel
 
-                # Devices panel
-                self.devices_panel = DeviceDiscoveryPanel(id="devices_section")
-                yield self.devices_panel
+                    self.org_panel = SimpleOrgPanel(id="org_panel")
+                    yield self.org_panel
 
-                # Org intelligence
-                self.org_panel = SimpleOrgPanel(id="org_section")
-                yield self.org_panel
+                # Center: Connection Table (35%)
+                self.connection_table = ConnectionTableNetwork(id="center_panel")
+                yield self.connection_table
+
+                # Right: Device Discovery (40%)
+                with Vertical(id="right_panels"):
+                    self.devices_panel = DeviceDiscoveryPanel(id="devices_section")
+                    yield self.devices_panel
 
         yield Footer()
 
@@ -454,6 +691,10 @@ class NetworkDashboard(NetworkDashboardBase):
         if self.connection_table and self._connection_cache:
             self.connection_table.update_connections(self._connection_cache)
 
+        # Update threat globe with connection data
+        if self.threat_globe and self._connection_cache:
+            self.threat_globe.update_with_connections(self._connection_cache)
+
         # Update network topology
         if self.topology_panel:
             self.topology_panel.update_flows(
@@ -471,6 +712,11 @@ class NetworkDashboard(NetworkDashboardBase):
         # Update threat posture panel
         if self.threat_posture_panel:
             self.threat_posture_panel.threat_data = threat_data
+
+        # Update trends panel
+        if self.trends_panel and self.threat_history:
+            for threat in list(self.threat_history)[-1:]:
+                self.trends_panel.update_history(threat)
 
         # Update organization intelligence
         org_data = self._calculate_organization_data()
