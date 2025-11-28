@@ -628,16 +628,22 @@ class ConnectionTableWidget(Static):
 
     def _populate_table(self, connections: List[Dict]) -> None:
         """Populate table with connection data"""
+        import logging
+        logger = logging.getLogger(__name__)
         try:
             table = self.query_one(DataTable)
             table.clear()
 
+            rows_added = 0
             for conn in connections[:60]:
                 row = self._build_row(conn)
                 if row:
                     table.add_row(*row)
-        except Exception:
-            pass
+                    rows_added += 1
+
+            logger.debug(f"[ConnectionTable] Populated table: {rows_added} rows added from {len(connections)} connections")
+        except Exception as e:
+            logger.error(f"[ConnectionTable] Error populating table: {e}")
 
     def _build_row(self, conn: Dict) -> Optional[List]:
         """Build a table row for a connection"""
@@ -701,8 +707,14 @@ class ConnectionTableWidget(Static):
 
     def watch_connections(self, connections: List[Dict]) -> None:
         """Update table when connections change"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"[ConnectionTable] watch_connections fired: {len(connections)} connections, initialized={self._columns_initialized}")
         if self._columns_initialized:
+            logger.debug(f"[ConnectionTable] Populating table with {len(connections)} rows")
             self._populate_table(connections)
+        else:
+            logger.debug(f"[ConnectionTable] Columns not initialized yet, skipping populate")
 
     def watch_density(self, density: ThreatDensity) -> None:
         """Handle density changes from external sources"""
@@ -928,38 +940,73 @@ class AlertTickerWidget(Static):
         return ticker
 
 
-class LogoWidget(Static):
-    """CobaltGraph ASCII Logo - Static display"""
+class AnomalyEventWidget(Static):
+    """Anomaly and Outlier Detection Events"""
+
+    anomalies = reactive(list)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._anomalies: List[Dict] = []
+
+    def watch_anomalies(self, anomalies: List[Dict]) -> None:
+        """Update when anomalies change"""
+        self._anomalies = anomalies
+        self.refresh()
+
+    def add_anomaly(self, anomaly_type: str, message: str, severity: str = "HIGH", ip: str = "", score: float = 0.0):
+        """Add an anomaly event"""
+        event = {
+            'timestamp': time.time(),
+            'type': anomaly_type,
+            'message': message,
+            'severity': severity,
+            'ip': ip,
+            'score': score,
+        }
+        self._anomalies.append(event)
+        # Keep only last 20 anomalies
+        if len(self._anomalies) > 20:
+            self._anomalies = self._anomalies[-20:]
+        self.refresh()
 
     def render(self) -> Panel:
-        logo = Text()
-        # Clean ASCII art logo
-        logo.append("┌─────────────────────┐\n", style="cyan")
-        logo.append("│", style="cyan")
-        logo.append("   C O B A L T       ", style="bold cyan")
-        logo.append("│\n", style="cyan")
-        logo.append("│", style="cyan")
-        logo.append("     G R A P H       ", style="bold blue")
-        logo.append("│\n", style="cyan")
-        logo.append("├─────────────────────┤\n", style="cyan")
-        logo.append("│", style="cyan")
-        logo.append("  ◉ ", style="cyan")
-        logo.append("4D Recon", style="bold white")
-        logo.append("       │\n", style="cyan")
-        logo.append("│", style="cyan")
-        logo.append("  ◆ ", style="yellow")
-        logo.append("Threat Intel", style="dim")
-        logo.append("    │\n", style="cyan")
-        logo.append("│", style="cyan")
-        logo.append("  ▲ ", style="green")
-        logo.append("Network Mon", style="dim")
-        logo.append("     │\n", style="cyan")
-        logo.append("└─────────────────────┘", style="cyan")
+        """Render anomaly events"""
+        if not self._anomalies:
+            return Panel(
+                "[dim]No anomalies detected[/dim]",
+                title="[bold magenta]◆ Anomalies[/bold magenta]",
+                border_style="magenta"
+            )
+
+        lines = []
+        for event in reversed(self._anomalies[-10:]):  # Show last 10
+            ts = event.get('timestamp', 0)
+            time_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "--:--:--"
+            anom_type = event.get('type', 'UNKNOWN')[:10]
+            severity = event.get('severity', 'HIGH')
+            message = event.get('message', '')[:30]
+            ip = event.get('ip', '')[-12:] if event.get('ip') else ''
+            score = event.get('score', 0.0)
+
+            # Color by severity
+            if severity == 'CRITICAL':
+                icon = "!"
+                style = "bold red"
+            elif severity == 'HIGH':
+                icon = "~"
+                style = "yellow"
+            else:
+                icon = "*"
+                style = "dim yellow"
+
+            score_str = f"{score:.2f}" if score > 0 else "-"
+            lines.append(f"[{style}]{icon}[/{style}] [{time_str}] {anom_type:10s} {message:30s} {ip:12s} [{score_str}]")
 
         return Panel(
-            logo,
-            title="",
-            border_style="dim cyan",
+            "\n".join(lines),
+            title="[bold magenta]◆ Anomalies & Outliers[/bold magenta]",
+            border_style="magenta"
         )
 
 
@@ -1078,16 +1125,16 @@ class CobaltGraphDashboard(App):
                         yield OrganizationTriageWidget(id="org-triage")
                         yield HopTopologyWidget(id="hop-topology")
 
-                # Right column - Globe, alerts/stats, log/logo
+                # Right column - Globe, alerts/stats, anomalies/log
                 with Vertical(id="right-column"):
                     yield EnhancedGlobeWidget(width=50, height=18, id="globe-widget")
                     with Horizontal(id="middle-right"):
                         yield AlertFeedWidget(id="alert-widget")
                         yield ThreatMatrixWidget(id="threat-matrix")
                     with Horizontal(id="bottom-right"):
+                        yield AnomalyEventWidget(id="anomaly-widget")
                         yield EventLogWidget(id="log-widget")
                         yield SystemStatsWidget(id="system-stats")
-                        yield LogoWidget(id="logo-widget")
 
         # Alert ticker at bottom
         yield AlertTickerWidget(id="alert-ticker")
@@ -1097,14 +1144,54 @@ class CobaltGraphDashboard(App):
         self.title = "CobaltGraph Dashboard"
         self.sub_title = "Unified Threat Monitoring"
 
+        import logging
+        logger = logging.getLogger(__name__)
+
         # Register event log callback for UI events
         try:
             from src.utils.logging_config import UIEventHandler, UIEventPoster
             log_widget = self.query_one("#log-widget", EventLogWidget)
-            UIEventHandler.register_callback(log_widget.add_event)
-            UIEventPoster.system("Dashboard initialized", "INFO")
-        except Exception:
-            pass  # UI logging is optional
+            anomaly_widget = self.query_one("#anomaly-widget", AnomalyEventWidget)
+
+            # Create wrapper to properly handle events
+            def event_callback(event):
+                """Route events to appropriate widgets"""
+                try:
+                    # Event is a dict with: timestamp, type, message, severity, metadata
+                    event_type = event.get('type', 'UNKNOWN')
+                    message = event.get('message', '')
+                    severity = event.get('severity', 'INFO')
+                    metadata = event.get('metadata', {})
+
+                    # Route anomaly events to anomaly widget
+                    if event_type == 'ANOMALY':
+                        anomaly_type = metadata.get('anomaly_type', 'UNKNOWN')
+                        dst_ip = metadata.get('dst_ip', '')
+                        anomaly_score = metadata.get('anomaly_score', 0.0)
+                        try:
+                            anomaly_widget.add_anomaly(anomaly_type, message, severity, dst_ip, anomaly_score)
+                        except Exception as e:
+                            logger.debug(f"Error adding anomaly to widget: {e}")
+                    else:
+                        # Route all other events to log widget
+                        log_widget.add_event(event_type, message, severity, metadata)
+                except Exception as e:
+                    logger.debug(f"Error processing event: {e}")
+
+            # Register the callback
+            UIEventHandler.register_callback(event_callback)
+
+            # Add initial event
+            try:
+                UIEventPoster.system("Dashboard initialized", "INFO")
+                logger.info("[Dashboard] UIEventHandler integrated successfully")
+            except Exception as e:
+                logger.warning(f"[Dashboard] Failed to post initial event: {e}")
+
+        except ImportError as e:
+            logger.warning(f"[Dashboard] UIEventHandler not available: {e}")
+        except Exception as e:
+            logger.warning(f"[Dashboard] Failed to integrate UIEventHandler: {e}")
 
         self.set_interval(1.0, self.update_data)
         self.set_interval(0.25, self.update_animations)
@@ -1240,44 +1327,77 @@ class CobaltGraphDashboard(App):
             return
         self._data_changed = False
 
-        # Update widgets
-        try:
-            self.query_one("#connection-panel", ConnectionTableWidget).connections = self.connections
-        except: pass
+        # Update widgets with detailed error tracking
 
+        # 1. Connection Table Widget
         try:
-            self.query_one("#globe-widget", EnhancedGlobeWidget).connections_data = self.connections
-        except: pass
+            widget = self.query_one("#connection-panel", ConnectionTableWidget)
+            widget.connections = list(self.connections)
+            import logging
+            logger = logging.getLogger(__name__)
+            if len(self.connections) > 0:
+                logger.debug(f"[Dashboard] Updated ConnectionTable: {len(self.connections)} connections")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[Dashboard] Failed to update connection panel: {e}")
 
+        # 2. Globe Widget
         try:
-            self.query_one("#alert-widget", AlertFeedWidget).alerts = self.alerts
-        except: pass
+            widget = self.query_one("#globe-widget", EnhancedGlobeWidget)
+            widget.connections_data = list(self.connections)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update globe: {e}")
 
+        # 3. Alert Feed Widget
+        try:
+            widget = self.query_one("#alert-widget", AlertFeedWidget)
+            widget.alerts = list(self.alerts)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update alert feed: {e}")
+
+        # 4. Organization Triage Widget
         try:
             w = self.query_one("#org-triage", OrganizationTriageWidget)
-            w.organizations = self.organizations
-        except: pass
+            w.organizations = dict(self.organizations)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update org triage: {e}")
 
+        # 5. Hop Topology Widget
         try:
             w = self.query_one("#hop-topology", HopTopologyWidget)
-            w.hop_counts = self.hop_counts
-        except: pass
+            w.hop_counts = dict(self.hop_counts)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update hop topology: {e}")
 
+        # 6. Threat Matrix Widget
         try:
-            self.query_one("#threat-matrix", ThreatMatrixWidget).threat_data = self.threat_data
-        except: pass
+            widget = self.query_one("#threat-matrix", ThreatMatrixWidget)
+            widget.threat_data = dict(self.threat_data)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update threat matrix: {e}")
 
+        # 7. System Stats Widget
         try:
-            self.query_one("#system-stats", SystemStatsWidget).system_stats = self.stats
-        except: pass
+            widget = self.query_one("#system-stats", SystemStatsWidget)
+            widget.system_stats = dict(self.stats)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update system stats: {e}")
 
-        # Update alert ticker with high/critical alerts
+        # 8. Alert Ticker Widget with high/critical alerts
         try:
             ticker = self.query_one("#alert-ticker", AlertTickerWidget)
             for alert in self.alerts:
                 if alert.get('severity') in ('CRITICAL', 'HIGH'):
                     ticker.add_alert(alert.get('message', ''), alert.get('severity', 'HIGH'))
-        except: pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update alert ticker: {e}")
 
     def update_animations(self):
         try:
