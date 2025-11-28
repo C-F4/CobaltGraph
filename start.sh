@@ -18,6 +18,26 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ACTIVATE VIRTUAL ENVIRONMENT
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Check for and activate venv if it exists
+# Use absolute path to venv python for sudo compatibility
+VENV_PYTHON=""
+if [ -f "venv/bin/python3" ]; then
+    VENV_PYTHON="$SCRIPT_DIR/venv/bin/python3"
+    source venv/bin/activate 2>/dev/null || true
+    USING_VENV=true
+elif [ -f ".venv/bin/python3" ]; then
+    VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+    source .venv/bin/activate 2>/dev/null || true
+    USING_VENV=true
+else
+    VENV_PYTHON="python3"
+    USING_VENV=false
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,11 +60,11 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Check Python version
-PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+# Check Python version (use venv python if available)
+PYTHON_VERSION=$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 REQUIRED_VERSION="3.8"
 
-if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)"; then
+if ! "$VENV_PYTHON" -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)"; then
     echo -e "${RED}❌ Error: Python $PYTHON_VERSION found, but 3.8+ required${NC}"
     echo ""
     echo "Please upgrade Python and try again."
@@ -68,7 +88,7 @@ fi
 
 # If any arguments provided, pass directly to start.py (non-interactive)
 if [ $# -gt 0 ]; then
-    exec python3 start.py "$@"
+    exec "$VENV_PYTHON" start.py "$@"
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -91,6 +111,11 @@ echo ""
 echo -e "${CYAN}🔍 System Information:${NC}"
 echo -e "  Python: ${GREEN}$PYTHON_VERSION${NC}"
 echo -e "  Platform: ${GREEN}$(uname -s)${NC}"
+if [ "$USING_VENV" = true ]; then
+    echo -e "  Environment: ${GREEN}venv activated${NC}"
+else
+    echo -e "  Environment: ${YELLOW}system Python (no venv found)${NC}"
+fi
 
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then
@@ -110,4 +135,4 @@ echo ""
 sleep 1
 
 # Launch start.py in interactive mode (no arguments)
-exec python3 start.py
+exec "$VENV_PYTHON" start.py
