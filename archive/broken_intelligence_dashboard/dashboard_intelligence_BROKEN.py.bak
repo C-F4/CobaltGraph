@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-CobaltGraph Dashboard - Unified Threat Monitoring Interface
+CobaltGraph Dashboard - Unified Intelligence Interface
 
 Features:
-- Real-time connection monitoring with threat scoring
-- ASCII globe with heatmaps and connection trails
-- Organization triage matrix with trust scoring
-- Hop count topology visualization
-- Event log viewer with filtering
-- Adaptive table density modes (LOW/MEDIUM/HIGH/FULL)
+- Real-time threat posture monitoring
+- Interactive organization intelligence matrix
+- Geographic threat heatmap
+- Temporal trend analysis
+- Active alerts feed
+- Enhanced connection table with filters
+- ASCII globe visualization
+- Adaptive table density modes
 
-Layout:
-  Left (55%):  Connection table + Stats panels
-  Right (45%): Globe + Organization triage + Hop topology + Logo
+Layout (Grid-based):
+  Top Row:    Threat Posture (40%) | Temporal Trends (60%)
+  Middle Row: Org Intelligence (33%) | Geo Heatmap (33%) | Active Alerts (33%)
+  Bottom Row: Connection Table (70%) | Globe (30%)
 
 Keyboard shortcuts:
   Q - Quit
@@ -20,20 +23,23 @@ Keyboard shortcuts:
   A - Alert summary
   G - Toggle globe visibility
   T - Cycle table density mode
-  O - Toggle organization triage
-  H - Toggle hop topology
-  L - Toggle event log viewer
+  F - Clear filters
+  I - Intelligence report
 """
 
 import sqlite3
 import time
 import math
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable
 from enum import Enum
 from collections import defaultdict
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 from rich.console import Console
 from rich.panel import Panel
@@ -44,6 +50,43 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
 from textual.widgets import Header, Footer, Static, DataTable, Label, Log
 from textual.reactive import reactive
+
+# Import intelligence widgets (use actual class names from intelligence_widgets.py)
+try:
+    from src.ui.intelligence_widgets import (
+        ThreatPosturePanel as ThreatPostureWidget,
+        OrganizationIntelligencePanel as OrgIntelligenceWidget,
+        GeographicHeatmapPanel as GeoHeatmapWidget,
+        TemporalTrendsPanel as TemporalTrendsWidget,
+        ActiveAlertsPanel as ActiveAlertsWidget,
+        ConnectionIntelligenceTable as IntelConnectionTable
+    )
+    INTEL_WIDGETS_AVAILABLE = True
+except ImportError as e:
+    try:
+        from intelligence_widgets import (
+            ThreatPosturePanel as ThreatPostureWidget,
+            OrganizationIntelligencePanel as OrgIntelligenceWidget,
+            GeographicHeatmapPanel as GeoHeatmapWidget,
+            TemporalTrendsPanel as TemporalTrendsWidget,
+            ActiveAlertsPanel as ActiveAlertsWidget,
+            ConnectionIntelligenceTable as IntelConnectionTable
+        )
+        INTEL_WIDGETS_AVAILABLE = True
+    except ImportError:
+        INTEL_WIDGETS_AVAILABLE = False
+        print(f"Warning: Intelligence widgets not available: {e}")
+
+# Import intelligence aggregator
+try:
+    from src.analytics.intelligence_aggregator import IntelligenceAggregator
+    INTEL_AGGREGATOR_AVAILABLE = True
+except ImportError:
+    try:
+        from analytics.intelligence_aggregator import IntelligenceAggregator
+        INTEL_AGGREGATOR_AVAILABLE = True
+    except ImportError:
+        INTEL_AGGREGATOR_AVAILABLE = False
 
 # Import visualization components
 try:
@@ -628,22 +671,16 @@ class ConnectionTableWidget(Static):
 
     def _populate_table(self, connections: List[Dict]) -> None:
         """Populate table with connection data"""
-        import logging
-        logger = logging.getLogger(__name__)
         try:
             table = self.query_one(DataTable)
             table.clear()
 
-            rows_added = 0
             for conn in connections[:60]:
                 row = self._build_row(conn)
                 if row:
                     table.add_row(*row)
-                    rows_added += 1
-
-            logger.debug(f"[ConnectionTable] Populated table: {rows_added} rows added from {len(connections)} connections")
-        except Exception as e:
-            logger.error(f"[ConnectionTable] Error populating table: {e}")
+        except Exception:
+            pass
 
     def _build_row(self, conn: Dict) -> Optional[List]:
         """Build a table row for a connection"""
@@ -707,19 +744,187 @@ class ConnectionTableWidget(Static):
 
     def watch_connections(self, connections: List[Dict]) -> None:
         """Update table when connections change"""
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"[ConnectionTable] watch_connections fired: {len(connections)} connections, initialized={self._columns_initialized}")
         if self._columns_initialized:
-            logger.debug(f"[ConnectionTable] Populating table with {len(connections)} rows")
             self._populate_table(connections)
-        else:
-            logger.debug(f"[ConnectionTable] Columns not initialized yet, skipping populate")
 
     def watch_density(self, density: ThreatDensity) -> None:
         """Handle density changes from external sources"""
         if density != self._current_density and self._columns_initialized:
             self._setup_columns(density)
+
+
+class DeviceDiscoveryWidget(Static):
+    """
+    Device Discovery Widget - Shows discovered network devices (Network Mode)
+
+    Displays devices discovered via passive broadcast capture:
+    - MAC addresses and associated IPs
+    - Vendor identification (OUI lookup)
+    - Connection counts and threat scoring
+    - Risk indicators based on behavioral analysis
+    """
+
+    devices_data = reactive(list)
+    visible = True
+    selected_mac: Optional[str] = None  # For drill-down filtering
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._devices: List[Dict] = []
+        self._selected_index = 0
+
+    def toggle_visibility(self):
+        self.visible = not self.visible
+        self.refresh()
+
+    def watch_devices_data(self, devices: List[Dict]) -> None:
+        """Update devices list when new data arrives"""
+        self._devices = devices
+
+    def select_next(self):
+        """Move selection down"""
+        if self._devices:
+            self._selected_index = (self._selected_index + 1) % len(self._devices)
+            self.refresh()
+
+    def select_prev(self):
+        """Move selection up"""
+        if self._devices:
+            self._selected_index = (self._selected_index - 1) % len(self._devices)
+            self.refresh()
+
+    def get_selected_device(self) -> Optional[Dict]:
+        """Get currently selected device for drill-down"""
+        if self._devices and 0 <= self._selected_index < len(self._devices):
+            return self._devices[self._selected_index]
+        return None
+
+    def toggle_filter(self) -> Optional[str]:
+        """Toggle filter on selected device, returns MAC or None"""
+        if self.selected_mac:
+            # Clear filter
+            self.selected_mac = None
+            return None
+        else:
+            # Set filter
+            device = self.get_selected_device()
+            if device:
+                self.selected_mac = device.get('mac')
+                return self.selected_mac
+        return None
+
+    def clear_filter(self):
+        """Clear device filter"""
+        self.selected_mac = None
+
+    def _truncate_mac(self, mac: str) -> str:
+        """Truncate MAC to last 8 chars for display"""
+        if not mac:
+            return "??:??:??"
+        parts = mac.split(":")
+        if len(parts) >= 3:
+            return ":".join(parts[-3:])
+        return mac[-8:]
+
+    def _get_threat_badge(self, level: str, score: float) -> Text:
+        """Get colored threat badge"""
+        if level == "HIGH":
+            return Text(f"HIGH", style="bold red")
+        elif level == "MEDIUM":
+            return Text(f"MED ", style="yellow")
+        else:
+            return Text(f"LOW ", style="green")
+
+    def render(self) -> Panel:
+        """Render the device discovery panel"""
+        if not self.visible:
+            return Panel(
+                "[dim]Hidden - press D[/dim]",
+                title="[bold magenta]Devices[/bold magenta]",
+                border_style="dim"
+            )
+
+        lines = []
+
+        # Header
+        lines.append("[bold]MAC          IP             Vendor       Conns Threat[/bold]")
+        lines.append("─" * 58)
+
+        if not self._devices:
+            lines.append("[dim]No devices discovered[/dim]")
+            lines.append("[dim]Network mode required for device discovery[/dim]")
+        else:
+            for idx, device in enumerate(self._devices[:10]):
+                mac = self._truncate_mac(device.get('mac', ''))
+                ip = device.get('primary_ip', '-')
+                if ip and len(ip) > 14:
+                    ip = ip[:14]
+                ip = (ip or '-').ljust(14)
+
+                vendor = (device.get('vendor', 'Unknown') or 'Unknown')[:12].ljust(12)
+                conns = str(device.get('connection_count', 0)).rjust(5)
+                threat_level = device.get('threat_level', 'LOW')
+                risk_score = device.get('risk_score', 0)
+
+                # Selection indicator
+                is_selected = idx == self._selected_index
+                is_filtered = device.get('mac') == self.selected_mac
+                prefix = "►" if is_selected else " "
+
+                # Build line
+                if is_filtered:
+                    line = f"[bold cyan]{prefix}[/bold cyan] [bold cyan]{mac}[/bold cyan] [cyan]{ip}[/cyan] [cyan]{vendor}[/cyan] [cyan]{conns}[/cyan] "
+                elif is_selected:
+                    line = f"[bold white]{prefix}[/bold white] [white]{mac}[/white] {ip} {vendor} {conns} "
+                else:
+                    line = f"[dim]{prefix}[/dim] [dim cyan]{mac}[/dim cyan] {ip} {vendor} {conns} "
+
+                # Threat badge
+                if threat_level == "HIGH":
+                    line += "[bold red]HIGH ⚠[/bold red]"
+                elif threat_level == "MEDIUM":
+                    line += "[yellow]MED[/yellow]"
+                else:
+                    line += "[green]LOW[/green]"
+
+                # Risk flags indicator
+                risk_flags = device.get('risk_flags', [])
+                if risk_flags:
+                    line += f" [dim magenta]({len(risk_flags)})[/dim magenta]"
+
+                # Active indicator
+                if device.get('is_active'):
+                    line += " [green]●[/green]"
+                else:
+                    line += " [dim]○[/dim]"
+
+                lines.append(line)
+
+        # Footer stats
+        total = len(self._devices)
+        active = sum(1 for d in self._devices if d.get('is_active'))
+        high_risk = sum(1 for d in self._devices if d.get('threat_level') == 'HIGH')
+
+        lines.append("─" * 58)
+        footer = f"[dim]Total: {total} | Active: {active}[/dim]"
+        if high_risk > 0:
+            footer += f" | [red]High Risk: {high_risk}[/red]"
+        if self.selected_mac:
+            footer += f" | [cyan]Filtered: {self._truncate_mac(self.selected_mac)}[/cyan]"
+        lines.append(footer)
+        lines.append("[dim]↑↓ Navigate | Enter: Filter | Esc: Clear[/dim]")
+
+        border_color = "cyan" if self.selected_mac else "magenta"
+        title = "[bold magenta]◉ Discovered Devices[/bold magenta]"
+        if self.selected_mac:
+            title = "[bold cyan]◉ Discovered Devices (FILTERED)[/bold cyan]"
+
+        return Panel(
+            "\n".join(lines),
+            title=title,
+            subtitle="[dim]Network Mode[/dim]",
+            border_style=border_color
+        )
 
 
 class OrganizationTriageWidget(Static):
@@ -940,73 +1145,38 @@ class AlertTickerWidget(Static):
         return ticker
 
 
-class AnomalyEventWidget(Static):
-    """Anomaly and Outlier Detection Events"""
-
-    anomalies = reactive(list)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._anomalies: List[Dict] = []
-
-    def watch_anomalies(self, anomalies: List[Dict]) -> None:
-        """Update when anomalies change"""
-        self._anomalies = anomalies
-        self.refresh()
-
-    def add_anomaly(self, anomaly_type: str, message: str, severity: str = "HIGH", ip: str = "", score: float = 0.0):
-        """Add an anomaly event"""
-        event = {
-            'timestamp': time.time(),
-            'type': anomaly_type,
-            'message': message,
-            'severity': severity,
-            'ip': ip,
-            'score': score,
-        }
-        self._anomalies.append(event)
-        # Keep only last 20 anomalies
-        if len(self._anomalies) > 20:
-            self._anomalies = self._anomalies[-20:]
-        self.refresh()
+class LogoWidget(Static):
+    """CobaltGraph ASCII Logo - Static display"""
 
     def render(self) -> Panel:
-        """Render anomaly events"""
-        if not self._anomalies:
-            return Panel(
-                "[dim]No anomalies detected[/dim]",
-                title="[bold magenta]◆ Anomalies[/bold magenta]",
-                border_style="magenta"
-            )
-
-        lines = []
-        for event in reversed(self._anomalies[-10:]):  # Show last 10
-            ts = event.get('timestamp', 0)
-            time_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "--:--:--"
-            anom_type = event.get('type', 'UNKNOWN')[:10]
-            severity = event.get('severity', 'HIGH')
-            message = event.get('message', '')[:30]
-            ip = event.get('ip', '')[-12:] if event.get('ip') else ''
-            score = event.get('score', 0.0)
-
-            # Color by severity
-            if severity == 'CRITICAL':
-                icon = "!"
-                style = "bold red"
-            elif severity == 'HIGH':
-                icon = "~"
-                style = "yellow"
-            else:
-                icon = "*"
-                style = "dim yellow"
-
-            score_str = f"{score:.2f}" if score > 0 else "-"
-            lines.append(f"[{style}]{icon}[/{style}] [{time_str}] {anom_type:10s} {message:30s} {ip:12s} [{score_str}]")
+        logo = Text()
+        # Clean ASCII art logo
+        logo.append("┌─────────────────────┐\n", style="cyan")
+        logo.append("│", style="cyan")
+        logo.append("   C O B A L T       ", style="bold cyan")
+        logo.append("│\n", style="cyan")
+        logo.append("│", style="cyan")
+        logo.append("     G R A P H       ", style="bold blue")
+        logo.append("│\n", style="cyan")
+        logo.append("├─────────────────────┤\n", style="cyan")
+        logo.append("│", style="cyan")
+        logo.append("  ◉ ", style="cyan")
+        logo.append("4D Recon", style="bold white")
+        logo.append("       │\n", style="cyan")
+        logo.append("│", style="cyan")
+        logo.append("  ◆ ", style="yellow")
+        logo.append("Threat Intel", style="dim")
+        logo.append("    │\n", style="cyan")
+        logo.append("│", style="cyan")
+        logo.append("  ▲ ", style="green")
+        logo.append("Network Mon", style="dim")
+        logo.append("     │\n", style="cyan")
+        logo.append("└─────────────────────┘", style="cyan")
 
         return Panel(
-            "\n".join(lines),
-            title="[bold magenta]◆ Anomalies & Outliers[/bold magenta]",
-            border_style="magenta"
+            logo,
+            title="",
+            border_style="dim cyan",
         )
 
 
@@ -1033,14 +1203,15 @@ class AlertFeedWidget(Static):
 
 class CobaltGraphDashboard(App):
     """
-    CobaltGraph Dashboard - Main monitoring interface
+    CobaltGraph Dashboard - Unified Intelligence Interface
 
-    Features:
-    - Real-time connection monitoring
-    - ASCII globe with connection trails
-    - Organization triage matrix
-    - Hop count topology
-    - Event log viewer
+    Integrates 6 intelligence widgets with full interactivity:
+    - Threat Posture
+    - Organization Intelligence
+    - Geographic Heatmap
+    - Temporal Trends
+    - Active Alerts
+    - Connection Table (enhanced with filters)
     """
 
     CSS = """
@@ -1050,20 +1221,35 @@ class CobaltGraphDashboard(App):
     .main-content { height: 1fr; }
     #alert-ticker { height: 3; dock: bottom; background: $surface; }
 
-    /* Main two-column layout */
-    #left-column { width: 55%; }
-    #right-column { width: 45%; }
+    /* Grid layout for intelligence widgets */
+    #top-row { height: 25%; }
+    #middle-row { height: 30%; }
+    #bottom-row { height: 45%; }
 
-    /* Left column sections */
+    /* Top row - Threat Posture + Temporal Trends */
+    #threat-posture { width: 40%; }
+    #temporal-trends { width: 60%; }
+
+    /* Middle row - Org Intel + Geo Heatmap + Active Alerts */
+    #org-intelligence { width: 33%; }
+    #geo-heatmap { width: 34%; }
+    #active-alerts-widget { width: 33%; }
+
+    /* Bottom row - Connection Table + Globe */
+    #intel-connection-table { width: 65%; }
+    #globe-panel { width: 35%; }
+
+    /* Legacy widgets (hidden by default in intelligence mode) */
     #connection-panel { height: 70%; }
     #bottom-left { height: 30%; }
-
-    /* Right column sections */
     #globe-widget { height: 45%; }
     #middle-right { height: 30%; }
     #bottom-right { height: 25%; }
+    #left-column { width: 55%; }
+    #right-column { width: 45%; }
 
     /* Bottom panels - equal width */
+    #device-discovery { width: 1fr; }
     #org-triage { width: 1fr; }
     #hop-topology { width: 1fr; }
     #threat-matrix { width: 1fr; }
@@ -1071,6 +1257,9 @@ class CobaltGraphDashboard(App):
     #log-widget { width: 1fr; }
     #system-stats { width: 1fr; }
     #logo-widget { width: 1fr; min-width: 25; }
+
+    /* Hide panels */
+    .hidden { display: none; }
 
     Horizontal { height: 1fr; }
     Vertical { height: 1fr; }
@@ -1082,18 +1271,27 @@ class CobaltGraphDashboard(App):
         ("a", "alerts", "Alerts"),
         ("g", "toggle_globe", "Globe"),
         ("t", "toggle_density", "Density"),
+        ("f", "clear_filters", "Clear Filters"),
+        ("i", "intelligence_report", "Intel Report"),
         ("o", "toggle_org", "Org"),
         ("h", "toggle_hop", "Hop"),
         ("l", "toggle_log", "Log"),
+        ("d", "toggle_devices", "Devices"),
     ]
 
-    def __init__(self, database_path: str = "data/cobaltgraph.db"):
+    def __init__(self, database_path: str = "data/cobaltgraph.db", network_mode: bool = False,
+                 use_intelligence_mode: bool = True):
         super().__init__()
         self.database_path = database_path
+        self.network_mode = network_mode
+        self.use_intelligence_mode = use_intelligence_mode and INTEL_WIDGETS_AVAILABLE
+
+        # Legacy data structures (for backward compatibility)
         self.connections = []
         self.alerts = []
         self.organizations: Dict[str, Dict] = {}
         self.hop_counts: Dict[int, Dict] = {}
+        self.discovered_devices: List[Dict] = []
         self.stats = {
             'uptime_start': time.time(),
             'total_connections': 0,
@@ -1102,8 +1300,22 @@ class CobaltGraphDashboard(App):
             'unique_ips': 0,
             'unique_orgs': 0,
             'density': 'MEDIUM',
+            'mode': 'network' if network_mode else 'device',
         }
         self.threat_data = {'total': 0, 'low': 0, 'medium': 0, 'high': 0, 'critical': 0}
+
+        # Intelligence aggregator
+        self.intelligence_aggregator: Optional[IntelligenceAggregator] = None
+
+        # Update intervals (in seconds)
+        self.update_intervals = {
+            'threat_posture': 5.0,
+            'org_intelligence': 10.0,
+            'geo_heatmap': 15.0,
+            'temporal_trends': 5.0,
+            'active_alerts': 2.0,
+            'connection_table': 1.0,
+        }
 
         self._last_count = 0
         self._last_max_timestamp = 0.0
@@ -1112,29 +1324,59 @@ class CobaltGraphDashboard(App):
         self._last_rate_time = time.time()
         self._last_rate_count = 0
         self._auto_density = True
+        self._device_filter_mac: Optional[str] = None
+        self._show_devices_panel = True
+
+        # Intelligence mode state
+        self._last_intelligence_update = {}
+        self._current_filter_org: Optional[str] = None
+        self._current_filter_country: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
         with Vertical(classes="main-content"):
-            with Horizontal():
-                # Left column - Connection table and bottom panels
-                with Vertical(id="left-column"):
-                    yield ConnectionTableWidget(id="connection-panel")
-                    with Horizontal(id="bottom-left"):
-                        yield OrganizationTriageWidget(id="org-triage")
-                        yield HopTopologyWidget(id="hop-topology")
+            if self.use_intelligence_mode:
+                # INTELLIGENCE MODE LAYOUT
+                # Top row: Threat Posture + Temporal Trends
+                with Horizontal(id="top-row"):
+                    yield ThreatPostureWidget(id="threat-posture")
+                    yield TemporalTrendsWidget(id="temporal-trends")
 
-                # Right column - Globe, alerts/stats, anomalies/log
-                with Vertical(id="right-column"):
-                    yield EnhancedGlobeWidget(width=50, height=18, id="globe-widget")
-                    with Horizontal(id="middle-right"):
-                        yield AlertFeedWidget(id="alert-widget")
-                        yield ThreatMatrixWidget(id="threat-matrix")
-                    with Horizontal(id="bottom-right"):
-                        yield AnomalyEventWidget(id="anomaly-widget")
-                        yield EventLogWidget(id="log-widget")
-                        yield SystemStatsWidget(id="system-stats")
+                # Middle row: Org Intelligence + Geo Heatmap + Active Alerts
+                with Horizontal(id="middle-row"):
+                    yield OrgIntelligenceWidget(id="org-intelligence")
+                    yield GeoHeatmapWidget(id="geo-heatmap")
+                    yield ActiveAlertsWidget(id="active-alerts-widget")
+
+                # Bottom row: Connection Table + Globe
+                with Horizontal(id="bottom-row"):
+                    yield IntelConnectionTable(id="intel-connection-table")
+                    # Globe panel container
+                    with Vertical(id="globe-panel"):
+                        yield EnhancedGlobeWidget(width=40, height=20, id="globe-widget")
+
+            else:
+                # LEGACY MODE LAYOUT (backward compatibility)
+                with Horizontal():
+                    # Left column - Connection table and bottom panels
+                    with Vertical(id="left-column"):
+                        yield ConnectionTableWidget(id="connection-panel")
+                        with Horizontal(id="bottom-left"):
+                            yield DeviceDiscoveryWidget(id="device-discovery")
+                            yield OrganizationTriageWidget(id="org-triage")
+                            yield HopTopologyWidget(id="hop-topology")
+
+                    # Right column - Globe, alerts/stats, log/logo
+                    with Vertical(id="right-column"):
+                        yield EnhancedGlobeWidget(width=50, height=18, id="globe-widget")
+                        with Horizontal(id="middle-right"):
+                            yield AlertFeedWidget(id="alert-widget")
+                            yield ThreatMatrixWidget(id="threat-matrix")
+                        with Horizontal(id="bottom-right"):
+                            yield EventLogWidget(id="log-widget")
+                            yield SystemStatsWidget(id="system-stats")
+                            yield LogoWidget(id="logo-widget")
 
         # Alert ticker at bottom
         yield AlertTickerWidget(id="alert-ticker")
@@ -1142,68 +1384,91 @@ class CobaltGraphDashboard(App):
 
     def on_mount(self) -> None:
         self.title = "CobaltGraph Dashboard"
-        self.sub_title = "Unified Threat Monitoring"
+        if self.use_intelligence_mode:
+            mode_str = "Intelligence Mode" if INTEL_AGGREGATOR_AVAILABLE else "Intelligence Mode (Limited)"
+        else:
+            mode_str = "Network Mode" if self.network_mode else "Device Mode"
+        self.sub_title = f"Unified Threat Monitoring - {mode_str}"
 
-        import logging
-        logger = logging.getLogger(__name__)
-
-        # Register event log callback for UI events
-        try:
-            from src.utils.logging_config import UIEventHandler, UIEventPoster
-            log_widget = self.query_one("#log-widget", EventLogWidget)
-            anomaly_widget = self.query_one("#anomaly-widget", AnomalyEventWidget)
-
-            # Create wrapper to properly handle events
-            def event_callback(event):
-                """Route events to appropriate widgets"""
-                try:
-                    # Event is a dict with: timestamp, type, message, severity, metadata
-                    event_type = event.get('type', 'UNKNOWN')
-                    message = event.get('message', '')
-                    severity = event.get('severity', 'INFO')
-                    metadata = event.get('metadata', {})
-
-                    # Route anomaly events to anomaly widget
-                    if event_type == 'ANOMALY':
-                        anomaly_type = metadata.get('anomaly_type', 'UNKNOWN')
-                        dst_ip = metadata.get('dst_ip', '')
-                        anomaly_score = metadata.get('anomaly_score', 0.0)
-                        try:
-                            anomaly_widget.add_anomaly(anomaly_type, message, severity, dst_ip, anomaly_score)
-                        except Exception as e:
-                            logger.debug(f"Error adding anomaly to widget: {e}")
-                    else:
-                        # Route all other events to log widget
-                        log_widget.add_event(event_type, message, severity, metadata)
-                except Exception as e:
-                    logger.debug(f"Error processing event: {e}")
-
-            # Register the callback
-            UIEventHandler.register_callback(event_callback)
-
-            # Add initial event
+        # Initialize intelligence aggregator
+        if self.use_intelligence_mode and INTEL_AGGREGATOR_AVAILABLE:
             try:
-                UIEventPoster.system("Dashboard initialized", "INFO")
-                logger.info("[Dashboard] UIEventHandler integrated successfully")
+                from src.storage.database import Database
+                db = Database(self.database_path)
+                self.intelligence_aggregator = IntelligenceAggregator(
+                    db_connection=db,
+                    cache_ttl=2.0  # 2-second cache for real-time feel
+                )
+                logger.info("Intelligence aggregator initialized")
             except Exception as e:
-                logger.warning(f"[Dashboard] Failed to post initial event: {e}")
+                logger.warning(f"Failed to initialize intelligence aggregator: {e}")
+                self.use_intelligence_mode = False
 
-        except ImportError as e:
-            logger.warning(f"[Dashboard] UIEventHandler not available: {e}")
-        except Exception as e:
-            logger.warning(f"[Dashboard] Failed to integrate UIEventHandler: {e}")
+        # Register event log callback for UI events (legacy mode)
+        if not self.use_intelligence_mode:
+            try:
+                from src.utils.logging_config import UIEventHandler, UIEventPoster
+                log_widget = self.query_one("#log-widget", EventLogWidget)
+                UIEventHandler.register_callback(log_widget.add_event)
+                UIEventPoster.system("Dashboard initialized", "INFO")
+            except Exception:
+                pass
 
-        self.set_interval(1.0, self.update_data)
-        self.set_interval(0.25, self.update_animations)
+            # Set up tabbed view - show Devices panel by default in network mode
+            self._setup_tabbed_view()
 
-        self.load_data_from_db()
+        # Set up update intervals
+        if self.use_intelligence_mode:
+            # Intelligence mode updates
+            self.set_interval(self.update_intervals['threat_posture'], self.update_threat_posture)
+            self.set_interval(self.update_intervals['org_intelligence'], self.update_org_intelligence)
+            self.set_interval(self.update_intervals['geo_heatmap'], self.update_geo_heatmap)
+            self.set_interval(self.update_intervals['temporal_trends'], self.update_temporal_trends)
+            self.set_interval(self.update_intervals['active_alerts'], self.update_active_alerts)
+            self.set_interval(self.update_intervals['connection_table'], self.update_connection_table)
+            self.set_interval(0.25, self.update_animations)
+        else:
+            # Legacy mode updates
+            self.set_interval(1.0, self.update_data)
+            self.set_interval(0.25, self.update_animations)
+            self.load_data_from_db()
+
+    def _setup_tabbed_view(self):
+        """Set up the tabbed view between Device Discovery and Org Triage"""
+        try:
+            device_widget = self.query_one("#device-discovery", DeviceDiscoveryWidget)
+            org_widget = self.query_one("#org-triage", OrganizationTriageWidget)
+
+            # In device mode, always hide device discovery (it's not useful)
+            # In network mode, allow toggling between devices and org triage
+            if not self.network_mode:
+                # Device mode: Hide device discovery, show org triage
+                device_widget.visible = False
+                device_widget.add_class("hidden")
+                org_widget.visible = True
+                org_widget.remove_class("hidden")
+            elif self._show_devices_panel:
+                # Network mode with devices panel shown
+                device_widget.visible = True
+                device_widget.remove_class("hidden")
+                org_widget.visible = False
+                org_widget.add_class("hidden")
+            else:
+                # Network mode with org triage shown
+                device_widget.visible = False
+                device_widget.add_class("hidden")
+                org_widget.visible = True
+                org_widget.remove_class("hidden")
+        except Exception:
+            pass
 
     def _check_data_changed(self) -> bool:
         try:
             if not Path(self.database_path).exists():
                 return False
 
-            conn = sqlite3.connect(self.database_path)
+            conn = sqlite3.connect(self.database_path, timeout=5.0)
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*), MAX(timestamp) FROM connections")
             row = cursor.fetchone()
@@ -1225,7 +1490,9 @@ class CobaltGraphDashboard(App):
             if not Path(self.database_path).exists():
                 return
 
-            conn = sqlite3.connect(self.database_path)
+            # Use WAL mode for concurrent access with pipeline
+            conn = sqlite3.connect(self.database_path, timeout=5.0)
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -1233,7 +1500,7 @@ class CobaltGraphDashboard(App):
                        dst_country, protocol, dst_lat, dst_lon,
                        dst_asn, dst_asn_name, dst_org, dst_org_type,
                        org_trust_score, ttl_observed, hop_count, dst_cidr,
-                       ttl_initial, os_fingerprint
+                       ttl_initial, os_fingerprint, src_mac, src_ip, device_vendor
                 FROM connections ORDER BY timestamp DESC LIMIT 100
             """)
 
@@ -1285,6 +1552,7 @@ class CobaltGraphDashboard(App):
                     'dst_org_type': org_type, 'org_trust_score': org_trust,
                     'ttl_observed': row[13], 'hop_count': hop_count,
                     'dst_cidr': row[15], 'ttl_initial': row[16], 'os_fingerprint': row[17],
+                    'src_mac': row[18], 'src_ip': row[19], 'device_vendor': row[20],
                 }
                 self.connections.append(conn_data)
 
@@ -1314,6 +1582,83 @@ class CobaltGraphDashboard(App):
             self.threat_data['total'] = len(rows)
             self._data_changed = True
 
+            # Load discovered devices
+            try:
+                cursor.execute("""
+                    SELECT mac, ip_addresses, vendor, hostname,
+                           first_seen, last_seen, packet_count,
+                           connection_count, threat_score_sum, high_threat_count,
+                           broadcast_count, arp_count, risk_flags, notes
+                    FROM devices
+                    ORDER BY last_seen DESC
+                    LIMIT 50
+                """)
+
+                import json as json_module
+                device_rows = cursor.fetchall()
+                self.discovered_devices = []
+                now = time.time()
+
+                for row in device_rows:
+                    mac = row[0]
+                    ip_addresses = json_module.loads(row[1]) if row[1] else []
+                    connection_count = row[7] or 0
+                    threat_sum = row[8] or 0
+                    high_threat_count = row[9] or 0
+                    broadcast_count = row[10] or 0
+
+                    avg_threat = threat_sum / connection_count if connection_count > 0 else 0
+
+                    # Calculate risk level
+                    risk_flags = []
+                    risk_score = 0.0
+
+                    if not row[2]:
+                        risk_flags.append("UNKNOWN_VENDOR")
+                        risk_score += 0.2
+                    if len(ip_addresses) > 3:
+                        risk_flags.append("MULTI_IP")
+                        risk_score += 0.15
+                    if broadcast_count > 100:
+                        risk_flags.append("HIGH_BROADCAST")
+                        risk_score += 0.1
+                    if high_threat_count > 0:
+                        risk_flags.append(f"HIGH_THREAT:{high_threat_count}")
+                        risk_score += min(0.4, high_threat_count * 0.1)
+                    risk_score += avg_threat * 0.3
+
+                    if risk_score >= 0.5:
+                        threat_level = "HIGH"
+                    elif risk_score >= 0.25:
+                        threat_level = "MEDIUM"
+                    else:
+                        threat_level = "LOW"
+
+                    self.discovered_devices.append({
+                        "mac": mac,
+                        "ip_addresses": ip_addresses,
+                        "primary_ip": ip_addresses[0] if ip_addresses else None,
+                        "vendor": row[2] or "Unknown",
+                        "hostname": row[3],
+                        "first_seen": row[4],
+                        "last_seen": row[5],
+                        "packet_count": row[6] or 0,
+                        "connection_count": connection_count,
+                        "avg_threat": avg_threat,
+                        "high_threat_count": high_threat_count,
+                        "broadcast_count": broadcast_count,
+                        "risk_score": min(1.0, risk_score),
+                        "threat_level": threat_level,
+                        "risk_flags": risk_flags,
+                        "is_active": (now - row[5]) < 300 if row[5] else False,
+                    })
+
+                self.stats['discovered_devices'] = len(self.discovered_devices)
+                self.stats['active_devices'] = sum(1 for d in self.discovered_devices if d.get('is_active'))
+
+            except Exception:
+                pass  # Devices table might not exist yet
+
             conn.close()
         except Exception:
             pass
@@ -1327,77 +1672,52 @@ class CobaltGraphDashboard(App):
             return
         self._data_changed = False
 
-        # Update widgets with detailed error tracking
-
-        # 1. Connection Table Widget
+        # Update widgets
         try:
-            widget = self.query_one("#connection-panel", ConnectionTableWidget)
-            widget.connections = list(self.connections)
-            import logging
-            logger = logging.getLogger(__name__)
-            if len(self.connections) > 0:
-                logger.debug(f"[Dashboard] Updated ConnectionTable: {len(self.connections)} connections")
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"[Dashboard] Failed to update connection panel: {e}")
+            conn_widget = self.query_one("#connection-panel", ConnectionTableWidget)
+            conn_widget.connections = self.connections.copy()  # Copy to trigger reactive
+            conn_widget.refresh()
+        except: pass
 
-        # 2. Globe Widget
         try:
-            widget = self.query_one("#globe-widget", EnhancedGlobeWidget)
-            widget.connections_data = list(self.connections)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update globe: {e}")
+            self.query_one("#globe-widget", EnhancedGlobeWidget).connections_data = self.connections
+        except: pass
 
-        # 3. Alert Feed Widget
         try:
-            widget = self.query_one("#alert-widget", AlertFeedWidget)
-            widget.alerts = list(self.alerts)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update alert feed: {e}")
+            self.query_one("#alert-widget", AlertFeedWidget).alerts = self.alerts
+        except: pass
 
-        # 4. Organization Triage Widget
         try:
             w = self.query_one("#org-triage", OrganizationTriageWidget)
-            w.organizations = dict(self.organizations)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update org triage: {e}")
+            w.organizations = self.organizations
+        except: pass
 
-        # 5. Hop Topology Widget
         try:
             w = self.query_one("#hop-topology", HopTopologyWidget)
-            w.hop_counts = dict(self.hop_counts)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update hop topology: {e}")
+            w.hop_counts = self.hop_counts
+        except: pass
 
-        # 6. Threat Matrix Widget
         try:
-            widget = self.query_one("#threat-matrix", ThreatMatrixWidget)
-            widget.threat_data = dict(self.threat_data)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update threat matrix: {e}")
+            self.query_one("#threat-matrix", ThreatMatrixWidget).threat_data = self.threat_data
+        except: pass
 
-        # 7. System Stats Widget
         try:
-            widget = self.query_one("#system-stats", SystemStatsWidget)
-            widget.system_stats = dict(self.stats)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update system stats: {e}")
+            self.query_one("#system-stats", SystemStatsWidget).system_stats = self.stats
+        except: pass
 
-        # 8. Alert Ticker Widget with high/critical alerts
+        # Update device discovery widget
+        try:
+            device_widget = self.query_one("#device-discovery", DeviceDiscoveryWidget)
+            device_widget.devices_data = self.discovered_devices
+        except: pass
+
+        # Update alert ticker with high/critical alerts
         try:
             ticker = self.query_one("#alert-ticker", AlertTickerWidget)
             for alert in self.alerts:
                 if alert.get('severity') in ('CRITICAL', 'HIGH'):
                     ticker.add_alert(alert.get('message', ''), alert.get('severity', 'HIGH'))
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug(f"[Dashboard] Failed to update alert ticker: {e}")
+        except: pass
 
     def update_animations(self):
         try:
@@ -1413,11 +1733,298 @@ class CobaltGraphDashboard(App):
             ticker.refresh()
         except: pass
 
+    # ==================== INTELLIGENCE MODE UPDATE METHODS ====================
+
+    def update_threat_posture(self):
+        """Update threat posture widget"""
+        if not self.use_intelligence_mode or not self.intelligence_aggregator:
+            return
+
+        try:
+            posture = self.intelligence_aggregator.calculate_threat_posture()
+
+            # Convert to widget format
+            posture_data = {
+                "posture_score": posture.current_threat,
+                "posture_level": self._threat_to_level(posture.current_threat),
+                "high_threat_count": posture.high_threats,
+                "trend": posture.trend,
+                "threat_distribution": {
+                    "critical": posture.high_threats,
+                    "high": posture.medium_threats,
+                    "medium": posture.total_connections - posture.high_threats - posture.medium_threats,
+                    "low": 0
+                }
+            }
+
+            widget = self.query_one("#threat-posture", ThreatPostureWidget)
+            widget.update_posture(posture_data)
+        except Exception as e:
+            logger.debug(f"Failed to update threat posture: {e}")
+
+    def update_org_intelligence(self):
+        """Update organization intelligence widget"""
+        if not self.use_intelligence_mode or not self.intelligence_aggregator:
+            return
+
+        try:
+            orgs = self.intelligence_aggregator.aggregate_organization_intelligence(limit=20)
+
+            # Convert to widget format
+            org_data = [
+                {
+                    "name": org.org_name,
+                    "org_type": org.org_type,
+                    "connection_count": org.connection_count,
+                    "risk_score": org.avg_threat,
+                    "trust_score": org.trust_score,
+                }
+                for org in orgs
+            ]
+
+            widget = self.query_one("#org-intelligence", OrgIntelligenceWidget)
+            widget.update_orgs(org_data)
+        except Exception as e:
+            logger.debug(f"Failed to update org intelligence: {e}")
+
+    def update_geo_heatmap(self):
+        """Update geographic heatmap widget"""
+        if not self.use_intelligence_mode or not self.intelligence_aggregator:
+            return
+
+        try:
+            geo_data = self.intelligence_aggregator.aggregate_geographic_intelligence(limit=30)
+
+            # Convert to widget format
+            geo_list = [
+                {
+                    "country": geo.country,
+                    "connection_count": geo.connection_count,
+                    "mean_threat": geo.avg_threat,
+                    "unique_ips": geo.unique_ips,
+                }
+                for geo in geo_data
+            ]
+
+            widget = self.query_one("#geo-heatmap", GeoHeatmapWidget)
+            widget.update_geo(geo_list)
+        except Exception as e:
+            logger.debug(f"Failed to update geo heatmap: {e}")
+
+    def update_temporal_trends(self):
+        """Update temporal trends widget"""
+        if not self.use_intelligence_mode or not self.intelligence_aggregator:
+            return
+
+        try:
+            trends = self.intelligence_aggregator.aggregate_temporal_trends(
+                bucket_seconds=3600,  # 1-hour buckets
+                window_minutes=1440  # 24 hours
+            )
+
+            # Convert to widget format
+            hourly_data = []
+            for trend in trends:
+                dt = datetime.fromtimestamp(trend.timestamp)
+                hourly_data.append({
+                    "hour": dt.hour,
+                    "count": trend.connection_count,
+                    "mean_threat": trend.avg_threat,
+                })
+
+            # Find peak hour
+            peak_hour = 0
+            if hourly_data:
+                peak_hour = max(hourly_data, key=lambda h: h["count"])["hour"]
+
+            posture = self.intelligence_aggregator.calculate_threat_posture()
+
+            temporal_data = {
+                "hourly_data": hourly_data,
+                "peak_hour": peak_hour,
+                "trend": posture.trend
+            }
+
+            widget = self.query_one("#temporal-trends", TemporalTrendsWidget)
+            widget.update_temporal(temporal_data)
+        except Exception as e:
+            logger.debug(f"Failed to update temporal trends: {e}")
+
+    def update_active_alerts(self):
+        """Update active alerts widget"""
+        if not self.use_intelligence_mode:
+            return
+
+        try:
+            # Generate alerts from recent high-threat connections
+            # For now, use legacy alert system
+            widget = self.query_one("#active-alerts-widget", ActiveAlertsWidget)
+            widget.update_alerts(self.alerts[:20])
+        except Exception as e:
+            logger.debug(f"Failed to update active alerts: {e}")
+
+    def update_connection_table(self):
+        """Update connection table widget"""
+        if not self.use_intelligence_mode or not self.intelligence_aggregator:
+            return
+
+        try:
+            # Get connections from aggregator
+            # Note: IntelligenceAggregator doesn't store individual connections,
+            # so we'll fetch from database directly
+            connections = self._fetch_recent_connections(limit=100)
+
+            widget = self.query_one("#intel-connection-table", IntelConnectionTable)
+            widget.update_connections(connections)
+
+            # Also update globe
+            globe = self.query_one("#globe-widget", EnhancedGlobeWidget)
+            globe.connections_data = connections
+        except Exception as e:
+            logger.debug(f"Failed to update connection table: {e}")
+
+    def _threat_to_level(self, threat_score: float) -> str:
+        """Convert threat score to level string"""
+        if threat_score >= 0.7:
+            return "CRITICAL"
+        elif threat_score >= 0.5:
+            return "HIGH"
+        elif threat_score >= 0.3:
+            return "ELEVATED"
+        else:
+            return "NORMAL"
+
+    def _fetch_recent_connections(self, limit: int = 100) -> List[Dict]:
+        """Fetch recent connections from database"""
+        try:
+            if not Path(self.database_path).exists():
+                return []
+
+            conn = sqlite3.connect(self.database_path, timeout=5.0)
+            conn.execute("PRAGMA journal_mode=WAL")
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT timestamp, src_ip, dst_ip, dst_port, threat_score,
+                       dst_country, dst_org, dst_asn, src_mac
+                FROM connections
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (limit,))
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            connections = []
+            for row in rows:
+                connections.append({
+                    "id": hash(row),
+                    "timestamp": row[0],
+                    "src_ip": row[1],
+                    "dst_ip": row[2],
+                    "dst_port": row[3],
+                    "threat_score": row[4] or 0.0,
+                    "dst_country": row[5],
+                    "dst_org": row[6],
+                    "dst_asn": row[7],
+                    "src_mac": row[8],
+                })
+
+            return connections
+        except Exception as e:
+            logger.debug(f"Failed to fetch connections: {e}")
+            return []
+
+    # ==================== CLICK HANDLERS ====================
+
+    def on_org_click(self, org_name: str):
+        """Handle organization click - filter connection table"""
+        self._current_filter_org = org_name
+        self._current_filter_country = None
+
+        try:
+            widget = self.query_one("#intel-connection-table", IntelConnectionTable)
+            widget.filter_by_org(org_name)
+            self.notify(f"Filtering by organization: {org_name}")
+        except Exception as e:
+            logger.debug(f"Failed to filter by org: {e}")
+
+    def on_country_click(self, country_code: str):
+        """Handle country click - filter connection table"""
+        self._current_filter_country = country_code
+        self._current_filter_org = None
+
+        try:
+            widget = self.query_one("#intel-connection-table", IntelConnectionTable)
+            widget.filter_by_country(country_code)
+            self.notify(f"Filtering by country: {country_code}")
+        except Exception as e:
+            logger.debug(f"Failed to filter by country: {e}")
+
+    def on_connection_click(self, connection: Dict):
+        """Handle connection click - expand details"""
+        # TODO: Implement details panel
+        dst_ip = connection.get("dst_ip", "")
+        threat_score = connection.get("threat_score", 0.0)
+        self.notify(f"Connection: {dst_ip} (threat: {threat_score:.2f})")
+
+    def on_alert_action(self, alert: Dict, action: str):
+        """Handle alert action - investigate/block/dismiss"""
+        alert_msg = alert.get("message", "")
+        if action == "investigate":
+            self.notify(f"Investigating: {alert_msg}")
+        elif action == "block":
+            self.notify(f"Blocking: {alert_msg}")
+        elif action == "dismiss":
+            self.notify(f"Dismissed: {alert_msg}")
+
+    # ==================== ACTIONS ====================
+
     def action_refresh(self):
-        self._data_changed = True
-        self.load_data_from_db()
-        self.update_data()
-        self.notify("Refreshed!")
+        """Refresh all data"""
+        if self.use_intelligence_mode:
+            # Force cache invalidation
+            if self.intelligence_aggregator:
+                self.intelligence_aggregator.invalidate_cache()
+            # Manually trigger all updates
+            self.update_threat_posture()
+            self.update_org_intelligence()
+            self.update_geo_heatmap()
+            self.update_temporal_trends()
+            self.update_active_alerts()
+            self.update_connection_table()
+            self.notify("Intelligence data refreshed!")
+        else:
+            self._data_changed = True
+            self.load_data_from_db()
+            self.update_data()
+            self.notify("Refreshed!")
+
+    def action_clear_filters(self):
+        """Clear all filters"""
+        if self.use_intelligence_mode:
+            self._current_filter_org = None
+            self._current_filter_country = None
+            try:
+                widget = self.query_one("#intel-connection-table", IntelConnectionTable)
+                widget.clear_filter()
+                self.notify("Filters cleared")
+            except: pass
+        else:
+            self.notify("Filters not available in legacy mode")
+
+    def action_intelligence_report(self):
+        """Show intelligence performance report"""
+        if self.use_intelligence_mode and self.intelligence_aggregator:
+            stats = self.intelligence_aggregator.get_performance_stats()
+            self.notify(
+                f"Cache: {stats['cache_hit_rate']:.1f}% hits | "
+                f"Avg query: {stats['avg_query_time_ms']:.1f}ms | "
+                f"Queries: {stats['queries']}",
+                title="Intelligence Stats"
+            )
+        else:
+            self.notify("Intelligence mode not active")
 
     def action_alerts(self):
         crit = len([a for a in self.alerts if a.get('severity') == 'CRITICAL'])
@@ -1457,6 +2064,97 @@ class CobaltGraphDashboard(App):
             w = self.query_one("#log-widget", EventLogWidget)
             w.toggle_visibility()
         except: pass
+
+    def action_toggle_devices(self):
+        """Toggle between Device Discovery and Org Triage panels (D key)"""
+        # Only allow toggle in network mode
+        if not self.network_mode:
+            self.notify("Device Discovery only available in Network mode")
+            return
+
+        self._show_devices_panel = not self._show_devices_panel
+        self._setup_tabbed_view()
+
+        if self._show_devices_panel:
+            self.notify("Showing: Device Discovery")
+        else:
+            self.notify("Showing: Organization Triage")
+
+    def action_device_filter(self):
+        """Filter connections by selected device (Enter key)"""
+        try:
+            device_widget = self.query_one("#device-discovery", DeviceDiscoveryWidget)
+            if not device_widget.visible:
+                return
+
+            mac = device_widget.toggle_filter()
+            if mac:
+                self._device_filter_mac = mac
+                # Filter connections to only show this device
+                self._apply_device_filter()
+                self.notify(f"Filtering by device: {mac[-8:]}")
+            else:
+                self._device_filter_mac = None
+                self._clear_device_filter()
+                self.notify("Filter cleared")
+
+            device_widget.refresh()
+        except Exception:
+            pass
+
+    def action_clear_filter(self):
+        """Clear device filter (Escape key)"""
+        try:
+            device_widget = self.query_one("#device-discovery", DeviceDiscoveryWidget)
+            device_widget.clear_filter()
+            self._device_filter_mac = None
+            self._clear_device_filter()
+            device_widget.refresh()
+            self.notify("Filter cleared")
+        except Exception:
+            pass
+
+    def action_device_nav_up(self):
+        """Navigate up in device list"""
+        try:
+            device_widget = self.query_one("#device-discovery", DeviceDiscoveryWidget)
+            if device_widget.visible:
+                device_widget.select_prev()
+        except Exception:
+            pass
+
+    def action_device_nav_down(self):
+        """Navigate down in device list"""
+        try:
+            device_widget = self.query_one("#device-discovery", DeviceDiscoveryWidget)
+            if device_widget.visible:
+                device_widget.select_next()
+        except Exception:
+            pass
+
+    def _apply_device_filter(self):
+        """Apply device filter to connection table"""
+        if not self._device_filter_mac:
+            return
+
+        try:
+            # Filter connections to only show those from this device
+            filtered = [c for c in self.connections
+                       if c.get('src_mac') == self._device_filter_mac]
+
+            # If we have filtered connections, update the table
+            conn_widget = self.query_one("#connection-panel", ConnectionTableWidget)
+            conn_widget.connections = filtered if filtered else self.connections
+        except Exception:
+            pass
+
+    def _clear_device_filter(self):
+        """Clear device filter and restore full connection list"""
+        try:
+            conn_widget = self.query_one("#connection-panel", ConnectionTableWidget)
+            conn_widget.connections = self.connections
+        except Exception:
+            pass
 
     def on_unmount(self) -> None:
         """Clean up on shutdown"""
