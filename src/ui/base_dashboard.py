@@ -300,12 +300,28 @@ class BaseDashboard(App):
         self.recent_events: deque = deque(maxlen=50)
         self.recent_devices: Dict[str, Dict] = {}
 
+        # Unified dashboard panel references
+        self.threat_posture_panel = None
+        self.temporal_trends_panel = None
+        self.geographic_alerts_panel = None
+        self.organization_intel_panel = None
+        self.connection_table_panel = None
+        self.threat_globe_panel = None
+
     def compose(self) -> ComposeResult:
         """
         Unified grid layout implementing the comprehensive threat monitoring model
         6-cell grid (2 rows x 3 columns) with Header and Footer
+        Subclasses populate cells with specific implementations
         """
-        from textual.widgets import Static
+        from src.ui.unified_components import (
+            ThreatPosturePanel,
+            TemporalTrendsPanel,
+            GeographicAlertsPanel,
+            OrganizationIntelPanel,
+            ConnectionTablePanel,
+            ThreatGlobePanel,
+        )
 
         yield Header()
 
@@ -313,15 +329,25 @@ class BaseDashboard(App):
         with Vertical(id="main_grid"):
             # Top row (50% height): Threat Context + Trends + Alerts
             with Horizontal(id="top_row"):
-                yield Static(id="top_left")      # Threat Posture (20%)
-                yield Static(id="top_center")    # Temporal Trends (50%)
-                yield Static(id="top_right")     # Geographic + Alerts (30%)
+                self.threat_posture_panel = ThreatPosturePanel(id="top_left")
+                yield self.threat_posture_panel
+
+                self.temporal_trends_panel = TemporalTrendsPanel(id="top_center")
+                yield self.temporal_trends_panel
+
+                self.geographic_alerts_panel = GeographicAlertsPanel(id="top_right")
+                yield self.geographic_alerts_panel
 
             # Bottom row (50% height): Organization + Connections + Globe
             with Horizontal(id="bottom_row"):
-                yield Static(id="bottom_left")   # Organization Intelligence (20%)
-                yield Static(id="bottom_center") # Connection Table (50%)
-                yield Static(id="bottom_right")  # Threat Globe (30%)
+                self.organization_intel_panel = OrganizationIntelPanel(id="bottom_left")
+                yield self.organization_intel_panel
+
+                self.connection_table_panel = ConnectionTablePanel(id="bottom_center")
+                yield self.connection_table_panel
+
+                self.threat_globe_panel = ThreatGlobePanel(id="bottom_right")
+                yield self.threat_globe_panel
 
         yield Footer()
 
