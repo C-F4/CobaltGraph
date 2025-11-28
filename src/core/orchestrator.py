@@ -194,6 +194,7 @@ class DataPipeline:
         self.consensus_scorer = None
         self.threat_analytics = None
         self.metadata_aggregator = None
+        self.intelligence_aggregator = None  # NEW: Intelligence aggregator for dashboard
         self.database = None
         self.exporter = None
 
@@ -260,6 +261,18 @@ class DataPipeline:
             logger.info("✅ Exporter initialized")
         except Exception as e:
             logger.warning(f"⚠️ Exporter unavailable: {e}")
+
+        # Intelligence Aggregator (for dashboard widgets)
+        try:
+            from src.analytics.intelligence_aggregator import IntelligenceAggregator
+            if self.database:
+                self.intelligence_aggregator = IntelligenceAggregator(
+                    db_connection=self.database,
+                    cache_ttl=5.0  # 5-second cache
+                )
+                logger.info("✅ Intelligence Aggregator initialized (dashboard support)")
+        except Exception as e:
+            logger.warning(f"⚠️ Intelligence Aggregator unavailable: {e}")
 
     def start(self):
         """Start the pipeline processing threads"""
@@ -401,7 +414,15 @@ class DataPipeline:
                 except queue.Empty:
                     continue
 
-                # Process through pipeline
+                # Check event type - handle device events separately
+                event_type = raw_conn.get("type", "connection")
+
+                if event_type == "device":
+                    # Process device discovery event (persist to DB)
+                    self._process_device_event(raw_conn)
+                    continue
+
+                # Process connection through pipeline
                 event = self._process_connection(raw_conn)
 
                 if event:
@@ -479,6 +500,46 @@ class DataPipeline:
             return self.ip_reputation.check_ip(dst_ip) or {}
         except Exception:
             return {}
+
+    def _process_device_event(self, raw_event: Dict):
+        """
+        Process a device discovery event (ARP, broadcast, or connection source)
+
+        Persists discovered devices to the database for the Device Discovery widget.
+        """
+        if not self.database:
+            return
+
+        try:
+            mac = raw_event.get("mac")
+            if not mac:
+                return
+
+            ip = raw_event.get("ip")
+            vendor = raw_event.get("vendor")
+            packet_type = raw_event.get("packet_type", "unknown")
+
+            # For connection events, also get threat score from the associated connection
+            threat_score = 0.0
+            if packet_type == "connection":
+                # We'll update threat score when we process the actual connection
+                # For now just track the device
+                pass
+
+            # Persist to database
+            self.database.upsert_device(
+                mac=mac,
+                ip=ip,
+                vendor=vendor,
+                packet_type=packet_type,
+                threat_score=threat_score
+            )
+
+            # Log discovery of new devices (first time only)
+            logger.debug(f"Device event: {packet_type} from {mac} ({vendor or 'Unknown'})")
+
+        except Exception as e:
+            logger.debug(f"Device event processing error: {e}")
 
     def _process_connection(self, raw_conn: Dict) -> Optional[ConnectionEvent]:
         """
@@ -606,6 +667,20 @@ class DataPipeline:
                         with self.stats_lock:
                             self.stats.anomalies_detected += 1
 
+                        # Post anomaly event to dashboard UIEventHandler
+                        try:
+                            from src.utils.logging_config import UIEventPoster
+                            severity = "CRITICAL" if anomaly_score > 0.8 else "HIGH" if anomaly_score > 0.5 else "MEDIUM"
+                            message = f"{anomaly_type.upper()}: {dst_ip} (score: {anomaly_score:.2f})"
+                            UIEventPoster.anomaly(message, severity, {
+                                'dst_ip': dst_ip,
+                                'anomaly_type': anomaly_type,
+                                'anomaly_score': anomaly_score,
+                                'factors': anomaly.get("factors", []),
+                            })
+                        except Exception as e:
+                            logger.debug(f"Failed to post anomaly event: {e}")
+
                 with self.stats_lock:
                     self.stats.analytics_processed += 1
 
@@ -661,6 +736,20 @@ class DataPipeline:
                 })
             except Exception as e:
                 logger.debug(f"Database storage failed: {e}")
+
+            # Also update device record with connection threat score
+            src_mac = raw_conn.get("src_mac")
+            if src_mac:
+                try:
+                    self.database.upsert_device(
+                        mac=src_mac,
+                        ip=src_ip,
+                        vendor=raw_conn.get("device_vendor"),
+                        packet_type="connection",
+                        threat_score=threat_score
+                    )
+                except Exception:
+                    pass
 
         # Stage 6: Export
         if self.exporter and scoring_method == "consensus":

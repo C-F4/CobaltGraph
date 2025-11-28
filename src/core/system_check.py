@@ -154,7 +154,6 @@ class SystemChecker:
         """Check CobaltGraph components"""
         components = [
             ("src.core.config", "Configuration System"),
-            ("src.ui.dashboard", "Dashboard"),
             ("src.capture.device_monitor", "Device Monitor"),
             ("src.storage.database", "Database Layer"),
             ("src.services.geo_lookup", "Geolocation Service"),
@@ -177,6 +176,41 @@ class SystemChecker:
                     message=f"{display_name} failed: {e}",
                     critical=True
                 ))
+
+        # Check dashboard components (at least one must be available)
+        dashboard_modules = [
+            ("src.ui.device_dashboard", "Device Dashboard"),
+            ("src.ui.network_dashboard", "Network Dashboard"),
+            ("src.ui.enhanced_lean_dashboard", "Enhanced Lean Dashboard (fallback)"),
+        ]
+
+        dashboard_available = False
+        for module_path, display_name in dashboard_modules:
+            try:
+                importlib.import_module(module_path)
+                self.results.append(CheckResult(
+                    name=display_name,
+                    passed=True,
+                    message=f"{display_name} ✓",
+                    critical=False
+                ))
+                dashboard_available = True
+            except ImportError as e:
+                self.results.append(CheckResult(
+                    name=display_name,
+                    passed=False,
+                    message=f"{display_name} not available",
+                    critical=False
+                ))
+
+        # At least one dashboard must be available
+        if not dashboard_available:
+            self.results.append(CheckResult(
+                name="Dashboard System",
+                passed=False,
+                message="No dashboard modules available (device/network/enhanced_lean)",
+                critical=True
+            ))
 
     def _check_database(self):
         """Verify SQLite database access"""
