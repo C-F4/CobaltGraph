@@ -3,45 +3,24 @@
 CobaltGraph Network Mode Dashboard
 Network topology focused - "What's happening on my network?"
 
-Layout:
-┌─────────────────────────┬─────────────────────┬──────────────────┐
-│ Network Topology Panel  │ Connection Table    │ Lightweight Globe│
-│ (Device→Dest Flow)      │ (30%)               │ (ASCII Textures) │
-│ (20%)                   │                     │ (20%)            │
-│                         │ Time|SrcMAC|Vendor  ├──────────────────┤
-│ [Device] → [Dest IPs]   │ DstIP|Port|Score    │ Device Discovery │
-│ AA:BB:CC (Apple)        │ Org|Hops|OS         │ Panel (15%)      │
-│   ├─► 142.250.80.46:443 │                     │                  │
-│   ├─► 8.8.8.8:53        │ Aggregated view:    │ MAC | Vendor     │
-│   └─► 1.1.1.1:443       │ Group by dest IP    │ IP  | Threats    │
-│                         │ Show device+count   │ Count| Score     │
-├─────────────────────────┤                     │                  │
-│ Threat Posture Panel    │ [D]evices [T]opo    │ [G]lobe toggle   │
-│ (Network-wide) (20%)    │ [F]ilter [E]xport   ├──────────────────┤
-│                         │                     │ Org Intelligence │
-│ Network Threat: 0.45    │ Shows passive       │ Panel (15%)      │
-│ 24h Baseline: 0.38      │ fingerprinting:     │                  │
-│ Devices: 12             │ - MAC vendor        │ Risk matrix      │
-│ High-Threat: 3          │ - OS detection      │ (Threat vs Trust)│
-│                         │ - Hop count         │                  │
-└─────────────────────────┴─────────────────────┴──────────────────┘
+Uses unified DataManager and VisualizationManager from BaseDashboard.
+Components register with viz_manager for automatic data updates.
 
-Features:
-- Network topology panel shows device→destination flows
-- Device discovery panel shows MAC vendor and OS fingerprinting
-- Lightweight globe with ASCII textures
-- Full passive fingerprinting display
+Layout:
+├─ Header
+├─ Main Content (2-column layout)
+│  ├─ Left (30%): Topology + ThreatPosture
+│  └─ Right (70%): Globe + ConnectionTable + Devices + OrgPanel
+└─ Footer
 """
 
 import logging
-import json
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import List, Dict
 
 from rich.text import Text
 from rich.panel import Panel
-from rich.table import Table as RichTable
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, Container
@@ -631,6 +610,10 @@ class NetworkDashboard(NetworkDashboardBase):
         self.org_panel = None
         self.threat_history = deque(maxlen=60)  # 60-minute trend
 
+        # Register components with visualization manager
+        self.viz_manager.register_component("connections", self._on_connections_update)
+        self.viz_manager.register_component("devices", self._on_devices_update)
+
     def compose(self) -> ComposeResult:
         """Create optimized network mode layout with globe and threat visualization"""
         yield Header()
@@ -672,60 +655,58 @@ class NetworkDashboard(NetworkDashboardBase):
     def on_mount(self) -> None:
         """Initialize after mount"""
         super().on_mount()
-        self.title = "CobaltGraph - Network Mode (Network Topology)"
+        self.title = "CobaltGraph - Network Mode"
 
-        # Set initial data
-        self._update_panels()
-
-    def _refresh_data(self) -> None:
-        """Refresh data from database"""
-        super()._refresh_data()
-        self._update_panels()
-
-    def _update_panels(self) -> None:
-        """Update all dashboard panels"""
-        if not self.is_connected:
+    def _on_connections_update(self, connections: List[Dict]) -> None:
+        """Called by viz_manager when connections update"""
+        if not connections:
             return
 
         # Update connection table
-        if self.connection_table and self._connection_cache:
-            self.connection_table.update_connections(self._connection_cache)
+        if self.connection_table:
+            self.connection_table.update_connections(connections)
 
-        # Update threat globe with connection data
-        if self.threat_globe and self._connection_cache:
-            self.threat_globe.update_with_connections(self._connection_cache)
+        # Update threat globe
+        if self.threat_globe:
+            self.threat_globe.update_with_connections(connections)
 
-        # Update network topology
-        if self.topology_panel:
-            self.topology_panel.update_flows(
-                self._connection_cache,
-                self._device_cache
-            )
+        # Update threats
+        threats = [c.get('threat_score', 0) or 0 for c in connections]
+        if threats:
+            current_threat = sum(threats) / len(threats)
+            self.threat_history.append(current_threat)
 
-        # Update device discovery
-        if self.devices_panel and self._device_cache:
-            self.devices_panel.update_devices(self._device_cache)
+        # Update topology
+        if self.topology_panel and self._device_cache:
+            self.topology_panel.update_flows(connections, self._device_cache)
 
-        # Calculate threat posture data
-        threat_data = self._calculate_threat_posture()
-
-        # Update threat posture panel
+        # Update threat posture
+        threat_data = self._calculate_threat_posture(connections)
         if self.threat_posture_panel:
             self.threat_posture_panel.threat_data = threat_data
 
-        # Update trends panel
+        # Update trends
         if self.trends_panel and self.threat_history:
             for threat in list(self.threat_history)[-1:]:
                 self.trends_panel.update_history(threat)
 
         # Update organization intelligence
-        org_data = self._calculate_organization_data()
+        org_data = self._calculate_organization_data(connections)
         if self.org_panel:
             self.org_panel.org_data = org_data
 
-    def _calculate_threat_posture(self) -> Dict:
+    def _on_devices_update(self, devices: List[Dict]) -> None:
+        """Called by viz_manager when devices update"""
+        if not devices:
+            return
+
+        # Update device discovery panel
+        if self.devices_panel:
+            self.devices_panel.update_devices(devices)
+
+    def _calculate_threat_posture(self, connections: List[Dict]) -> Dict:
         """Calculate network-wide threat posture"""
-        if not self._connection_cache:
+        if not connections:
             return {
                 'current_threat': 0.0,
                 'baseline_threat': 0.0,
@@ -735,24 +716,18 @@ class NetworkDashboard(NetworkDashboardBase):
             }
 
         # Current threat = average of recent connections
-        recent_threats = [
-            float(conn.get('threat_score', 0) or 0)
-            for conn in self._connection_cache[:20]
-        ]
+        recent_threats = [float(c.get('threat_score', 0) or 0) for c in connections[:20]]
         current_threat = sum(recent_threats) / len(recent_threats) if recent_threats else 0
 
         # Baseline threat = average of all connections
-        all_threats = [
-            float(conn.get('threat_score', 0) or 0)
-            for conn in self._connection_cache
-        ]
+        all_threats = [float(c.get('threat_score', 0) or 0) for c in connections]
         baseline_threat = sum(all_threats) / len(all_threats) if all_threats else 0
 
         # Active threats
-        active_threats = sum(1 for conn in self._connection_cache if float(conn.get('threat_score', 0) or 0) >= 0.7)
+        active_threats = sum(1 for c in connections if float(c.get('threat_score', 0) or 0) >= 0.7)
 
-        # Monitored IPs = unique destination IPs
-        monitored_ips = len(set(conn.get('dst_ip') for conn in self._connection_cache))
+        # Monitored IPs
+        monitored_ips = len(set(c.get('dst_ip') for c in connections))
 
         return {
             'current_threat': current_threat,
@@ -762,7 +737,7 @@ class NetworkDashboard(NetworkDashboardBase):
             'anomaly_count': self.stats.get('anomalies_detected', 0),
         }
 
-    def _calculate_organization_data(self) -> Dict:
+    def _calculate_organization_data(self, connections: List[Dict]) -> Dict:
         """Calculate organization intelligence"""
         org_stats = defaultdict(lambda: {
             'count': 0,
@@ -771,7 +746,7 @@ class NetworkDashboard(NetworkDashboardBase):
             'trust_sum': 0.0,
         })
 
-        for conn in self._connection_cache:
+        for conn in connections:
             org = conn.get('dst_org', 'Unknown')
             org_stats[org]['count'] += 1
             threat = float(conn.get('threat_score', 0) or 0)
@@ -807,13 +782,9 @@ class NetworkDashboard(NetworkDashboardBase):
         logger.info("Fingerprinting action triggered")
 
     def _on_live_connection(self, conn_dict: Dict) -> None:
-        """Handle live connection events from pipeline"""
-        # Track threat history for trends
-        threat = conn_dict.get('threat_score', 0) or 0
-        self.threat_history.append(threat)
-
-        # Update panels with live data
-        self._update_panels()
+        """Handle live connection from pipeline"""
+        # Delegated to _on_connections_update via viz_manager
+        pass
 
     def action_export(self) -> None:
         """Export data"""
