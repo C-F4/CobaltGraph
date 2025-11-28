@@ -278,11 +278,41 @@ class NetworkMonitor:
         src_mac = ":".join(f"{b:02x}" for b in src_mac_bytes)
         dest_mac = ":".join(f"{b:02x}" for b in dest_mac_bytes)
 
+        # Determine if this is a broadcast frame
+        is_broadcast = dest_mac == "ff:ff:ff:ff:ff:ff"
+
         return {
             "src_mac": src_mac,
             "dest_mac": dest_mac,
             "eth_type": eth_type,
+            "is_broadcast": is_broadcast,
             "payload": data[14:],
+        }
+
+    def parse_arp_packet(self, data: bytes) -> Optional[Dict]:
+        """
+        Parse ARP packet to extract sender/target info
+
+        ARP Packet Format:
+        [HW Type: 2][Proto Type: 2][HW Size: 1][Proto Size: 1]
+        [Opcode: 2][Sender MAC: 6][Sender IP: 4][Target MAC: 6][Target IP: 4]
+        """
+        if len(data) < 28:
+            return None
+
+        opcode = struct.unpack("!H", data[6:8])[0]
+        sender_mac = ":".join(f"{b:02x}" for b in data[8:14])
+        sender_ip = socket.inet_ntoa(data[14:18])
+        target_mac = ":".join(f"{b:02x}" for b in data[18:24])
+        target_ip = socket.inet_ntoa(data[24:28])
+
+        return {
+            "opcode": opcode,  # 1 = request, 2 = reply
+            "sender_mac": sender_mac,
+            "sender_ip": sender_ip,
+            "target_mac": target_mac,
+            "target_ip": target_ip,
+            "is_gratuitous": sender_ip == target_ip,
         }
 
     def parse_ipv4_packet(self, data: bytes) -> Optional[Dict]:
@@ -360,6 +390,49 @@ class NetworkMonitor:
 
         # Track source device
         src_mac = eth_frame["src_mac"]
+        is_broadcast = eth_frame.get("is_broadcast", False)
+
+        # Handle ARP packets (0x0806)
+        if eth_frame["eth_type"] == 0x0806:
+            arp_packet = self.parse_arp_packet(eth_frame["payload"])
+            if arp_packet:
+                # Track device from ARP
+                self.track_device(arp_packet["sender_mac"], arp_packet["sender_ip"])
+
+                # Emit device discovery event for ARP
+                device_event = {
+                    "type": "device",
+                    "event": "arp",
+                    "timestamp": datetime.now().isoformat(),
+                    "mac": arp_packet["sender_mac"],
+                    "ip": arp_packet["sender_ip"],
+                    "vendor": self.devices.get(arp_packet["sender_mac"], NetworkDevice("")).vendor,
+                    "packet_type": "arp",
+                    "arp_opcode": arp_packet["opcode"],
+                    "is_gratuitous": arp_packet["is_gratuitous"],
+                    "metadata": {"network_mode": self.mode, "interface": self.interface},
+                }
+                print(json.dumps(device_event), flush=True)
+            return
+
+        # Handle broadcast frames (emit device event)
+        if is_broadcast and eth_frame["eth_type"] == 0x0800:
+            # Track device from broadcast
+            ip_packet = self.parse_ipv4_packet(eth_frame["payload"])
+            if ip_packet:
+                self.track_device(src_mac, ip_packet["src_ip"])
+
+                device_event = {
+                    "type": "device",
+                    "event": "broadcast",
+                    "timestamp": datetime.now().isoformat(),
+                    "mac": src_mac,
+                    "ip": ip_packet["src_ip"],
+                    "vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
+                    "packet_type": "broadcast",
+                    "metadata": {"network_mode": self.mode, "interface": self.interface},
+                }
+                print(json.dumps(device_event), flush=True)
 
         # Only process IPv4 packets (0x0800)
         if eth_frame["eth_type"] != 0x0800:
@@ -401,7 +474,7 @@ class NetworkMonitor:
             if src_mac in self.devices:
                 self.devices[src_mac].connection_count += 1
 
-            # Emit connection event
+            # Emit connection event (includes source device info for tracking)
             connection = {
                 "type": "connection",
                 "timestamp": datetime.now().isoformat(),
@@ -416,6 +489,21 @@ class NetworkMonitor:
 
             print(json.dumps(connection), flush=True)
             self.connections.append(connection)
+
+            # Also emit device event for the source device making connection
+            device_event = {
+                "type": "device",
+                "event": "connection",
+                "timestamp": datetime.now().isoformat(),
+                "mac": src_mac,
+                "ip": src_ip,
+                "vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
+                "packet_type": "connection",
+                "dst_ip": dest_ip,
+                "dst_port": ip_packet["dest_port"],
+                "metadata": {"network_mode": self.mode, "interface": self.interface},
+            }
+            print(json.dumps(device_event), flush=True)
 
     def start_capture(self):
         """Start network packet capture"""

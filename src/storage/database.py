@@ -39,8 +39,8 @@ class Database:
     """
 
     # Batch configuration
-    BATCH_SIZE = 100  # Flush after N pending inserts
-    BATCH_TIMEOUT = 2.0  # Flush after N seconds regardless of size
+    BATCH_SIZE = 50  # Flush after N pending inserts
+    BATCH_TIMEOUT = 0.5  # Flush after N seconds regardless of size (faster for dashboard)
 
     # Column definitions for batch operations
     INSERT_COLUMNS = [
@@ -205,6 +205,43 @@ class Database:
                     except sqlite3.Error:
                         pass
 
+                # Discovered devices table (network mode)
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS devices (
+                        mac TEXT PRIMARY KEY,
+                        ip_addresses TEXT,
+                        vendor TEXT,
+                        hostname TEXT,
+                        first_seen REAL NOT NULL,
+                        last_seen REAL NOT NULL,
+                        packet_count INTEGER DEFAULT 0,
+                        connection_count INTEGER DEFAULT 0,
+                        threat_score_sum REAL DEFAULT 0,
+                        high_threat_count INTEGER DEFAULT 0,
+                        broadcast_count INTEGER DEFAULT 0,
+                        arp_count INTEGER DEFAULT 0,
+                        is_active INTEGER DEFAULT 1,
+                        risk_flags TEXT,
+                        notes TEXT
+                    )
+                """)
+
+                # Device indexes
+                device_indexes = [
+                    ("idx_device_last_seen", "devices(last_seen DESC)"),
+                    ("idx_device_threat", "devices(threat_score_sum DESC)"),
+                    ("idx_device_active", "devices(is_active, last_seen DESC)"),
+                ]
+
+                for idx_name, idx_def in device_indexes:
+                    try:
+                        self.conn.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}")
+                    except sqlite3.Error:
+                        pass
+
+                # Create optimized views for intelligence dashboard
+                self._create_intelligence_views()
+
                 self.conn.commit()
                 logger.debug("Optimized schema initialized with %d indexes", len(indexes))
 
@@ -235,6 +272,118 @@ class Database:
                     logger.info(f"Migrated: added column {col_name}")
                 except sqlite3.Error:
                     pass
+
+    def _create_intelligence_views(self):
+        """
+        Create optimized database views for intelligence aggregation
+
+        These views provide pre-computed aggregations for dashboard queries,
+        dramatically improving performance for common intelligence queries
+        """
+        try:
+            # Threat posture view - 5 minute window
+            self.conn.execute("""
+                CREATE VIEW IF NOT EXISTS threat_posture_5min AS
+                SELECT
+                    AVG(threat_score) as current_threat,
+                    COUNT(*) as total_connections,
+                    COUNT(CASE WHEN threat_score > 0.7 THEN 1 END) as high_threats,
+                    COUNT(CASE WHEN threat_score > 0.4 AND threat_score <= 0.7 THEN 1 END) as medium_threats,
+                    MAX(timestamp) as latest_timestamp,
+                    MIN(timestamp) as earliest_timestamp
+                FROM connections
+                WHERE timestamp > (SELECT MAX(timestamp) FROM connections) - 300
+            """)
+
+            # Organization intelligence view - 1 hour window
+            self.conn.execute("""
+                CREATE VIEW IF NOT EXISTS org_intelligence_1hour AS
+                SELECT
+                    dst_org,
+                    dst_org_type,
+                    COUNT(*) as conn_count,
+                    AVG(threat_score) as avg_threat,
+                    MAX(threat_score) as max_threat,
+                    COUNT(DISTINCT dst_ip) as unique_ips,
+                    AVG(COALESCE(org_trust_score, 0.5)) as avg_trust,
+                    MIN(timestamp) as first_seen,
+                    MAX(timestamp) as last_seen
+                FROM connections
+                WHERE timestamp > (SELECT MAX(timestamp) FROM connections) - 3600
+                  AND dst_org IS NOT NULL
+                GROUP BY dst_org, dst_org_type
+                ORDER BY conn_count DESC
+            """)
+
+            # Geographic intelligence view - 1 hour window
+            self.conn.execute("""
+                CREATE VIEW IF NOT EXISTS geo_intelligence_1hour AS
+                SELECT
+                    dst_country,
+                    COUNT(*) as conn_count,
+                    AVG(threat_score) as avg_threat,
+                    MAX(threat_score) as max_threat,
+                    COUNT(DISTINCT dst_ip) as unique_ips,
+                    COUNT(DISTINCT dst_asn) as unique_asns
+                FROM connections
+                WHERE timestamp > (SELECT MAX(timestamp) FROM connections) - 3600
+                  AND dst_country IS NOT NULL
+                GROUP BY dst_country
+                ORDER BY avg_threat DESC
+            """)
+
+            # Temporal trends view - 1 minute buckets, last hour
+            # Note: This is a template; actual queries will use parameterized time buckets
+            self.conn.execute("""
+                CREATE VIEW IF NOT EXISTS temporal_trends_1hour AS
+                SELECT
+                    CAST((timestamp / 60) AS INTEGER) * 60 as time_bucket,
+                    COUNT(*) as conn_count,
+                    AVG(threat_score) as avg_threat,
+                    COUNT(CASE WHEN threat_score > 0.7 THEN 1 END) as high_threat_count,
+                    COUNT(DISTINCT dst_ip) as unique_ips
+                FROM connections
+                WHERE timestamp > (SELECT MAX(timestamp) FROM connections) - 3600
+                GROUP BY time_bucket
+                ORDER BY time_bucket ASC
+            """)
+
+            # High-value connections view - for alert generation
+            self.conn.execute("""
+                CREATE VIEW IF NOT EXISTS high_value_connections AS
+                SELECT
+                    src_ip, src_mac, dst_ip, dst_port, dst_org, dst_org_type,
+                    threat_score, timestamp, device_vendor,
+                    dst_asn, dst_country, org_trust_score
+                FROM connections
+                WHERE threat_score > 0.4
+                   OR dst_org_type IN ('tor_proxy', 'vpn', 'hosting')
+                ORDER BY timestamp DESC
+            """)
+
+            # ASN intelligence view
+            self.conn.execute("""
+                CREATE VIEW IF NOT EXISTS asn_intelligence_1hour AS
+                SELECT
+                    dst_asn,
+                    dst_asn_name,
+                    COUNT(*) as conn_count,
+                    AVG(threat_score) as avg_threat,
+                    MAX(threat_score) as max_threat,
+                    COUNT(DISTINCT dst_ip) as unique_ips,
+                    MIN(timestamp) as first_seen,
+                    MAX(timestamp) as last_seen
+                FROM connections
+                WHERE timestamp > (SELECT MAX(timestamp) FROM connections) - 3600
+                  AND dst_asn IS NOT NULL
+                GROUP BY dst_asn, dst_asn_name
+                ORDER BY avg_threat DESC
+            """)
+
+            logger.debug("Intelligence views created successfully")
+
+        except sqlite3.Error as e:
+            logger.warning(f"Failed to create intelligence views: {e}")
 
     def _start_flush_thread(self):
         """Start background thread for periodic batch flushing"""
@@ -702,6 +851,321 @@ class Database:
 
         except sqlite3.Error as e:
             logger.error(f"Failed to cleanup events: {e}")
+
+    # =========================================================================
+    # DEVICE DISCOVERY METHODS (Network Mode)
+    # =========================================================================
+
+    def upsert_device(self, mac: str, ip: str = None, vendor: str = None,
+                      hostname: str = None, packet_type: str = None,
+                      threat_score: float = 0.0):
+        """
+        Insert or update a discovered device
+
+        Args:
+            mac: MAC address (primary key)
+            ip: IP address observed
+            vendor: Vendor name from OUI lookup
+            hostname: Hostname if discovered
+            packet_type: Type of packet (arp, broadcast, connection)
+            threat_score: Threat score from associated connection
+        """
+        import json
+        now = time.time()
+
+        try:
+            with self.lock:
+                # Check if device exists
+                cursor = self.conn.execute(
+                    "SELECT ip_addresses, packet_count, connection_count, "
+                    "threat_score_sum, high_threat_count, broadcast_count, arp_count "
+                    "FROM devices WHERE mac = ?",
+                    (mac,)
+                )
+                existing = cursor.fetchone()
+
+                if existing:
+                    # Update existing device
+                    ip_addresses = json.loads(existing[0]) if existing[0] else []
+                    if ip and ip not in ip_addresses:
+                        ip_addresses.append(ip)
+
+                    packet_count = existing[1] + 1
+                    connection_count = existing[2]
+                    threat_sum = existing[3]
+                    high_threat_count = existing[4]
+                    broadcast_count = existing[5]
+                    arp_count = existing[6]
+
+                    # Update counters based on packet type
+                    if packet_type == 'connection':
+                        connection_count += 1
+                        threat_sum += threat_score
+                        if threat_score >= 0.5:
+                            high_threat_count += 1
+                    elif packet_type == 'broadcast':
+                        broadcast_count += 1
+                    elif packet_type == 'arp':
+                        arp_count += 1
+
+                    self.conn.execute("""
+                        UPDATE devices SET
+                            ip_addresses = ?,
+                            vendor = COALESCE(?, vendor),
+                            hostname = COALESCE(?, hostname),
+                            last_seen = ?,
+                            packet_count = ?,
+                            connection_count = ?,
+                            threat_score_sum = ?,
+                            high_threat_count = ?,
+                            broadcast_count = ?,
+                            arp_count = ?,
+                            is_active = 1
+                        WHERE mac = ?
+                    """, (
+                        json.dumps(ip_addresses), vendor, hostname, now,
+                        packet_count, connection_count, threat_sum,
+                        high_threat_count, broadcast_count, arp_count, mac
+                    ))
+                else:
+                    # Insert new device
+                    ip_addresses = [ip] if ip else []
+                    connection_count = 1 if packet_type == 'connection' else 0
+                    broadcast_count = 1 if packet_type == 'broadcast' else 0
+                    arp_count = 1 if packet_type == 'arp' else 0
+                    high_threat_count = 1 if threat_score >= 0.5 else 0
+
+                    self.conn.execute("""
+                        INSERT INTO devices (
+                            mac, ip_addresses, vendor, hostname,
+                            first_seen, last_seen, packet_count,
+                            connection_count, threat_score_sum, high_threat_count,
+                            broadcast_count, arp_count, is_active
+                        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 1)
+                    """, (
+                        mac, json.dumps(ip_addresses), vendor, hostname,
+                        now, now, connection_count, threat_score,
+                        high_threat_count, broadcast_count, arp_count
+                    ))
+
+                self.conn.commit()
+
+        except sqlite3.Error as e:
+            logger.error(f"Failed to upsert device: {e}")
+
+    def get_discovered_devices(self, active_only: bool = False,
+                                limit: int = 100) -> List[Dict]:
+        """
+        Get list of discovered devices
+
+        Args:
+            active_only: Only return devices seen in last 5 minutes
+            limit: Maximum number of devices to return
+
+        Returns:
+            List of device dictionaries with threat scoring
+        """
+        import json
+
+        try:
+            with self.lock:
+                if active_only:
+                    cutoff = time.time() - 300  # 5 minutes
+                    cursor = self.conn.execute("""
+                        SELECT mac, ip_addresses, vendor, hostname,
+                               first_seen, last_seen, packet_count,
+                               connection_count, threat_score_sum, high_threat_count,
+                               broadcast_count, arp_count, risk_flags, notes
+                        FROM devices
+                        WHERE last_seen > ?
+                        ORDER BY last_seen DESC
+                        LIMIT ?
+                    """, (cutoff, limit))
+                else:
+                    cursor = self.conn.execute("""
+                        SELECT mac, ip_addresses, vendor, hostname,
+                               first_seen, last_seen, packet_count,
+                               connection_count, threat_score_sum, high_threat_count,
+                               broadcast_count, arp_count, risk_flags, notes
+                        FROM devices
+                        ORDER BY last_seen DESC
+                        LIMIT ?
+                    """, (limit,))
+
+                devices = []
+                now = time.time()
+
+                for row in cursor.fetchall():
+                    mac = row[0]
+                    ip_addresses = json.loads(row[1]) if row[1] else []
+                    connection_count = row[7] or 0
+                    threat_sum = row[8] or 0
+                    high_threat_count = row[9] or 0
+                    broadcast_count = row[10] or 0
+                    arp_count = row[11] or 0
+
+                    # Calculate average threat score
+                    avg_threat = threat_sum / connection_count if connection_count > 0 else 0
+
+                    # Calculate risk level based on available passive indicators
+                    risk_flags = []
+                    risk_score = 0.0
+
+                    # Unknown vendor is suspicious
+                    if not row[2]:
+                        risk_flags.append("UNKNOWN_VENDOR")
+                        risk_score += 0.2
+
+                    # Multiple IPs could indicate spoofing
+                    if len(ip_addresses) > 3:
+                        risk_flags.append("MULTI_IP")
+                        risk_score += 0.15
+
+                    # High broadcast rate (relative)
+                    if broadcast_count > 100:
+                        risk_flags.append("HIGH_BROADCAST")
+                        risk_score += 0.1
+
+                    # High threat connections (if we see them)
+                    if high_threat_count > 0:
+                        risk_flags.append(f"HIGH_THREAT_CONNS:{high_threat_count}")
+                        risk_score += min(0.4, high_threat_count * 0.1)
+
+                    # Average threat from connections
+                    risk_score += avg_threat * 0.3
+
+                    # Determine threat level
+                    if risk_score >= 0.5:
+                        threat_level = "HIGH"
+                    elif risk_score >= 0.25:
+                        threat_level = "MEDIUM"
+                    else:
+                        threat_level = "LOW"
+
+                    devices.append({
+                        "mac": mac,
+                        "ip_addresses": ip_addresses,
+                        "primary_ip": ip_addresses[0] if ip_addresses else None,
+                        "vendor": row[2] or "Unknown",
+                        "hostname": row[3],
+                        "first_seen": row[4],
+                        "last_seen": row[5],
+                        "packet_count": row[6] or 0,
+                        "connection_count": connection_count,
+                        "avg_threat": avg_threat,
+                        "high_threat_count": high_threat_count,
+                        "broadcast_count": broadcast_count,
+                        "arp_count": arp_count,
+                        "risk_score": min(1.0, risk_score),
+                        "threat_level": threat_level,
+                        "risk_flags": risk_flags,
+                        "is_active": (now - row[5]) < 300,
+                        "notes": row[13],
+                    })
+
+                return devices
+
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get devices: {e}")
+            return []
+
+    def get_device_by_mac(self, mac: str) -> Optional[Dict]:
+        """Get a single device by MAC address"""
+        devices = self.get_discovered_devices(limit=1)
+        # Re-query with filter
+        import json
+        try:
+            with self.lock:
+                cursor = self.conn.execute("""
+                    SELECT mac, ip_addresses, vendor, hostname,
+                           first_seen, last_seen, packet_count,
+                           connection_count, threat_score_sum, high_threat_count,
+                           broadcast_count, arp_count, risk_flags, notes
+                    FROM devices WHERE mac = ?
+                """, (mac,))
+                row = cursor.fetchone()
+                if row:
+                    ip_addresses = json.loads(row[1]) if row[1] else []
+                    connection_count = row[7] or 0
+                    threat_sum = row[8] or 0
+                    avg_threat = threat_sum / connection_count if connection_count > 0 else 0
+
+                    return {
+                        "mac": row[0],
+                        "ip_addresses": ip_addresses,
+                        "primary_ip": ip_addresses[0] if ip_addresses else None,
+                        "vendor": row[2] or "Unknown",
+                        "hostname": row[3],
+                        "first_seen": row[4],
+                        "last_seen": row[5],
+                        "packet_count": row[6] or 0,
+                        "connection_count": connection_count,
+                        "avg_threat": avg_threat,
+                    }
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get device: {e}")
+        return None
+
+    def get_connections_by_device(self, mac: str, limit: int = 100) -> List[Dict]:
+        """Get connections made by a specific device (for drill-down)"""
+        self._flush_batch()
+
+        try:
+            with self.lock:
+                cursor = self.conn.execute("""
+                    SELECT src_mac, src_ip, dst_ip, dst_port, dst_country, dst_lat, dst_lon,
+                           dst_org, dst_hostname, threat_score, timestamp, device_vendor, protocol,
+                           dst_asn, dst_asn_name, dst_org_type, dst_cidr,
+                           ttl_observed, ttl_initial, hop_count, os_fingerprint, org_trust_score
+                    FROM connections
+                    WHERE src_mac = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (mac, limit))
+
+                columns = [
+                    "src_mac", "src_ip", "dst_ip", "dst_port", "dst_country",
+                    "dst_lat", "dst_lon", "dst_org", "dst_hostname", "threat_score",
+                    "timestamp", "device_vendor", "protocol",
+                    "dst_asn", "dst_asn_name", "dst_org_type", "dst_cidr",
+                    "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score"
+                ]
+
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get device connections: {e}")
+            return []
+
+    def get_device_count(self, active_only: bool = False) -> int:
+        """Get count of discovered devices"""
+        try:
+            with self.lock:
+                if active_only:
+                    cutoff = time.time() - 300
+                    cursor = self.conn.execute(
+                        "SELECT COUNT(*) FROM devices WHERE last_seen > ?",
+                        (cutoff,)
+                    )
+                else:
+                    cursor = self.conn.execute("SELECT COUNT(*) FROM devices")
+                return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get device count: {e}")
+            return 0
+
+    def update_device_activity(self):
+        """Mark devices as inactive if not seen recently"""
+        try:
+            with self.lock:
+                cutoff = time.time() - 300  # 5 minutes
+                self.conn.execute(
+                    "UPDATE devices SET is_active = 0 WHERE last_seen < ? AND is_active = 1",
+                    (cutoff,)
+                )
+                self.conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to update device activity: {e}")
 
     def close(self):
         """Close database with final flush"""

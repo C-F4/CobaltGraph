@@ -380,3 +380,8 @@ class UIEventPoster:
     def system(message: str, severity: str = "INFO"):
         """Post a system event"""
         UIEventPoster.post("SYSTEM", message, severity)
+
+    @staticmethod
+    def anomaly(message: str, severity: str = "HIGH", metadata: Optional[dict] = None):
+        """Post an anomaly detection event"""
+        UIEventPoster.post("ANOMALY", message, severity, metadata)
