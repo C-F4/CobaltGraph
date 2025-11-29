@@ -44,6 +44,9 @@ class SmartConnectionTable(Static):
     Enhanced connection table for device mode
     Adaptive column sizing to prevent truncation
     Shows outbound connections with essential enrichment data
+
+    Uses call_later() to defer updates outside the render cycle,
+    preventing race conditions with DataTable's internal state.
     """
 
     DEFAULT_CSS = """
@@ -64,6 +67,7 @@ class SmartConnectionTable(Static):
         self.filtered_connections: List[Dict] = []
         self.filter_state = "all"  # all, high, medium, low, unknown
         self.table = None
+        self._update_pending = False
 
     def compose(self) -> ComposeResult:
         """Create data table with smart column sizing"""
@@ -84,9 +88,24 @@ class SmartConnectionTable(Static):
         yield self.table
 
     def update_connections(self, connections: List[Dict]) -> None:
-        """Update table with new connections and apply filters"""
+        """Update table with new connections and apply filters
+
+        Uses call_later() to defer updates outside render cycle.
+        """
         self.connections = connections
-        self._apply_filter()
+
+        # Defer the filter and render to avoid race conditions
+        # with the DataTable's render cycle
+        if not self._update_pending:
+            self._update_pending = True
+            self.call_later(self._apply_filter_deferred)
+
+    def _apply_filter_deferred(self) -> None:
+        """Deferred filter application (called outside render cycle)"""
+        try:
+            self._apply_filter()
+        finally:
+            self._update_pending = False
 
     def _apply_filter(self) -> None:
         """Apply current filter to connections"""
@@ -104,12 +123,23 @@ class SmartConnectionTable(Static):
         self._render_table()
 
     def _render_table(self) -> None:
-        """Render filtered connections in table"""
+        """Render filtered connections in table
+
+        Safely clears and repopulates the table, ensuring all rows
+        are consistent with filtered_connections list.
+        """
         if not self.table:
             return
 
-        self.table.clear()
+        # Clear all existing rows first
+        try:
+            self.table.clear()
+        except Exception as e:
+            logger.debug(f"Error clearing table: {e}")
+            return
 
+        # Build all row data before adding to avoid partial states
+        rows_to_add = []
         for conn in self.filtered_connections[:100]:  # Limit display
             timestamp = conn.get('timestamp', 0)
             if isinstance(timestamp, (int, float)):
@@ -136,7 +166,7 @@ class SmartConnectionTable(Static):
             trust = f"{(conn.get('org_trust_score', 0) or 0) * 100:.0f}%"
             hops = str(conn.get('hop_count', '-'))
 
-            self.table.add_row(
+            rows_to_add.append((
                 time_str,
                 Text(dst_ip, style="cyan"),
                 port,
@@ -146,13 +176,36 @@ class SmartConnectionTable(Static):
                 org_type,
                 trust,
                 hops,
-                key=f"conn_{id(conn)}"
-            )
+                f"conn_{id(conn)}"
+            ))
+
+        # Add all rows at once
+        for row_data in rows_to_add:
+            try:
+                self.table.add_row(
+                    row_data[0],
+                    row_data[1],
+                    row_data[2],
+                    row_data[3],
+                    row_data[4],
+                    row_data[5],
+                    row_data[6],
+                    row_data[7],
+                    row_data[8],
+                    key=row_data[9]
+                )
+            except Exception as e:
+                logger.debug(f"Error adding row to table: {e}")
+                continue
 
     def set_filter(self, filter_type: str) -> None:
         """Set filter type and refresh display"""
         self.filter_state = filter_type
-        self._apply_filter()
+
+        # Defer the filter update to avoid conflicts with rendering
+        if not self._update_pending:
+            self._update_pending = True
+            self.call_later(self._apply_filter_deferred)
 
 
 class ThreatGlobePanel(Static):
