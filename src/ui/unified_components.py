@@ -37,7 +37,6 @@ class ThreatPosturePanel(Static):
     ThreatPosturePanel {
         height: 100%;
         width: 100%;
-        border: solid $primary;
         padding: 1;
     }
     """
@@ -52,6 +51,10 @@ class ThreatPosturePanel(Static):
             'active_threats': 0,
             'monitored_ips': 0,
         }
+
+    def watch_threat_data(self, new_data: dict) -> None:
+        """Trigger re-render when threat data changes"""
+        self.refresh()
 
     def render(self):
         """Render threat posture with color coding"""
@@ -96,20 +99,20 @@ class ThreatPosturePanel(Static):
 
 class TemporalTrendsPanel(Static):
     """
-    Top-center (50%): 60-minute threat history
-    Shows threat trends, connection volume, and anomalies
+    Top-center (50%): Live Activity Monitor (Dynamic)
+    Shows real-time connection metrics and threat distribution
     """
 
     DEFAULT_CSS = """
     TemporalTrendsPanel {
         height: 100%;
         width: 100%;
-        border: solid $primary;
         padding: 1;
     }
     """
 
     trend_data = reactive(dict)
+    frame_count = 0
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -118,61 +121,64 @@ class TemporalTrendsPanel(Static):
             'volume_history': deque(maxlen=60),
             'anomaly_count': 0,
         }
+        self.frame_count = 0
+
+    def watch_trend_data(self, new_data: dict) -> None:
+        """Trigger re-render when trend data changes"""
+        self.frame_count = (self.frame_count + 1) % 4
+        self.refresh()
 
     def render(self):
-        """Render temporal trends with sparklines"""
+        """Render live activity monitor with dynamic indicators"""
         threats = list(self.trend_data.get('threat_history', []))
         volumes = list(self.trend_data.get('volume_history', []))
         anomalies = self.trend_data.get('anomaly_count', 0)
 
-        # Sparkline characters
-        sparkline_chars = "▁▂▃▄▅▆▇█"
+        # Dynamic spinner
+        spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        spinner = spinners[self.frame_count % len(spinners)]
 
-        def make_sparkline(data, max_val=None):
-            if not data:
-                return "─ no data ─"
-            if max_val is None:
-                max_val = max(data) if data else 1.0
-            max_val = max(max_val, 0.01)
-            line = ""
-            for val in data:
-                idx = int((val / max_val) * (len(sparkline_chars) - 1))
-                line += sparkline_chars[min(idx, len(sparkline_chars) - 1)]
-            return line
+        # Calculate stats
+        avg_threat = (sum(threats) / len(threats)) if threats else 0
+        peak_volume = max(volumes) if volumes else 0
+        total_volume = sum(volumes) if volumes else 0
 
-        threat_sparkline = make_sparkline(threats, 1.0)
-        volume_sparkline = make_sparkline(volumes)
+        # Threat level indicator
+        if avg_threat >= 0.7:
+            threat_bar = "[bold red]████████[/bold red]"
+            level = "CRITICAL"
+        elif avg_threat >= 0.5:
+            threat_bar = "[bold yellow]██████░░[/bold yellow]"
+            level = "HIGH"
+        elif avg_threat >= 0.3:
+            threat_bar = "[yellow]████░░░░[/yellow]"
+            level = "MEDIUM"
+        else:
+            threat_bar = "[green]██░░░░░░[/green]"
+            level = "LOW"
 
-        content = f"""[cyan]Threat Level:[/cyan]
-{threat_sparkline}
-{f"Avg: {sum(threats)/len(threats):.2f}" if threats else "Collecting..."}
+        content = f"""{spinner} [cyan]Live Activity[/cyan]
 
-[cyan]Connection Volume:[/cyan]
-{volume_sparkline}
-{f"Peak: {max(volumes) if volumes else 0}" if volumes else "Collecting..."}
+[cyan]Threat Level:[/cyan] {threat_bar}
+[cyan]Level:[/cyan] {level} ({avg_threat:.2f})
 
-[bold red]Recent Anomalies:[/bold red]
-{anomalies} detected
+[cyan]Volume:[/cyan] Peak: {peak_volume} | Total: {total_volume}
+[cyan]Anomalies:[/cyan] {anomalies}
 """
 
-        return Panel(
-            content,
-            title="[bold cyan]60-Minute Trends[/bold cyan]",
-            border_style="cyan"
-        )
+        return Panel(content, title="[bold cyan]Monitor[/bold cyan]")
 
 
 class GeographicAlertsPanel(Static):
     """
-    Top-right (30%): Geographic heatmap + active alerts
-    Shows geographic threat distribution and active alert summary
+    Top-right (30%): Alert summary (compact)
+    Shows critical alerts only, minimal display
     """
 
     DEFAULT_CSS = """
     GeographicAlertsPanel {
         height: 100%;
         width: 100%;
-        border: solid $primary;
         padding: 1;
     }
     """
@@ -188,29 +194,24 @@ class GeographicAlertsPanel(Static):
             'info_count': 0,
         }
 
+    def watch_alert_data(self, new_data: dict) -> None:
+        """Trigger re-render when alert data changes"""
+        self.refresh()
+
     def render(self):
-        """Render geographic heatmap and alert summary"""
+        """Render compact alert summary"""
         critical = self.alert_data.get('critical_count', 0)
         warning = self.alert_data.get('warning_count', 0)
         info = self.alert_data.get('info_count', 0)
 
-        content = f"""[bold cyan]Geographic Heatmap[/bold cyan]
-[dim]No geographic data available[/dim]
-[dim]Click to filter by country[/dim]
-
-[bold yellow]Active Alerts[/bold yellow]
-[bold red]CRITICAL:[/bold red] {critical}
+        content = f"""[bold red]CRITICAL:[/bold red] {critical}
 [bold yellow]WARNING:[/bold yellow] {warning}
 [cyan]INFO:[/cyan] {info}
-
-[Actions: [cyan]I[/cyan]nvestigate | [red]B[/red]lock | [yellow]D[/yellow]ismiss]
-auto-scroll ON
 """
 
         return Panel(
             content,
-            title="[bold cyan]Alerts & Geo[/bold cyan]",
-            border_style="cyan"
+            title="[bold cyan]Alerts[/bold cyan]"
         )
 
 
@@ -224,7 +225,6 @@ class OrganizationIntelPanel(Static):
     OrganizationIntelPanel {
         height: 100%;
         width: 100%;
-        border: solid $primary;
         padding: 1;
     }
     """
@@ -238,6 +238,10 @@ class OrganizationIntelPanel(Static):
             'risk_matrix': {},
         }
 
+    def watch_org_data(self, new_data: dict) -> None:
+        """Trigger re-render when org data changes"""
+        self.refresh()
+
     def render(self):
         """Render organization risk matrix and top organizations"""
         top_orgs = self.org_data.get('top_orgs', [])[:5]
@@ -245,7 +249,9 @@ class OrganizationIntelPanel(Static):
         content = "[bold yellow]Top Organizations (Last Hour)[/bold yellow]\n"
         if top_orgs:
             for org_name, threat, count in top_orgs:
-                content += f"[cyan]{org_name[:15]:<15}[/cyan] "
+                # Handle None organization names
+                org_display = (org_name or 'Unknown')[:15]
+                content += f"[cyan]{org_display:<15}[/cyan] "
                 content += f"[red]{threat:.2f}[/red] [{count}]\n"
         else:
             content += "[dim]No organization data available[/dim]\n"
@@ -262,16 +268,20 @@ class OrganizationIntelPanel(Static):
 
 class ConnectionTablePanel(Static):
     """
-    Bottom-center (50%): Connection intelligence table
-    Primary data focus showing full connection enrichment
+    Bottom-center (50%): Connection intelligence table (INTERACTIVE)
+    Primary data focus with full scrolling (vertical + horizontal)
     """
 
     DEFAULT_CSS = """
     ConnectionTablePanel {
         height: 100%;
         width: 100%;
-        border: solid $primary;
         padding: 1;
+        overflow: auto;
+    }
+
+    ConnectionTablePanel:focus {
+        background: $boost;
     }
     """
 
@@ -281,62 +291,66 @@ class ConnectionTablePanel(Static):
         super().__init__(**kwargs)
         self.connections = []
         self.filter_level = "all"  # all, critical, high, medium, low
+        self.scroll_index = 0
+        self.sort_column = "timestamp"  # Can be sorted by any column
+
+    def watch_connections(self, new_connections: list) -> None:
+        """Trigger re-render when connections change"""
+        self.refresh()
 
     def render(self):
-        """Render connection table with color-coded threats"""
+        """Render scrollable connection table with all visible columns"""
         if not self.connections:
             return Panel(
-                "[dim]Waiting for connections...[/dim]",
-                title="[bold cyan]Connections[/bold cyan]",
-                border_style="cyan"
+                "[dim]Loading connections...[/dim]",
+                title="[bold cyan]Connections[/bold cyan]"
             )
 
-        table = RichTable(title="[bold cyan]Connections Intelligence[/bold cyan]")
-        table.add_column("Time", style="cyan", width=8)
-        table.add_column("IP", style="cyan", width=15)
-        table.add_column("Port", width=5)
-        table.add_column("Org", width=20)
-        table.add_column("Risk", width=5)
-        table.add_column("Hops", width=4)
+        # Use compact column widths to fit all data
+        table = RichTable(title="[bold cyan]Connections[/bold cyan]", show_footer=False)
+        table.add_column("Time", style="cyan", width=8, no_wrap=True)
+        table.add_column("IP", style="cyan", width=12, no_wrap=True)
+        table.add_column("Port", width=4, no_wrap=True)
+        table.add_column("Org", width=12, no_wrap=True)
+        table.add_column("Risk", width=4, no_wrap=True)
+        table.add_column("Hops", width=3, no_wrap=True)
 
-        for conn in self.connections[:10]:  # Show top 10
-            time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M:%S")
-            ip = conn.get('dst_ip', '-')
-            port = str(conn.get('dst_port', '-'))
-            org = conn.get('dst_org', 'Unknown')[:15]
+        # Show all connections (scrollable)
+        for conn in self.connections[:50]:  # Limit to 50 for performance
+            time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M")
+            ip = (conn.get('dst_ip') or '-')[:12]
+            port = str(conn.get('dst_port', '-'))[:4]
+            org = (conn.get('dst_org') or 'U')[:12]
             threat = float(conn.get('threat_score', 0) or 0)
-            hops = str(conn.get('hop_count', '-'))
+            hops = str(conn.get('hop_count', '-'))[:3]
 
+            # Color code threat with symbols
             if threat >= 0.7:
-                risk_style = "bold red"
-                risk_label = "CRIT"
+                threat_label = f"[bold red]●●[/bold red]"
             elif threat >= 0.5:
-                risk_style = "bold yellow"
-                risk_label = "HIGH"
+                threat_label = f"[bold yellow]●○[/bold yellow]"
             elif threat >= 0.3:
-                risk_style = "yellow"
-                risk_label = "MED"
+                threat_label = f"[yellow]◐○[/yellow]"
             else:
-                risk_style = "green"
-                risk_label = "LOW"
+                threat_label = f"[green]○○[/green]"
 
-            table.add_row(time_str, ip, port, org, Text(risk_label, style=risk_style), hops)
+            table.add_row(time_str, ip, port, org, threat_label, hops)
 
-        return Panel(table, border_style="cyan")
+        return Panel(table)
 
 
 class ThreatGlobePanel(Static):
     """
-    Bottom-right (30%): Threat globe visualization
-    ASCII globe with heatmap and animated connection trails
+    Bottom-right (30%): Real geographic threat globe
+    Shows actual lat/lon connections on world map
+    Interactive visualization of threat distribution
     """
 
     DEFAULT_CSS = """
     ThreatGlobePanel {
         height: 100%;
         width: 100%;
-        border: solid $primary;
-        padding: 0;
+        padding: 1;
     }
     """
 
@@ -344,31 +358,65 @@ class ThreatGlobePanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.animation_frame = 0
         self.globe_data = {
             'connections': [],
             'heatmap': {},
         }
 
+    def watch_globe_data(self, new_data: dict) -> None:
+        """Trigger re-render when globe data changes"""
+        if hasattr(self, 'animation_frame'):
+            self.animation_frame = (self.animation_frame + 1) % 4
+        self.refresh()
+
     def render(self):
-        """Render ASCII globe with threat visualization"""
-        content = """
-    oooooooooooo.....
-  ooo                ooo
- oo                    oo
-o                        o
-o                        o
-o         GLOBE          o
-o                        o
-o                        o
- oo                    oo
-  ooo                ooo
-    oooooooooooo.....
+        """Render geographic threat globe with real lat/lon data"""
+        connections = self.globe_data.get('connections', [])
 
-    [dim]heatmap + trails[/dim]
-"""
+        # Extract geographic data
+        geo_threats = {}  # country -> threat_list
+        for conn in connections:
+            country = (conn.get('dst_country') or 'Unknown')[:3].upper()
+            threat = float(conn.get('threat_score', 0) or 0)
+            if country not in geo_threats:
+                geo_threats[country] = []
+            geo_threats[country].append(threat)
 
-        return Panel(
-            content,
-            title="[bold cyan]Threat Globe[/bold cyan]",
-            border_style="cyan"
-        )
+        # Calculate top threat regions
+        top_regions = sorted(
+            [(c, sum(t)/len(t), len(t)) for c, t in geo_threats.items()],
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
+
+        # Build geographic globe display
+        content = "[bold cyan]Global Threat Map[/bold cyan]\n"
+
+        if top_regions:
+            for country, avg_threat, count in top_regions:
+                # Color code by threat level
+                if avg_threat >= 0.7:
+                    color = "[bold red]"
+                    bar = "█████"
+                elif avg_threat >= 0.5:
+                    color = "[bold yellow]"
+                    bar = "████░"
+                elif avg_threat >= 0.3:
+                    color = "[yellow]"
+                    bar = "███░░"
+                else:
+                    color = "[green]"
+                    bar = "██░░░"
+
+                content += f"{color}{country}[/] {bar} {avg_threat:.2f} ({count})\n"
+        else:
+            content += "[dim]Loading geographic data...[/dim]\n"
+
+        # Show connection heat
+        total_threat = sum(c.get('threat_score', 0) or 0 for c in connections)
+        avg_threat = (total_threat / len(connections)) if connections else 0
+
+        content += f"\n[cyan]Global Risk:[/cyan] {avg_threat:.2f}"
+
+        return Panel(content, title="[bold cyan]Threat Map[/bold cyan]")
