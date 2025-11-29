@@ -277,7 +277,8 @@ class SmartConnectionTable(Static):
         self.table.add_column("Port", key="port", width=5)
         self.table.add_column("Org", key="org", width=18)
         self.table.add_column("Type", key="org_type", width=8)
-        self.table.add_column("Risk", key="threat", width=4)
+        self.table.add_column("Risk", key="threat", width=6)
+        self.table.add_column("Score", key="score", width=5)
         self.table.add_column("Hops", key="hops", width=4)
 
         yield self.table
@@ -328,6 +329,7 @@ class SmartConnectionTable(Static):
                     org,
                     org_type,
                     threat_label,
+                    f"{threat:.2f}",
                     hops,
                     key=str(conn.get('id', ''))
                 )
