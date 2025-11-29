@@ -192,10 +192,16 @@ class CobaltGraphMain:
 
             # Launch dashboard directly (no pipeline needed)
             dashboard_class = self._select_dashboard()
-            logger.info(f"Launching {dashboard_class.__name__}...")
-            print(f"{Colors.GREEN}✓ Dashboard ready{Colors.NC}\n")
+            logger.info(f"Launching {dashboard_class.__name__} in {self.mode} mode...")
+            print(f"{Colors.GREEN}✓ Dashboard ready ({self.mode.upper()} mode){Colors.NC}\n")
 
-            dashboard = dashboard_class()
+            # Pass mode to dashboard if it's the enhanced version
+            try:
+                dashboard = dashboard_class(mode=self.mode)
+            except TypeError:
+                # Fallback for dashboards that don't support mode parameter
+                dashboard = dashboard_class()
+
             dashboard.run()
 
             return 0
@@ -248,6 +254,11 @@ Examples:
     def main(self) -> int:
         """Main entry point"""
         args = self.parse_arguments()
+
+        # Check if boot sequence set a mode
+        boot_mode = os.environ.get('COBALTGRAPH_MODE')
+        if boot_mode and args.mode == 'auto':
+            args.mode = boot_mode
 
         if args.health:
             self.mode = args.mode if args.mode != 'auto' else 'device'

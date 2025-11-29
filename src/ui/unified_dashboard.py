@@ -103,6 +103,56 @@ class DataManager:
         """Get average query execution time"""
         return sum(self._query_times) / len(self._query_times) if self._query_times else 0.0
 
+    def get_connections(self, limit: int = 100) -> List[Dict]:
+        """Get recent connections from database"""
+        if not self.is_cache_valid():
+            query = """
+                SELECT * FROM connections
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """
+            results = self.execute_query(query, (limit,))
+            self._connection_cache = [dict(row) for row in results]
+            self._last_update = time.time()
+        return self._connection_cache
+
+    def get_devices(self) -> List[Dict]:
+        """Get device list from database"""
+        query = "SELECT * FROM devices WHERE is_active = 1 ORDER BY last_seen DESC LIMIT 100"
+        try:
+            results = self.execute_query(query)
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.debug(f"Error fetching devices: {e}")
+            return []
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get overall statistics"""
+        try:
+            # Total connections
+            total_query = "SELECT COUNT(*) as count FROM connections"
+            total_results = self.execute_query(total_query)
+            total = dict(total_results[0]).get('count', 0) if total_results else 0
+
+            # High threat count
+            threat_query = "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
+            threat_results = self.execute_query(threat_query)
+            high_threat = dict(threat_results[0]).get('count', 0) if threat_results else 0
+
+            # Device count
+            device_query = "SELECT COUNT(*) as count FROM devices WHERE is_active = 1"
+            device_results = self.execute_query(device_query)
+            devices = dict(device_results[0]).get('count', 0) if device_results else 0
+
+            return {
+                'total': total,
+                'high_threat': high_threat,
+                'devices': devices,
+            }
+        except Exception as e:
+            logger.debug(f"Error fetching stats: {e}")
+            return {'total': 0, 'high_threat': 0, 'devices': 0}
+
 
 class VisualizationManager:
     """
