@@ -164,30 +164,33 @@ class EnhancedThreatGlobePanel(Static):
         if self.globe is None:
             return
 
-        # Add connections to globe
-        connections = new_data.get('connections', [])
-        for conn in connections[-10:]:  # Last 10 connections only
-            try:
-                src_lat, src_lon = 39.8283, -98.5795  # US center
-                dst_lat = float(conn.get('dst_lat', 0) or 0)
-                dst_lon = float(conn.get('dst_lon', 0) or 0)
-                threat = float(conn.get('threat_score', 0) or 0)
+        try:
+            # Add connections to globe
+            connections = new_data.get('connections', [])
+            for conn in connections[-10:]:  # Last 10 connections only
+                try:
+                    src_lat, src_lon = 39.8283, -98.5795  # US center
+                    dst_lat = float(conn.get('dst_lat', 0) or 0)
+                    dst_lon = float(conn.get('dst_lon', 0) or 0)
+                    threat = float(conn.get('threat_score', 0) or 0)
 
-                self.globe.add_connection(
-                    src_lat, src_lon,
-                    dst_lat, dst_lon,
-                    threat,
-                    metadata={
-                        'ip': conn.get('dst_ip'),
-                        'org': conn.get('dst_org'),
-                        'country': conn.get('dst_country'),
-                        'port': conn.get('dst_port'),
-                    }
-                )
-            except Exception as e:
-                logger.debug(f"Failed to add connection to globe: {e}")
+                    self.globe.add_connection(
+                        src_lat, src_lon,
+                        dst_lat, dst_lon,
+                        threat,
+                        metadata={
+                            'ip': conn.get('dst_ip'),
+                            'org': conn.get('dst_org'),
+                            'country': conn.get('dst_country'),
+                            'port': conn.get('dst_port'),
+                        }
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to add connection to globe: {e}")
 
-        self.refresh()
+            self.refresh()
+        except Exception as e:
+            logger.warning(f"Globe data watch failed: {e}")
 
     def render(self):
         """Render the globe with overlay"""
@@ -261,8 +264,8 @@ class SmartConnectionTable(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.connections = []
         self.table = None
+        self.connections = []
 
     def compose(self) -> ComposeResult:
         """Create data table"""
@@ -584,6 +587,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 yield self.mode_specific_panel
 
         yield Footer()
+
+    def action_refresh(self) -> None:
+        """Manual refresh action"""
+        self._refresh_data()
 
     def on_mount(self) -> None:
         """Initialize dashboard on mount"""
