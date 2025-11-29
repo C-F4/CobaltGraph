@@ -640,7 +640,7 @@ class ASCIIGlobe:
                 org_type = meta.get('org_type', '')[:8] if meta.get('org_type') else ""
                 hops = f"{meta.get('hops')}h" if meta.get('hops') else ""
                 ip = meta.get('ip', 'Unknown')[:15]
-                threat_color = self.get_threat_color(ping.threat)
+                threat_color = self.get_threat_color(ping.threat_score)
 
                 # Format: IP [org] type hops
                 line_parts = [f"[{threat_color}]{ip}[/{threat_color}]"]
