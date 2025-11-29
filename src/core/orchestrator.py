@@ -896,10 +896,9 @@ class CobaltGraphOrchestrator:
         self.pipeline.start()
         self.start_capture()
 
-        # Launch 3D globe
-        from src.ui.globe_3d import main as globe_main
-        db_path = self.config.get("database_path", "data/cobaltgraph.db")
-        globe_main(database_path=db_path)
+        # Globe visualization now integrated into dashboard_enhanced
+        # Legacy 3D globe module has been archived and replaced by ASCIIGlobe
+        # in the enhanced dashboard (see src/ui/dashboard_enhanced.py)
 
         # Cleanup
         self.stop()
