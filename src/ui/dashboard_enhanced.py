@@ -218,53 +218,122 @@ class EnhancedThreatGlobePanel(Static):
         self.refresh()
 
     def render(self):
-        """Render the globe with overlay"""
-        if self.globe is None:
-            # Fallback to simple heatmap if globe unavailable
-            connections = self.globe_data.get('connections', [])
+        """Sophisticated threat visualization with globe, heatmap, and analytics"""
+        connections = self.globe_data.get('connections', [])
 
-            # Extract geographic data
-            geo_threats = {}
-            for conn in connections:
-                country = (conn.get('dst_country') or 'XX')[:2].upper()
-                threat = float(conn.get('threat_score', 0) or 0)
-                if country not in geo_threats:
-                    geo_threats[country] = []
-                geo_threats[country].append(threat)
+        # Try to render full globe if available
+        if self.globe:
+            try:
+                # Get globe rendering
+                globe_output = self.globe.render_with_overlay()
+                return globe_output
+            except Exception as e:
+                logger.debug(f"Globe render failed: {e}")
 
-            # Top regions
-            top_regions = sorted(
-                [(c, sum(t)/len(t), len(t)) for c, t in geo_threats.items()],
-                key=lambda x: x[1],
-                reverse=True
-            )[:8]
+        # Sophisticated fallback: Enhanced threat heatmap with multiple metrics
+        lines = []
+        lines.append("[bold cyan]═══════════════════════════════════════[/bold cyan]")
+        lines.append("[bold cyan]🌐 GLOBAL THREAT INTELLIGENCE MAP[/bold cyan]")
+        lines.append("[bold cyan]═══════════════════════════════════════[/bold cyan]")
 
-            content = "[bold cyan]◐ World Threat Map[/bold cyan]\n\n"
+        # Geographic threat analysis
+        geo_data = {}
+        org_types = {}
+        threat_stats = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 
-            for country, avg_threat, count in top_regions:
-                if avg_threat >= 0.7:
-                    bar = "[bold red]████████[/bold red]"
-                elif avg_threat >= 0.5:
-                    bar = "[bold yellow]██████░░[/bold yellow]"
-                elif avg_threat >= 0.3:
-                    bar = "[yellow]████░░░░[/yellow]"
-                else:
-                    bar = "[green]██░░░░░░[/green]"
+        for conn in connections:
+            country = (conn.get('dst_country') or 'XX')[:2].upper()
+            threat = float(conn.get('threat_score', 0) or 0)
+            org_type = (conn.get('dst_org_type') or 'unknown').lower()
 
-                content += f"{country} {bar} {avg_threat:.2f}\n"
+            if country not in geo_data:
+                geo_data[country] = {'threats': [], 'count': 0, 'types': {}}
 
-            if not top_regions:
-                content += "[dim]Loading geographic data...[/dim]\n"
+            geo_data[country]['threats'].append(threat)
+            geo_data[country]['count'] += 1
+            geo_data[country]['types'][org_type] = geo_data[country]['types'].get(org_type, 0) + 1
 
-            content += f"\n[cyan]Total:[/cyan] {len(connections)}"
-            return Panel(content, title="[bold cyan]Threat Map[/bold cyan]")
+            # Track threat distribution
+            if threat >= 0.7:
+                threat_stats['critical'] += 1
+            elif threat >= 0.5:
+                threat_stats['high'] += 1
+            elif threat >= 0.3:
+                threat_stats['medium'] += 1
+            else:
+                threat_stats['low'] += 1
 
-        # Use full globe rendering
-        try:
-            return self.globe.render_with_overlay()
-        except Exception as e:
-            logger.error(f"Globe render failed: {e}")
-            return Panel(f"[red]Globe Error: {e}[/red]", title="[bold cyan]Threat Map[/bold cyan]")
+        # Top threat regions
+        top_regions = sorted(
+            [(c, sum(d['threats'])/len(d['threats']), d['count']) for c, d in geo_data.items()],
+            key=lambda x: x[1] * x[2],  # Sort by threat * count
+            reverse=True
+        )[:6]
+
+        lines.append("")
+        lines.append("[bold]🔴 CRITICAL THREAT ZONES:[/bold]")
+        for country, avg_threat, count in top_regions:
+            if avg_threat >= 0.7:
+                threat_bar = "[bold red]▓▓▓▓▓▓▓▓▓▓[/bold red]"
+                indicator = "[bold red]⚠ CRITICAL[/bold red]"
+            elif avg_threat >= 0.5:
+                threat_bar = "[bold yellow]▓▓▓▓▓▓░░░░[/bold yellow]"
+                indicator = "[bold yellow]⚠ HIGH[/bold yellow]"
+            elif avg_threat >= 0.3:
+                threat_bar = "[yellow]▓▓▓▓░░░░░░[/yellow]"
+                indicator = "[yellow]⚠ MEDIUM[/yellow]"
+            else:
+                threat_bar = "[green]▓▓░░░░░░░░[/green]"
+                indicator = "[green]✓ LOW[/green]"
+
+            lines.append(f"  {country:2s} {threat_bar} {avg_threat:5.2f} (n={count:2d}) {indicator}")
+
+        lines.append("")
+        lines.append("[bold]🏢 ORGANIZATION TYPE DISTRIBUTION:[/bold]")
+
+        # Organization type breakdown
+        org_summary = {}
+        for country, data in geo_data.items():
+            for org_type, count in data['types'].items():
+                if org_type not in org_summary:
+                    org_summary[org_type] = 0
+                org_summary[org_type] += count
+
+        type_colors = {
+            'cloud': 'bold cyan',
+            'cdn': 'cyan',
+            'hosting': 'blue',
+            'isp': 'magenta',
+            'vpn': 'bold magenta',
+            'tor': 'bold red',
+            'enterprise': 'bold green',
+            'government': 'bold blue',
+        }
+
+        for org_type, count in sorted(org_summary.items(), key=lambda x: x[1], reverse=True)[:5]:
+            color = type_colors.get(org_type, 'white')
+            lines.append(f"  [{color}]{org_type:12s}[/{color}] ▰▰▰ {count:3d} connections")
+
+        lines.append("")
+        lines.append("[bold]📊 THREAT DISTRIBUTION:[/bold]")
+        total = sum(threat_stats.values())
+        if total > 0:
+            crit_pct = (threat_stats['critical'] / total) * 100
+            high_pct = (threat_stats['high'] / total) * 100
+            med_pct = (threat_stats['medium'] / total) * 100
+            low_pct = (threat_stats['low'] / total) * 100
+
+            lines.append(f"  [bold red]CRITICAL[/bold red]: {threat_stats['critical']:3d} ({crit_pct:5.1f}%) [bold red]{'█' * int(crit_pct/5)}[/bold red]")
+            lines.append(f"  [bold yellow]HIGH[/bold yellow]:     {threat_stats['high']:3d} ({high_pct:5.1f}%) [bold yellow]{'█' * int(high_pct/5)}[/bold yellow]")
+            lines.append(f"  [yellow]MEDIUM[/yellow]:   {threat_stats['medium']:3d} ({med_pct:5.1f}%) [yellow]{'█' * int(med_pct/5)}[/yellow]")
+            lines.append(f"  [green]LOW[/green]:      {threat_stats['low']:3d} ({low_pct:5.1f}%) [green]{'█' * int(low_pct/5)}[/green]")
+
+        lines.append("")
+        lines.append(f"[dim]Total Connections: {len(connections)} | Active Regions: {len(geo_data)}[/dim]")
+        lines.append("[bold cyan]═══════════════════════════════════════[/bold cyan]")
+
+        content = "\n".join(lines)
+        return Panel(content, title="[bold cyan]🌐 THREAT INTELLIGENCE DASHBOARD[/bold cyan]", border_style="cyan")
 
 
 class SmartConnectionTable(Static):
@@ -309,56 +378,64 @@ class SmartConnectionTable(Static):
         yield self.table
 
     def watch_connections(self, new_connections: list) -> None:
-        """Update table when connections change"""
+        """Update table when connections change - text color coded by threat and type"""
         if self.table is None:
             return
 
         self.connections = new_connections
         self.table.clear()
 
-        # Add rows with full color coding
+        # Add rows with text color coding by threat and type
         for conn in self.connections[:50]:  # Limit to 50 for performance
             try:
                 time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M:%S")
                 threat = float(conn.get('threat_score', 0) or 0)
+                org_type = (conn.get('dst_org_type') or 'unknown').lower()
 
-                # Determine threat level and styling
+                # Threat color mapping (text only)
                 if threat >= 0.7:
-                    threat_level = "CRITICAL"
+                    threat_color = "bold red"
                     threat_indicator = "●●●"
-                    row_style = "bold red on color(52)"  # Dark red background
                 elif threat >= 0.5:
-                    threat_level = "HIGH"
+                    threat_color = "bold yellow"
                     threat_indicator = "●●○"
-                    row_style = "bold yellow on color(94)"  # Dark yellow background
                 elif threat >= 0.3:
-                    threat_level = "MEDIUM"
+                    threat_color = "yellow"
                     threat_indicator = "●○○"
-                    row_style = "dim yellow on color(58)"  # Dark orange background
                 else:
-                    threat_level = "LOW"
+                    threat_color = "green"
                     threat_indicator = "○○○"
-                    row_style = "green on color(23)"  # Dark green background
+
+                # Type color mapping (text only) - based on organization type
+                type_colors = {
+                    'cloud': 'bold cyan',
+                    'cdn': 'cyan',
+                    'hosting': 'blue',
+                    'isp': 'magenta',
+                    'vpn': 'bold magenta',
+                    'tor': 'bold red',
+                    'enterprise': 'bold green',
+                    'government': 'bold blue',
+                    'education': 'green',
+                    'unknown': 'dim white',
+                }
+                type_color = type_colors.get(org_type, 'dim white')
 
                 ip = (conn.get('dst_ip') or 'Unknown')[:15]
                 port = str(conn.get('dst_port', '-'))
                 org = (conn.get('dst_org') or 'Unknown')[:18]
-                org_type = (conn.get('dst_org_type') or 'unknown')[:8]
                 hops = str(conn.get('hop_count', '-'))
 
-                # Format row with full styling
+                # Format row with text color coding only (no backgrounds)
                 self.table.add_row(
-                    f"[{row_style}]{time_str}[/]",
-                    f"[{row_style}]{ip}[/]",
-                    f"[{row_style}]{port}[/]",
-                    f"[{row_style}]{org}[/]",
-                    f"[{row_style}]{org_type}[/]",
-                    f"[bold red on color(52)]{threat_indicator}[/]" if threat >= 0.7 else
-                    f"[bold yellow on color(94)]{threat_indicator}[/]" if threat >= 0.5 else
-                    f"[dim yellow on color(58)]{threat_indicator}[/]" if threat >= 0.3 else
-                    f"[green on color(23)]{threat_indicator}[/]",
-                    f"[{row_style}]{threat:.2f}[/]",
-                    f"[{row_style}]{hops}[/]",
+                    f"[dim]{time_str}[/]",
+                    f"[cyan]{ip}[/]",
+                    f"[magenta]{port}[/]",
+                    f"[white]{org}[/]",
+                    f"[{type_color}]{org_type:>8}[/]",
+                    f"[{threat_color}]{threat_indicator}[/]",
+                    f"[{threat_color}]{threat:.2f}[/]",
+                    f"[cyan]{hops}[/]",
                     key=str(conn.get('id', ''))
                 )
             except Exception as e:
@@ -393,48 +470,96 @@ class NetworkTopologyPanel(Static):
         self.refresh()
 
     def render(self):
-        """Render device→destination topology"""
+        """Render device→destination topology with ASCII graph"""
         if not self.flows:
             return Panel(
-                "[dim]No topology data available[/dim]",
-                title="[bold cyan]Network Topology[/bold cyan]"
+                "[dim]Scanning network topology...[/dim]",
+                title="[bold cyan]🌐 NETWORK TOPOLOGY[/bold cyan]",
+                border_style="cyan"
             )
 
-        content = ""
+        lines = []
+        lines.append("[bold cyan]┌─────────────────────────────────────┐[/bold cyan]")
+        lines.append("[bold cyan]│ PASSIVELY DISCOVERED DEVICES        │[/bold cyan]")
+        lines.append("[bold cyan]└─────────────────────────────────────┘[/bold cyan]")
+        lines.append("")
+
         device_count = len(self.flows)
+        lines.append(f"[dim]Total Devices: {device_count}[/dim]")
+        lines.append("")
 
-        for src_mac, flow_data in list(self.flows.items())[:10]:  # Limit to 10 devices
-            vendor = flow_data.get('device_vendor', 'Unknown')
+        # Create a topology graph
+        lines.append("[bold]LOCAL NETWORK TOPOLOGY:[/bold]")
+        lines.append("")
+        lines.append("[cyan]┌─ HOME NETWORK (Local)[/cyan]")
+
+        device_list = list(self.flows.items())[:8]  # Top 8 devices
+
+        for idx, (src_mac, flow_data) in enumerate(device_list):
+            vendor = (flow_data.get('device_vendor', 'Unknown'))[:16]
             dest_count = len(flow_data.get('destinations', {}))
+            threat_score = flow_data.get('threat_avg', 0)
 
-            if dest_count == 0:
-                continue
+            is_last = idx == len(device_list) - 1
 
-            content += f"[cyan]{vendor}[/cyan] → {dest_count} destinations\n"
+            # Device node
+            prefix = "[cyan]└─[/cyan]" if is_last else "[cyan]├─[/cyan]"
 
-            # Show top destinations
+            if threat_score >= 0.7:
+                threat_icon = "[bold red]⚠[/bold red]"
+                threat_color = "bold red"
+            elif threat_score >= 0.5:
+                threat_icon = "[bold yellow]⚡[/bold yellow]"
+                threat_color = "bold yellow"
+            elif threat_score >= 0.3:
+                threat_icon = "[yellow]△[/yellow]"
+                threat_color = "yellow"
+            else:
+                threat_icon = "[green]✓[/green]"
+                threat_color = "green"
+
+            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:16s}[/{threat_color}] → {dest_count} flows")
+
+            # Show connection flows
             destinations = sorted(
                 flow_data.get('destinations', {}).items(),
-                key=lambda x: x[1].get('threat', 0),
+                key=lambda x: float(x[1].get('threat', 0) or 0),
                 reverse=True
-            )[:3]
+            )[:2]  # Top 2 destinations per device
 
-            for dest, data in destinations:
-                threat = data.get('threat', 0)
+            for dest_idx, (dest, data) in enumerate(destinations):
+                threat = float(data.get('threat', 0) or 0)
                 count = data.get('count', 0)
 
+                is_dest_last = dest_idx == len(destinations) - 1
+                flow_prefix = "[cyan]│  └──[/cyan]" if is_dest_last else "[cyan]│  ├──[/cyan]"
+
                 if threat >= 0.7:
-                    threat_style = "[bold red]"
+                    dest_color = "bold red"
+                    dest_icon = "🔴"
                 elif threat >= 0.5:
-                    threat_style = "[bold yellow]"
+                    dest_color = "bold yellow"
+                    dest_icon = "🟡"
                 else:
-                    threat_style = "[green]"
+                    dest_color = "green"
+                    dest_icon = "🟢"
 
-                content += f"  └─ {threat_style}{dest}[/] ({count})\n"
+                # Truncate IP if too long
+                dest_str = dest[:18] if len(dest) > 18 else dest
 
+                lines.append(f"{flow_prefix} {dest_icon} [{dest_color}]{dest_str:18s}[/{dest_color}] x{count}")
+
+        lines.append("")
+        lines.append("[bold cyan]═════════════════════════════════════[/bold cyan]")
+
+        # Add statistics
+        total_flows = sum(len(f.get('destinations', {})) for f in self.flows.values())
+        lines.append(f"[dim]Total Flows: {total_flows} | Active Devices: {device_count}[/dim]")
+
+        content = "\n".join(lines)
         return Panel(
             content,
-            title="[bold cyan]Network Topology[/bold cyan]",
+            title="[bold cyan]🌐 NETWORK TOPOLOGY[/bold cyan]",
             border_style="cyan"
         )
 
@@ -466,42 +591,83 @@ class DeviceDiscoveryPanel(Static):
         self.refresh()
 
     def render(self):
-        """Render discovered devices"""
+        """Render discovered devices with network topology"""
         if not self.devices:
             return Panel(
-                "[dim]No devices discovered[/dim]",
-                title="[bold cyan]Discovered Devices[/bold cyan]"
+                "[dim]Scanning for connected devices...[/dim]",
+                title="[bold cyan]🔍 DEVICE DISCOVERY[/bold cyan]",
+                border_style="cyan"
             )
 
-        content = ""
+        lines = []
+        lines.append("[bold cyan]┌─────────────────────────────────────┐[/bold cyan]")
+        lines.append("[bold cyan]│ PASSIVELY DISCOVERED DEVICES        │[/bold cyan]")
+        lines.append("[bold cyan]└─────────────────────────────────────┘[/bold cyan]")
+        lines.append("")
 
         # Sort by threat score
         sorted_devices = sorted(
             self.devices,
             key=lambda d: float(d.get('threat_score', 0) or 0),
             reverse=True
-        )[:15]  # Show top 15
+        )[:12]  # Show top 12
 
-        for device in sorted_devices:
+        # Add summary
+        lines.append(f"[dim]Discovered: {len(self.devices)} device(s)[/dim]")
+        lines.append("")
+        lines.append("[bold]DEVICE INVENTORY:[/bold]")
+        lines.append("")
+
+        # Build network tree
+        lines.append("[cyan]┌─ LOCAL NETWORK[/cyan]")
+
+        for idx, device in enumerate(sorted_devices):
             mac = device.get('mac', 'Unknown')[:17]
-            vendor = (device.get('vendor') or 'Unknown')[:20]
+            vendor = (device.get('vendor') or 'Unknown')[:16]
             threat = float(device.get('threat_score', 0) or 0)
             conn_count = device.get('connection_count', 0)
 
+            is_last = idx == len(sorted_devices) - 1
+            prefix = "[cyan]└─[/cyan]" if is_last else "[cyan]├─[/cyan]"
+
+            # Threat indicator with color
             if threat >= 0.7:
-                indicator = "[bold red]●[/bold red]"
+                threat_icon = "[bold red]⚠[/bold red]"
+                threat_color = "bold red"
+                threat_label = "CRITICAL"
             elif threat >= 0.5:
-                indicator = "[bold yellow]●[/bold yellow]"
+                threat_icon = "[bold yellow]⚡[/bold yellow]"
+                threat_color = "bold yellow"
+                threat_label = "HIGH"
             elif threat >= 0.3:
-                indicator = "[yellow]●[/yellow]"
+                threat_icon = "[yellow]△[/yellow]"
+                threat_color = "yellow"
+                threat_label = "MEDIUM"
             else:
-                indicator = "[green]●[/green]"
+                threat_icon = "[green]✓[/green]"
+                threat_color = "green"
+                threat_label = "LOW"
 
-            content += f"{indicator} {mac} [{vendor[:12]}] {conn_count} conns\n"
+            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:16s}[/{threat_color}] [{threat_label:8s}] {conn_count} flows")
+            lines.append(f"[dim]   └─ MAC: {mac}[/dim]")
 
+        lines.append("")
+        lines.append("[bold cyan]═════════════════════════════════════[/bold cyan]")
+
+        # Statistics
+        total_connections = sum(d.get('connection_count', 0) for d in self.devices)
+        high_threat_devices = len([d for d in self.devices if float(d.get('threat_score', 0) or 0) >= 0.5])
+
+        lines.append("")
+        lines.append("[bold]NETWORK STATISTICS:[/bold]")
+        lines.append(f"  [cyan]Devices:[/cyan] {len(self.devices)}")
+        lines.append(f"  [cyan]Total Flows:[/cyan] {total_connections}")
+        lines.append(f"  [bold yellow]High Risk:[/bold yellow] {high_threat_devices}")
+
+        content = "\n".join(lines)
         return Panel(
             content,
-            title="[bold cyan]Discovered Devices[/bold cyan]",
+            title="[bold cyan]🔍 DEVICE DISCOVERY[/bold cyan]",
             border_style="cyan"
         )
 
