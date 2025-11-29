@@ -1,22 +1,34 @@
 """
-CobaltGraph Dashboard
-Unified threat monitoring interface with multi-dimensional visualization
+CobaltGraph Dashboard - Enhanced Unified Threat Monitoring Interface
+
+Active Components:
+- CobaltGraphDashboardEnhanced: Primary dashboard (4-cell grid layout)
+- ASCIIGlobe: High-resolution ASCII globe with threat heatmaps and trails
+- Mode support: device (personal device security) and network (topology monitoring)
 
 Features:
-- ASCII globe with heatmaps
-- Organization triage matrix with trust scoring
-- Hop count topology visualization
-- Event log viewer with filtering
-- Adaptive table density modes (LOW/MEDIUM/HIGH/FULL)
-- Multi-dimensional threat vector analysis
+- Real-time threat scoring with confidence intervals
+- Geographic threat visualization with animated connection trails
+- Network topology and device discovery (mode-specific)
+- High-density connection table with full enrichment
+- Adaptive rendering for different terminal sizes
+
+Deprecated (archived to archive/dashboards_deprecated/):
+- dashboard_v2.py: Simple 2-cell layout (replaced by enhanced version)
+- device_dashboard.py: Old device mode (integrated into enhanced)
+- network_dashboard.py: Old network mode (integrated into enhanced)
+- unified_dashboard.py: Base framework (now internal)
+- globe_3d.py: 3D visualization (replaced by ascii_globe)
+- boot_sequence.py: Legacy initialization
+- reconnaissance_integration.py: Unused
 """
 
-# Import Dashboard (main terminal interface)
+# Import Enhanced Dashboard (main terminal interface)
 try:
-    from .dashboard import CobaltGraphDashboard
+    from .dashboard_enhanced import CobaltGraphDashboardEnhanced
     DASHBOARD_AVAILABLE = True
-except ImportError:
-    CobaltGraphDashboard = None
+except ImportError as e:
+    CobaltGraphDashboardEnhanced = None
     DASHBOARD_AVAILABLE = False
 
 # Import ASCII globe component
@@ -28,52 +40,12 @@ except ImportError:
     GlobeWidget = None
     GLOBE_AVAILABLE = False
 
-# Import visualization engine
-try:
-    from .viz_engine import (
-        ThreatGlobe,
-        ThreatHeatmap,
-        OrganizationTriageMatrix,
-        HopTopologyVisualizer,
-        ParallelCoordinatesThreat,
-        VisualizationEngine,
-        ThreatVector,
-        OrganizationTriage,
-        THREAT_COLORS,
-        ORG_TYPE_RISK,
-    )
-    VIZ_ENGINE_AVAILABLE = True
-except ImportError:
-    ThreatGlobe = None
-    ThreatHeatmap = None
-    OrganizationTriageMatrix = None
-    HopTopologyVisualizer = None
-    ParallelCoordinatesThreat = None
-    VisualizationEngine = None
-    ThreatVector = None
-    OrganizationTriage = None
-    THREAT_COLORS = None
-    ORG_TYPE_RISK = None
-    VIZ_ENGINE_AVAILABLE = False
-
 __all__ = [
     # Main dashboard
-    'CobaltGraphDashboard',
+    'CobaltGraphDashboardEnhanced',
     'DASHBOARD_AVAILABLE',
-    # Globes
+    # ASCII globe
     'ASCIIGlobe',
     'GlobeWidget',
     'GLOBE_AVAILABLE',
-    # Visualization engine
-    'ThreatGlobe',
-    'ThreatHeatmap',
-    'OrganizationTriageMatrix',
-    'HopTopologyVisualizer',
-    'ParallelCoordinatesThreat',
-    'VisualizationEngine',
-    'ThreatVector',
-    'OrganizationTriage',
-    'THREAT_COLORS',
-    'ORG_TYPE_RISK',
-    'VIZ_ENGINE_AVAILABLE',
 ]
