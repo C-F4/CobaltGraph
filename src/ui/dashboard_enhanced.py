@@ -119,14 +119,14 @@ class ThreatPostureQuickPanel(Static):
 
 class EnhancedThreatGlobePanel(Static):
     """
-    Bottom-right (30%): ASCII Globe with advanced rendering
-    Integrates ascii_globe.py for superior visualization
+    Top-Right (50%): Interactive Threat Visualization
+    Provides real-time threat heat mapping and animated connection visualization
 
     Features:
-    - Braille-character rendering for high resolution
-    - Threat heatmaps by geographic region
-    - Animated connection ping trails
-    - Real-time metadata overlay (rotation, stats, threats)
+    - Dynamic threat heatmap by region
+    - Animated connection indicators
+    - Real-time threat scores
+    - Color-coded threat levels
     """
 
     DEFAULT_CSS = """
@@ -139,6 +139,7 @@ class EnhancedThreatGlobePanel(Static):
     """
 
     globe_data = reactive(dict)
+    animation_frame = reactive(int)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -148,6 +149,9 @@ class EnhancedThreatGlobePanel(Static):
             'heatmap': {},
             'stats': {},
         }
+        self.animation_frame = 0
+        self.threat_regions = {}
+        self.region_pings = []
 
         # Initialize ASCII globe if available
         if ASCIIGlobe:
@@ -155,6 +159,8 @@ class EnhancedThreatGlobePanel(Static):
                 # Calculate dimensions from terminal (will be refined on mount)
                 self.globe = ASCIIGlobe(width=40, height=20)
                 self.globe.state.rotation_x = 23.5  # Earth's axial tilt
+                self.globe.auto_rotate = True
+                self.globe.rotation_speed = 15.0  # degrees per second
             except Exception as e:
                 logger.warning(f"Failed to initialize ASCIIGlobe: {e}")
                 self.globe = None
@@ -165,14 +171,27 @@ class EnhancedThreatGlobePanel(Static):
             return
 
         try:
-            # Add connections to globe
+            # Extract threat regions from connections
             connections = new_data.get('connections', [])
-            for conn in connections[-10:]:  # Last 10 connections only
+
+            # Build threat region map
+            self.threat_regions = {}
+            for conn in connections[-20:]:  # Last 20 connections
                 try:
+                    country = (conn.get('dst_country') or 'Unknown')[:2].upper()
+                    threat = float(conn.get('threat_score', 0) or 0)
+
+                    if country not in self.threat_regions:
+                        self.threat_regions[country] = {'count': 0, 'avg_threat': 0.0, 'ips': []}
+
+                    self.threat_regions[country]['count'] += 1
+                    self.threat_regions[country]['avg_threat'] = threat
+                    self.threat_regions[country]['ips'].append(conn.get('dst_ip', 'Unknown'))
+
+                    # Add to globe
                     src_lat, src_lon = 39.8283, -98.5795  # US center
                     dst_lat = float(conn.get('dst_lat', 0) or 0)
                     dst_lon = float(conn.get('dst_lon', 0) or 0)
-                    threat = float(conn.get('threat_score', 0) or 0)
 
                     self.globe.add_connection(
                         src_lat, src_lon,
@@ -181,16 +200,22 @@ class EnhancedThreatGlobePanel(Static):
                         metadata={
                             'ip': conn.get('dst_ip'),
                             'org': conn.get('dst_org'),
-                            'country': conn.get('dst_country'),
+                            'country': country,
                             'port': conn.get('dst_port'),
+                            'threat': threat,
                         }
                     )
                 except Exception as e:
-                    logger.debug(f"Failed to add connection to globe: {e}")
+                    logger.debug(f"Failed to process connection: {e}")
 
-            self.refresh()
+            # Trigger animation update
+            self.animation_frame += 1
         except Exception as e:
             logger.warning(f"Globe data watch failed: {e}")
+
+    def watch_animation_frame(self, frame: int) -> None:
+        """Animation frame update trigger"""
+        self.refresh()
 
     def render(self):
         """Render the globe with overlay"""
@@ -291,46 +316,49 @@ class SmartConnectionTable(Static):
         self.connections = new_connections
         self.table.clear()
 
-        if len(self.connections) > 0:
-            logger.debug(f"Updating connection table with {len(self.connections)} connections")
-            sample = self.connections[0]
-            logger.debug(f"Sample connection keys: {list(sample.keys()) if isinstance(sample, dict) else 'not a dict'}")
-            logger.debug(f"Sample threat_score: {sample.get('threat_score', 'N/A') if isinstance(sample, dict) else 'N/A'}")
-
-        # Add rows with color coding
+        # Add rows with full color coding
         for conn in self.connections[:50]:  # Limit to 50 for performance
             try:
                 time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M:%S")
+                threat = float(conn.get('threat_score', 0) or 0)
+
+                # Determine threat level and styling
+                if threat >= 0.7:
+                    threat_level = "CRITICAL"
+                    threat_indicator = "●●●"
+                    row_style = "bold red on color(52)"  # Dark red background
+                elif threat >= 0.5:
+                    threat_level = "HIGH"
+                    threat_indicator = "●●○"
+                    row_style = "bold yellow on color(94)"  # Dark yellow background
+                elif threat >= 0.3:
+                    threat_level = "MEDIUM"
+                    threat_indicator = "●○○"
+                    row_style = "dim yellow on color(58)"  # Dark orange background
+                else:
+                    threat_level = "LOW"
+                    threat_indicator = "○○○"
+                    row_style = "green on color(23)"  # Dark green background
+
                 ip = (conn.get('dst_ip') or 'Unknown')[:15]
                 port = str(conn.get('dst_port', '-'))
                 org = (conn.get('dst_org') or 'Unknown')[:18]
                 org_type = (conn.get('dst_org_type') or 'unknown')[:8]
-                threat = float(conn.get('threat_score', 0) or 0)
                 hops = str(conn.get('hop_count', '-'))
 
-                # Color coding by threat level
-                if threat >= 0.7:
-                    threat_style = "bold red"
-                    threat_label = "●●●"
-                elif threat >= 0.5:
-                    threat_style = "bold yellow"
-                    threat_label = "●●○"
-                elif threat >= 0.3:
-                    threat_style = "yellow"
-                    threat_label = "●○○"
-                else:
-                    threat_style = "green"
-                    threat_label = "○○○"
-
+                # Format row with full styling
                 self.table.add_row(
-                    time_str,
-                    ip,
-                    port,
-                    org,
-                    org_type,
-                    threat_label,
-                    f"{threat:.2f}",
-                    hops,
+                    f"[{row_style}]{time_str}[/]",
+                    f"[{row_style}]{ip}[/]",
+                    f"[{row_style}]{port}[/]",
+                    f"[{row_style}]{org}[/]",
+                    f"[{row_style}]{org_type}[/]",
+                    f"[bold red on color(52)]{threat_indicator}[/]" if threat >= 0.7 else
+                    f"[bold yellow on color(94)]{threat_indicator}[/]" if threat >= 0.5 else
+                    f"[dim yellow on color(58)]{threat_indicator}[/]" if threat >= 0.3 else
+                    f"[green on color(23)]{threat_indicator}[/]",
+                    f"[{row_style}]{threat:.2f}[/]",
+                    f"[{row_style}]{hops}[/]",
                     key=str(conn.get('id', ''))
                 )
             except Exception as e:
@@ -607,7 +635,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         if self.data_manager.connect():
             self.is_connected = True
             self.set_interval(2.0, self._refresh_data)
-            self.set_interval(0.5, self._update_display)
+            self.set_interval(0.1, self._update_display)  # 100ms for smooth animations
             self._refresh_data()
         else:
             self.sub_title = "Database connection failed"
@@ -668,11 +696,14 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def _update_display(self) -> None:
         """Quick display updates (animations, etc)"""
-        if self.globe_panel and self.globe_panel.globe:
+        # Update globe animation
+        if self.globe_panel:
             try:
-                self.globe_panel.globe.update(0.1)
-            except Exception:
-                pass
+                if self.globe_panel.globe:
+                    self.globe_panel.globe.update(0.05)  # Update every 50ms
+                    self.globe_panel.refresh()  # Force re-render
+            except Exception as e:
+                logger.debug(f"Globe update failed: {e}")
 
     def _calculate_heatmap(self, connections: List[Dict]) -> Dict:
         """Calculate geographic heatmap from connections"""
