@@ -290,6 +290,12 @@ class SmartConnectionTable(Static):
         self.connections = new_connections
         self.table.clear()
 
+        if len(self.connections) > 0:
+            logger.debug(f"Updating connection table with {len(self.connections)} connections")
+            sample = self.connections[0]
+            logger.debug(f"Sample connection keys: {list(sample.keys()) if isinstance(sample, dict) else 'not a dict'}")
+            logger.debug(f"Sample threat_score: {sample.get('threat_score', 'N/A') if isinstance(sample, dict) else 'N/A'}")
+
         # Add rows with color coding
         for conn in self.connections[:50]:  # Limit to 50 for performance
             try:
