@@ -158,10 +158,16 @@ class CobaltGraphMain:
     def _select_dashboard(self):
         """Select appropriate dashboard based on mode"""
         try:
-            from src.ui.dashboard_v2 import CobaltGraphDashboardV2
-            return CobaltGraphDashboardV2
+            from src.ui.dashboard_enhanced import CobaltGraphDashboardEnhanced
+            return CobaltGraphDashboardEnhanced
         except ImportError as e:
-            raise ImportError(f"CobaltGraphDashboardV2 not found: {e}")
+            # Fallback to V2 if enhanced not available
+            try:
+                from src.ui.dashboard_v2 import CobaltGraphDashboardV2
+                logger.info("Using V2 dashboard (Enhanced not available)")
+                return CobaltGraphDashboardV2
+            except ImportError as e2:
+                raise ImportError(f"No dashboard available: {e} | {e2}")
 
     def launch_dashboard(self) -> int:
         """Launch the CobaltGraph Dashboard (simplified V2)"""
