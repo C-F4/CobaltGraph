@@ -105,16 +105,21 @@ class DataManager:
 
     def get_connections(self, limit: int = 100) -> List[Dict]:
         """Get recent connections from database"""
-        if not self.is_cache_valid():
-            query = """
-                SELECT * FROM connections
-                ORDER BY timestamp DESC
-                LIMIT ?
-            """
-            results = self.execute_query(query, (limit,))
-            self._connection_cache = [dict(row) for row in results]
-            self._last_update = time.time()
-        return self._connection_cache
+        try:
+            if not self.is_cache_valid():
+                query = """
+                    SELECT * FROM connections
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """
+                results = self.execute_query(query, (limit,))
+                self._connection_cache = [dict(row) for row in results]
+                self._last_update = time.time()
+                logger.debug(f"Loaded {len(self._connection_cache)} connections from database")
+            return self._connection_cache
+        except Exception as e:
+            logger.error(f"Error fetching connections: {e}")
+            return []
 
     def get_devices(self) -> List[Dict]:
         """Get device list from database"""
