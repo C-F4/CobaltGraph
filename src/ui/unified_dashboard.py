@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-CobaltGraph Base Dashboard
-Abstract base class for mode-specific dashboards (device vs network)
+CobaltGraph Unified Dashboard Framework
 
-Provides:
-- Shared database initialization with caching strategy
-- Data pipeline integration with real-time events
-- Unified visualization component orchestration
-- Mode-aware layout and refresh intervals
+Single consolidated base class for all dashboard implementations.
+Provides 6-cell grid layout with automatic data management and reactive panels.
 
 Architecture:
-- BaseDashboard: Abstract App base (database, caching, pipelines)
-- DataManager: Unified data access with TTL-based caching
-- VisualizationManager: Component orchestration and update routing
-- DeviceDashboardBase/NetworkDashboardBase: Mode implementations
+├─ UnifiedDashboard: Core base class with 6-cell grid + data management
+├─ DataManager: Database queries with TTL caching
+├─ VisualizationManager: Component event routing
+└─ unified_components: 6 reusable panel components
+
+Each mode (device/network) extends UnifiedDashboard with mode-specific components.
 """
 
+import json
 import logging
 import sqlite3
 from collections import deque
@@ -148,7 +147,7 @@ class VisualizationManager:
         self.notify_components("events", events)
 
 
-class BaseDashboard(App):
+class UnifiedDashboard(App):
     """
     Unified Base Dashboard for CobaltGraph
     Implements comprehensive threat monitoring model for device and network modes
@@ -172,7 +171,7 @@ class BaseDashboard(App):
     Features:
     - Unified layout for device and network modes
     - Real-time data updates via DataManager + VisualizationManager
-    - Mode-aware component display (device focuses on personal, network on topology)
+    - Mode-aware component display
     - Comprehensive threat visualization with multiple dimensions
     - Interactive filtering and inspection
     """
@@ -220,43 +219,37 @@ class BaseDashboard(App):
     #top_left {
         width: 20%;
         height: 100%;
-        border: solid $primary;
-        padding: 1;
+        padding: 0 1 0 0;
     }
 
     #top_center {
         width: 50%;
         height: 100%;
-        border: solid $primary;
-        padding: 1;
+        padding: 0 1 0 1;
     }
 
     #top_right {
         width: 30%;
         height: 100%;
-        border: solid $primary;
-        padding: 1;
+        padding: 0 0 0 1;
     }
 
     #bottom_left {
         width: 20%;
         height: 100%;
-        border: solid $primary;
-        padding: 1;
+        padding: 1 1 0 0;
     }
 
     #bottom_center {
         width: 50%;
         height: 100%;
-        border: solid $primary;
-        padding: 1;
+        padding: 1 1 0 1;
     }
 
     #bottom_right {
         width: 30%;
         height: 100%;
-        border: solid $primary;
-        padding: 1;
+        padding: 1 0 0 1;
     }
     """
 
@@ -275,7 +268,7 @@ class BaseDashboard(App):
     }
 
     def __init__(self, db_path: str = "data/cobaltgraph.db", mode: str = "device", pipeline=None):
-        """Initialize base dashboard"""
+        """Initialize unified dashboard"""
         super().__init__()
         self.mode = mode
         self.pipeline = pipeline
@@ -307,6 +300,11 @@ class BaseDashboard(App):
         self.organization_intel_panel = None
         self.connection_table_panel = None
         self.threat_globe_panel = None
+
+    @property
+    def _device_cache(self) -> List[Dict]:
+        """Proxy to data_manager's device cache for backward compatibility"""
+        return self.data_manager._device_cache
 
     def compose(self) -> ComposeResult:
         """
@@ -354,6 +352,7 @@ class BaseDashboard(App):
     def on_mount(self) -> None:
         """Initialize dashboard after mounting"""
         self.title = f"CobaltGraph - {self.mode.title()} Mode"
+        self.sub_title = "Initializing..."
         self.is_connected = self.data_manager.connect()
 
         if self.pipeline:
@@ -361,9 +360,12 @@ class BaseDashboard(App):
             logger.info(f"Dashboard subscribed to pipeline (mode: {self.mode})")
 
         # Set up refresh intervals
-        self.set_interval(2.0, self._refresh_data)  # DB sync
+        self.set_interval(2.0, self._refresh_data)  # DB sync (forces cache invalidation)
+        self.set_interval(0.5, self._update_heartbeat)  # Update heartbeat timestamp (0.5s)
         self.set_interval(1.0, self._update_ui)     # UI animation
 
+        # Force initial data load
+        self.data_manager.invalidate_cache()
         self._refresh_data()
 
     def on_unmount(self) -> None:
@@ -372,35 +374,25 @@ class BaseDashboard(App):
 
     def _refresh_data(self) -> None:
         """Refresh data from database (called every 2s)"""
-        if not self.is_connected or not self.data_manager.is_cache_valid():
+        if not self.is_connected:
             return
+
+        # Invalidate cache on every refresh to ensure fresh data
+        self.data_manager.invalidate_cache()
 
         # Query connections
         conn_query = """
         SELECT timestamp, src_ip, src_mac, dst_ip, dst_port, protocol,
                threat_score, dst_org, dst_org_type, org_trust_score,
-               dst_country, hop_count, os_fingerprint, dst_asn, device_vendor
+               dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor
         FROM connections
         ORDER BY timestamp DESC LIMIT 100
         """
 
-        if self.mode == "device":
-            conn_query = """
-            SELECT timestamp, src_ip, src_mac, dst_ip, dst_port, protocol,
-                   threat_score, dst_org, dst_org_type, org_trust_score,
-                   dst_country, hop_count, os_fingerprint, dst_asn, device_vendor
-            FROM connections
-            WHERE src_ip IN (
-                SELECT DISTINCT src_ip FROM connections
-                WHERE src_ip NOT LIKE '10.%' AND src_ip NOT LIKE '172.%' AND src_ip NOT LIKE '192.168.%'
-                ORDER BY timestamp DESC LIMIT 1
-            ) OR src_ip = '127.0.0.1'
-            ORDER BY timestamp DESC LIMIT 100
-            """
-
         rows = self.data_manager.execute_query(conn_query)
         connections = [dict(row) for row in rows]
         self.data_manager._connection_cache = connections
+        self.recent_connections = deque(connections, maxlen=100)
         self.viz_manager.update_connections(connections)
 
         # Load devices (network mode only)
@@ -414,10 +406,25 @@ class BaseDashboard(App):
             rows = self.data_manager.execute_query(device_query)
             devices = [dict(row) for row in rows]
             self.data_manager._device_cache = devices
+            self.recent_devices = {d.get('mac'): d for d in devices}
             self.viz_manager.update_devices(devices)
+        else:
+            devices = []
+
+        # Load events
+        event_query = """
+        SELECT timestamp, event_type, severity, message, source_ip, dst_ip, threat_score
+        FROM events
+        ORDER BY timestamp DESC LIMIT 50
+        """
+        rows = self.data_manager.execute_query(event_query)
+        events = [dict(row) for row in rows]
+        self.recent_events = deque(events, maxlen=50)
+        self.viz_manager.update_events(events)
 
         # Update statistics
         self._update_statistics()
+        self._update_unified_panels(connections, devices, events)
         self.stats = self.stats.copy()  # Trigger reactive update
 
     def _update_statistics(self) -> None:
@@ -456,6 +463,82 @@ class BaseDashboard(App):
         self.stats['anomalies_detected'] = anomaly_result[0]['count'] if anomaly_result else 0
         self.stats['last_update'] = time.time()
 
+    def _update_unified_panels(self, connections: List[Dict], devices: List[Dict], events: List[Dict]) -> None:
+        """Update unified 6-cell grid panels with calculated data"""
+        if not connections:
+            return
+
+        # Threat Posture Panel (Top-Left)
+        if self.threat_posture_panel:
+            threats = [c.get('threat_score', 0) or 0 for c in connections]
+            current_threat = sum(threats) / len(threats) if threats else 0
+            high_count = sum(1 for t in threats if t >= 0.7)
+
+            self.threat_posture_panel.threat_data = {
+                'current_threat': current_threat,
+                'baseline_threat': sum(threats[:len(threats)//3]) / max(len(threats)//3, 1) if threats else 0,
+                'active_threats': high_count,
+                'monitored_ips': len(set(c.get('dst_ip') for c in connections)),
+            }
+
+        # Temporal Trends Panel (Top-Center) - update with history
+        if self.temporal_trends_panel:
+            threats = [c.get('threat_score', 0) or 0 for c in connections]
+            if threats:
+                self.temporal_trends_panel.trend_data['threat_history'].append(
+                    sum(threats) / len(threats)
+                )
+                self.temporal_trends_panel.trend_data['volume_history'].append(len(threats))
+
+            anomaly_count = sum(1 for e in events if e.get('event_type') == 'anomaly')
+            self.temporal_trends_panel.trend_data['anomaly_count'] = anomaly_count
+
+        # Geographic Alerts Panel (Top-Right)
+        if self.geographic_alerts_panel:
+            critical_events = sum(1 for e in events if e.get('severity') == 'CRITICAL')
+            warning_events = sum(1 for e in events if e.get('severity') == 'WARNING')
+            info_events = sum(1 for e in events if e.get('severity') == 'INFO')
+
+            self.geographic_alerts_panel.alert_data = {
+                'critical_count': critical_events,
+                'warning_count': warning_events,
+                'info_count': info_events,
+                'geo_map': {},
+            }
+
+        # Organization Intel Panel (Bottom-Left)
+        if self.organization_intel_panel:
+            org_stats = {}
+            for conn in connections:
+                org = conn.get('dst_org', 'Unknown')
+                threat = conn.get('threat_score', 0) or 0
+                if org not in org_stats:
+                    org_stats[org] = {'threat': 0, 'count': 0}
+                org_stats[org]['threat'] += threat
+                org_stats[org]['count'] += 1
+
+            top_orgs = sorted(
+                [(k, v['threat']/v['count'], v['count']) for k, v in org_stats.items()],
+                key=lambda x: x[1],
+                reverse=True
+            )[:5]
+
+            self.organization_intel_panel.org_data = {
+                'top_orgs': top_orgs,
+                'risk_matrix': {},
+            }
+
+        # Connection Table Panel (Bottom-Center)
+        if self.connection_table_panel:
+            self.connection_table_panel.connections = connections
+
+        # Threat Globe Panel (Bottom-Right) - geo data
+        if self.threat_globe_panel:
+            self.threat_globe_panel.globe_data = {
+                'connections': connections,
+                'heatmap': {},
+            }
+
     def _on_connection_event(self, event) -> None:
         """Callback from DataPipeline for real-time events"""
         try:
@@ -482,10 +565,15 @@ class BaseDashboard(App):
         except Exception as e:
             logger.error(f"Connection event error: {e}")
 
+    def _update_heartbeat(self) -> None:
+        """Update heartbeat timestamp in subtitle (called every 0.5s)"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.sub_title = f"Last update: {timestamp} | Status: {'Connected' if self.is_connected else 'Offline'}"
+
     def _update_ui(self) -> None:
         """Called every 1s for UI animations"""
         # Subclass panels update themselves via VisualizationManager callbacks
-        # No need for explicit updates - components subscribe to data changes
         pass
 
     def get_threat_color(self, score: float) -> str:
@@ -520,7 +608,7 @@ class BaseDashboard(App):
 
     def action_refresh(self) -> None:
         """Manually refresh data"""
-        self._last_db_update = 0.0  # Force cache invalidation
+        self.data_manager.invalidate_cache()
         self._refresh_data()
 
     def action_export(self) -> None:
@@ -532,9 +620,64 @@ class BaseDashboard(App):
         pass
 
 
-# Mode-specific base classes
+# Convenience aliases for backward compatibility
+class CobaltGraphDashboard(UnifiedDashboard):
+    """Unified CobaltGraph Dashboard - alias for UnifiedDashboard"""
 
-class DeviceDashboardBase(BaseDashboard):
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("r", "refresh", "Refresh"),
+        ("a", "alerts", "Alerts"),
+        ("g", "toggle_globe", "Globe"),
+        ("t", "toggle_density", "Density"),
+        ("o", "organization", "Organization"),
+        ("h", "hop_topology", "Hops"),
+        ("l", "event_log", "Log"),
+        ("d", "device_panel", "Devices"),
+        ("e", "export", "Export"),
+        ("f", "filter", "Filter"),
+        ("i", "intel_report", "Intel"),
+        ("?", "show_help", "Help"),
+    ]
+
+    def action_alerts(self) -> None:
+        """Show alert management dialog"""
+        logger.info("Alerts action triggered")
+
+    def action_toggle_globe(self) -> None:
+        """Toggle threat globe visibility"""
+        logger.info("Toggle globe visibility")
+
+    def action_toggle_density(self) -> None:
+        """Cycle through adaptive density modes"""
+        logger.info("Toggle density mode")
+
+    def action_organization(self) -> None:
+        """Show organization intelligence view"""
+        logger.info("Organization view triggered")
+
+    def action_hop_topology(self) -> None:
+        """Show hop topology visualization"""
+        logger.info("Hop topology view triggered")
+
+    def action_event_log(self) -> None:
+        """Show event log with filters"""
+        logger.info("Event log view triggered")
+
+    def action_device_panel(self) -> None:
+        """Toggle device discovery panel (network mode)"""
+        logger.info("Device panel toggle triggered")
+
+    def action_intel_report(self) -> None:
+        """Generate intelligence report"""
+        logger.info("Intel report generation triggered")
+
+    def action_filter(self) -> None:
+        """Open filter configuration"""
+        logger.info("Filter dialog triggered")
+
+
+class DeviceDashboardBase(UnifiedDashboard):
     """Base class for device mode dashboards"""
 
     def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None):
@@ -552,7 +695,7 @@ class DeviceDashboardBase(BaseDashboard):
     ]
 
 
-class NetworkDashboardBase(BaseDashboard):
+class NetworkDashboardBase(UnifiedDashboard):
     """Base class for network mode dashboards"""
 
     def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None):
@@ -569,3 +712,8 @@ class NetworkDashboardBase(BaseDashboard):
         ("p", "fingerprinting", "Fingerprint"),
         ("?", "show_help", "Help"),
     ]
+
+
+if __name__ == "__main__":
+    dashboard = CobaltGraphDashboard()
+    dashboard.run()
