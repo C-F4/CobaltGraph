@@ -179,9 +179,9 @@ class SystemChecker:
 
         # Check dashboard components (at least one must be available)
         dashboard_modules = [
-            ("src.ui.device_dashboard", "Device Dashboard"),
-            ("src.ui.network_dashboard", "Network Dashboard"),
-            ("src.ui.enhanced_lean_dashboard", "Enhanced Lean Dashboard (fallback)"),
+            ("src.ui.dashboard_enhanced", "CobaltGraph Enhanced Dashboard"),
+            ("src.ui.ascii_globe", "ASCII Globe Visualization"),
+            ("src.ui.boot_sequence", "Boot Sequence"),
         ]
 
         dashboard_available = False
