@@ -27,9 +27,9 @@ from textual.containers import Horizontal, Vertical, Container
 from textual.widgets import Header, Footer, DataTable, Static
 
 try:
-    from src.ui.base_dashboard import NetworkDashboardBase
+    from src.ui.unified_dashboard import NetworkDashboardBase
 except ImportError:
-    from base_dashboard import NetworkDashboardBase
+    from unified_dashboard import NetworkDashboardBase
 
 try:
     from src.ui.viz_engine import ThreatGlobe
@@ -163,8 +163,8 @@ class DeviceDiscoveryPanel(Static):
         lines.append("─" * 50)
 
         for device in self.devices[:10]:  # Show top 10 devices
-            mac = device.get('mac', 'Unknown')[:17]
-            vendor = device.get('vendor', 'Unknown')[:13]
+            mac = (device.get('mac') or 'Unknown')[:17]
+            vendor = (device.get('vendor') or 'Unknown')[:13]
             ips_raw = device.get('ip_addresses', '[]')
 
             # Parse IP addresses
