@@ -158,107 +158,39 @@ class CobaltGraphMain:
     def _select_dashboard(self):
         """Select appropriate dashboard based on mode"""
         try:
-            from src.ui.dashboard import CobaltGraphDashboard
-            return CobaltGraphDashboard
-        except ImportError:
-            # Fallback to device dashboard if comprehensive dashboard not available
-            try:
-                from src.ui.device_dashboard import DeviceDashboard
-                return DeviceDashboard
-            except ImportError:
-                raise ImportError("No compatible dashboard found")
+            from src.ui.dashboard_v2 import CobaltGraphDashboardV2
+            return CobaltGraphDashboardV2
+        except ImportError as e:
+            raise ImportError(f"CobaltGraphDashboardV2 not found: {e}")
 
     def launch_dashboard(self) -> int:
-        """Launch the CobaltGraph Dashboard with capture"""
+        """Launch the CobaltGraph Dashboard (simplified V2)"""
         try:
-            from src.core.orchestrator import DataPipeline
-            from src.capture.device_monitor import DeviceMonitor
             from src.utils.logging_config import setup_logging
-            import threading
 
-            # Setup logging FIRST
+            # Setup logging
             setup_logging(
                 log_level=logging.INFO,
                 log_file='cobaltgraph.log',
                 log_dir='logs',
-                use_color=False,  # Disable color in file logs
+                use_color=False,
                 detailed_file_logs=True
             )
             logger = logging.getLogger(__name__)
             logger.info(f"CobaltGraph {self.VERSION} starting...")
             logger.info(f"Mode: {self.mode} | Database: {self.db_path}")
 
-            print(f"\n{Colors.GREEN}Launching CobaltGraph Dashboard...{Colors.NC}")
-            print(f"{Colors.CYAN}Mode: {self.mode} | Database: {self.db_path}{Colors.NC}")
-            print(f"{Colors.DIM}Press 'Q' to quit, 'R' to refresh, '?' for help{Colors.NC}\n")
+            print(f"\n{Colors.GREEN}Launching CobaltGraph Dashboard V2...{Colors.NC}")
+            print(f"{Colors.CYAN}Database: {self.db_path}{Colors.NC}")
+            print(f"{Colors.DIM}Press [Q] to quit, [R] to refresh, [?] for help{Colors.NC}\n")
 
-            # Initialize pipeline for data processing
-            pipeline = None
-            device_monitor = None
-
-            try:
-                # Start the data pipeline
-                pipeline_config = {"database_path": self.db_path}
-                pipeline = DataPipeline(config=pipeline_config)
-                pipeline.initialize_components()  # CRITICAL: Initialize database, geo, threat intel
-                pipeline.start()
-                print(f"{Colors.GREEN}✓ Data pipeline started{Colors.NC}")
-
-                # Start capture based on mode
-                try:
-                    capture_count = [0]  # Use list to allow mutation in closure
-
-                    def capture_callback(connection):
-                        capture_count[0] += 1
-                        if capture_count[0] <= 5 or capture_count[0] % 10 == 0:
-                            print(f"{Colors.DIM}  → Captured: {connection.get('dst_ip')}:{connection.get('dst_port')}{Colors.NC}")
-                        pipeline.submit(connection)
-
-                    poll_interval = 1.0 if self.mode == 'network' else 2.0
-                    device_monitor = DeviceMonitor({"poll_interval": poll_interval})
-                    device_monitor.set_callback(capture_callback)
-                    device_monitor.start()
-
-                    mode_desc = "broadcast" if self.mode == 'network' else "local"
-                    print(f"{Colors.GREEN}✓ Capture started ({mode_desc} mode, {poll_interval}s polling){Colors.NC}")
-
-                    if self.mode == 'network':
-                        print(f"{Colors.DIM}Note: Full network capture requires SPAN port or TAP{Colors.NC}")
-
-                except Exception as e:
-                    import traceback
-                    print(f"{Colors.YELLOW}⚠ Capture not available: {e}{Colors.NC}")
-                    traceback.print_exc()
-                    print(f"{Colors.DIM}Dashboard will show historical data only{Colors.NC}")
-
-            except Exception as e:
-                print(f"{Colors.YELLOW}⚠ Pipeline init failed: {e}{Colors.NC}")
-
-            # Launch mode-specific dashboard with pipeline connection
+            # Launch dashboard directly (no pipeline needed)
             dashboard_class = self._select_dashboard()
             logger.info(f"Launching {dashboard_class.__name__}...")
-            # Pass database path to dashboard
-            # Note: CobaltGraphDashboard expects database_path, others expect db_path
-            if dashboard_class.__name__ == 'CobaltGraphDashboard':
-                dashboard = dashboard_class(database_path=self.db_path)
-            else:
-                dashboard = dashboard_class(db_path=self.db_path, pipeline=pipeline)
-            dashboard_type = f"{self.mode.title()} Mode"
-            print(f"{Colors.GREEN}✓ Dashboard ready ({dashboard_type}){Colors.NC}")
-            print(f"{Colors.DIM}Live data streaming from pipeline...{Colors.NC}\n")
-            dashboard.run()
+            print(f"{Colors.GREEN}✓ Dashboard ready{Colors.NC}\n")
 
-            # Cleanup
-            if device_monitor:
-                try:
-                    device_monitor.stop()
-                except:
-                    pass
-            if pipeline:
-                try:
-                    pipeline.stop()
-                except:
-                    pass
+            dashboard = dashboard_class()
+            dashboard.run()
 
             return 0
 

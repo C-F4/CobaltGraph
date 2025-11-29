@@ -27,9 +27,9 @@ from textual.containers import Horizontal, Vertical, Container
 from textual.widgets import Header, Footer, DataTable, Static
 
 try:
-    from src.ui.base_dashboard import DeviceDashboardBase
+    from src.ui.unified_dashboard import DeviceDashboardBase
 except ImportError:
-    from base_dashboard import DeviceDashboardBase
+    from unified_dashboard import DeviceDashboardBase
 
 try:
     from src.ui.viz_engine import ThreatGlobe
@@ -160,9 +160,9 @@ class SmartConnectionTable(Static):
 
             dst_ip = conn.get('dst_ip', '-')
             port = str(conn.get('dst_port', '-'))
-            protocol = conn.get('protocol', '-').upper()
-            org = conn.get('dst_org', 'Unknown')[:25]
-            org_type = conn.get('dst_org_type', 'unknown')[:10]
+            protocol = (conn.get('protocol') or '-').upper()
+            org = (conn.get('dst_org') or 'Unknown')[:25]
+            org_type = (conn.get('dst_org_type') or 'unknown')[:10]
             trust = f"{(conn.get('org_trust_score', 0) or 0) * 100:.0f}%"
             hops = str(conn.get('hop_count', '-'))
 
