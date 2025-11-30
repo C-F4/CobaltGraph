@@ -43,12 +43,12 @@ except ImportError:
     from unified_dashboard import UnifiedDashboard, DataManager, VisualizationManager
 
 try:
-    from src.ui.globe_ascii_visual import SimpleGlobeRenderer
+    from src.ui.globe_simple import SimpleGlobe
 except ImportError:
     try:
-        from globe_ascii_visual import SimpleGlobeRenderer
+        from globe_simple import SimpleGlobe
     except ImportError:
-        SimpleGlobeRenderer = None
+        SimpleGlobe = None
 
 
 class ThreatPostureQuickPanel(Static):
@@ -160,12 +160,12 @@ class EnhancedThreatGlobePanel(Static):
         self.last_update_time = time.time()
 
         # Initialize simple visual globe (rotating ASCII globe with threat markers)
-        if SimpleGlobeRenderer:
+        if SimpleGlobe:
             try:
-                self.simple_globe = SimpleGlobeRenderer(width=75, height=20)
-                logger.debug("Initialized SimpleGlobeRenderer - visual rotating globe")
+                self.simple_globe = SimpleGlobe(width=70, height=15)
+                logger.debug("Initialized SimpleGlobe - visual rotating globe")
             except Exception as e:
-                logger.warning(f"Failed to initialize SimpleGlobeRenderer: {e}")
+                logger.warning(f"Failed to initialize SimpleGlobe: {e}")
                 self.simple_globe = None
 
     def watch_globe_data(self, new_data: dict) -> None:
@@ -194,16 +194,11 @@ class EnhancedThreatGlobePanel(Static):
                     self.threat_regions[country]['ips'].append(conn.get('dst_ip', 'Unknown'))
 
                     # Add to simple visual globe
-                    src_lat, src_lon = 39.8283, -98.5795  # US center
                     dst_lat = float(conn.get('dst_lat', 0) or 0)
                     dst_lon = float(conn.get('dst_lon', 0) or 0)
 
-                    self.simple_globe.add_connection(
-                        src_lat, src_lon,
-                        dst_lat, dst_lon,
-                        threat,
-                        confidence=confidence,
-                        organization=org_type
+                    self.simple_globe.add_threat(
+                        dst_lat, dst_lon, threat
                     )
                 except Exception as e:
                     logger.debug(f"Failed to process connection: {e}")
