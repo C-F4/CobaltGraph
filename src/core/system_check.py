@@ -180,7 +180,7 @@ class SystemChecker:
         # Check dashboard components (at least one must be available)
         dashboard_modules = [
             ("src.ui.dashboard_enhanced", "CobaltGraph Enhanced Dashboard"),
-            ("src.ui.ascii_globe", "ASCII Globe Visualization"),
+            ("src.ui.globe_ascii_visual", "Visual Threat Globe"),
             ("src.ui.boot_sequence", "Boot Sequence"),
         ]
 
