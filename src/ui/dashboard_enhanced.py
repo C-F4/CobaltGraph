@@ -48,6 +48,14 @@ except ImportError:
     ASCIIGlobe = None
     ConnectionPing = None
 
+try:
+    from src.ui.globe_enhanced import EnhancedGlobeRenderer
+except ImportError:
+    try:
+        from globe_enhanced import EnhancedGlobeRenderer
+    except ImportError:
+        EnhancedGlobeRenderer = None
+
 
 class ThreatPostureQuickPanel(Static):
     """
@@ -119,14 +127,17 @@ class ThreatPostureQuickPanel(Static):
 
 class EnhancedThreatGlobePanel(Static):
     """
-    Top-Right (50%): Interactive Threat Visualization
-    Provides real-time threat heat mapping and animated connection visualization
+    Top-Right (50%): Interactive Threat Visualization with 4D Globe
+    Provides real-time threat heat mapping with particle system and connection visualization
 
     Features:
-    - Dynamic threat heatmap by region
-    - Animated connection indicators
-    - Real-time threat scores
-    - Color-coded threat levels
+    - High-resolution Braille globe (Drawille 4x resolution if available)
+    - 4D color encoding: threat/confidence/age/organization
+    - Particle system for dynamic threat events
+    - Great-circle connection arcs with animation
+    - Real-time threat heatmaps with decay
+    - Regional threat aggregation and clustering
+    - Sophisticated threat zone analysis
     """
 
     DEFAULT_CSS = """
@@ -144,6 +155,7 @@ class EnhancedThreatGlobePanel(Static):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.globe = None
+        self.enhanced_globe = None
         self.globe_data = {
             'connections': [],
             'heatmap': {},
@@ -152,22 +164,35 @@ class EnhancedThreatGlobePanel(Static):
         self.animation_frame = 0
         self.threat_regions = {}
         self.region_pings = []
+        self.last_update_time = time.time()
 
-        # Initialize ASCII globe if available
-        if ASCIIGlobe:
+        # Initialize enhanced globe first (preferred)
+        if EnhancedGlobeRenderer:
             try:
-                # Calculate dimensions from terminal (will be refined on mount)
+                self.enhanced_globe = EnhancedGlobeRenderer(width=40, height=20)
+                self.enhanced_globe.rotation_x = 23.5  # Earth's axial tilt
+                self.enhanced_globe.auto_rotate = True
+                self.enhanced_globe.rotation_speed = 15.0  # degrees per second
+                logger.debug("Initialized EnhancedGlobeRenderer")
+            except Exception as e:
+                logger.warning(f"Failed to initialize EnhancedGlobeRenderer: {e}")
+                self.enhanced_globe = None
+
+        # Fallback to ASCII globe if enhanced not available
+        if self.enhanced_globe is None and ASCIIGlobe:
+            try:
                 self.globe = ASCIIGlobe(width=40, height=20)
-                self.globe.state.rotation_x = 23.5  # Earth's axial tilt
+                self.globe.state.rotation_x = 23.5
                 self.globe.auto_rotate = True
-                self.globe.rotation_speed = 15.0  # degrees per second
+                self.globe.rotation_speed = 15.0
+                logger.debug("Fallback to ASCIIGlobe")
             except Exception as e:
                 logger.warning(f"Failed to initialize ASCIIGlobe: {e}")
                 self.globe = None
 
     def watch_globe_data(self, new_data: dict) -> None:
-        """Update globe when data changes"""
-        if self.globe is None:
+        """Update globe when data changes with enhanced renderer"""
+        if self.enhanced_globe is None and self.globe is None:
             return
 
         try:
@@ -180,6 +205,8 @@ class EnhancedThreatGlobePanel(Static):
                 try:
                     country = (conn.get('dst_country') or 'Unknown')[:2].upper()
                     threat = float(conn.get('threat_score', 0) or 0)
+                    confidence = float(conn.get('confidence', 0.8) or 0.8)
+                    org_type = (conn.get('dst_org_type') or 'unknown').lower()
 
                     if country not in self.threat_regions:
                         self.threat_regions[country] = {'count': 0, 'avg_threat': 0.0, 'ips': []}
@@ -188,28 +215,40 @@ class EnhancedThreatGlobePanel(Static):
                     self.threat_regions[country]['avg_threat'] = threat
                     self.threat_regions[country]['ips'].append(conn.get('dst_ip', 'Unknown'))
 
-                    # Add to globe
-                    src_lat, src_lon = 39.8283, -98.5795  # US center
+                    # Add to globe (source: US center)
+                    src_lat, src_lon = 39.8283, -98.5795
                     dst_lat = float(conn.get('dst_lat', 0) or 0)
                     dst_lon = float(conn.get('dst_lon', 0) or 0)
 
-                    self.globe.add_connection(
-                        src_lat, src_lon,
-                        dst_lat, dst_lon,
-                        threat,
-                        metadata={
-                            'ip': conn.get('dst_ip'),
-                            'org': conn.get('dst_org'),
-                            'country': country,
-                            'port': conn.get('dst_port'),
-                            'threat': threat,
-                        }
-                    )
+                    # Use enhanced globe if available
+                    if self.enhanced_globe:
+                        self.enhanced_globe.add_connection(
+                            src_lat, src_lon,
+                            dst_lat, dst_lon,
+                            threat,
+                            confidence=confidence,
+                            organization=org_type
+                        )
+                    # Fallback to ASCII globe
+                    elif self.globe:
+                        self.globe.add_connection(
+                            src_lat, src_lon,
+                            dst_lat, dst_lon,
+                            threat,
+                            metadata={
+                                'ip': conn.get('dst_ip'),
+                                'org': conn.get('dst_org'),
+                                'country': country,
+                                'port': conn.get('dst_port'),
+                                'threat': threat,
+                            }
+                        )
                 except Exception as e:
                     logger.debug(f"Failed to process connection: {e}")
 
             # Trigger animation update
             self.animation_frame += 1
+            self.last_update_time = time.time()
         except Exception as e:
             logger.warning(f"Globe data watch failed: {e}")
 
@@ -218,10 +257,22 @@ class EnhancedThreatGlobePanel(Static):
         self.refresh()
 
     def render(self):
-        """Sophisticated threat visualization with globe, heatmap, and analytics"""
+        """Sophisticated threat visualization with enhanced 4D globe, heatmap, and analytics"""
         connections = self.globe_data.get('connections', [])
 
-        # Try to render full globe if available
+        # Update and render enhanced globe if available
+        if self.enhanced_globe:
+            try:
+                # Update animation
+                dt = 0.1  # 100ms per frame
+                self.enhanced_globe.update(dt)
+
+                # Render enhanced globe
+                return self.enhanced_globe.render()
+            except Exception as e:
+                logger.debug(f"Enhanced globe render failed: {e}")
+
+        # Fallback to ASCII globe if available
         if self.globe:
             try:
                 # Get globe rendering
