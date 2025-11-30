@@ -43,20 +43,6 @@ except ImportError:
     from unified_dashboard import UnifiedDashboard, DataManager, VisualizationManager
 
 try:
-    from src.ui.ascii_globe import ASCIIGlobe, ConnectionPing
-except ImportError:
-    ASCIIGlobe = None
-    ConnectionPing = None
-
-try:
-    from src.ui.globe_enhanced import EnhancedGlobeRenderer
-except ImportError:
-    try:
-        from globe_enhanced import EnhancedGlobeRenderer
-    except ImportError:
-        EnhancedGlobeRenderer = None
-
-try:
     from src.ui.globe_ascii_visual import SimpleGlobeRenderer
 except ImportError:
     try:
@@ -162,8 +148,6 @@ class EnhancedThreatGlobePanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.globe = None
-        self.enhanced_globe = None
         self.simple_globe = None
         self.globe_data = {
             'connections': [],
@@ -175,49 +159,25 @@ class EnhancedThreatGlobePanel(Static):
         self.region_pings = []
         self.last_update_time = time.time()
 
-        # Initialize simple visual globe first (preferred - actually visible!)
+        # Initialize simple visual globe (rotating ASCII globe with threat markers)
         if SimpleGlobeRenderer:
             try:
                 self.simple_globe = SimpleGlobeRenderer(width=75, height=20)
-                logger.debug("Initialized SimpleGlobeRenderer")
+                logger.debug("Initialized SimpleGlobeRenderer - visual rotating globe")
             except Exception as e:
                 logger.warning(f"Failed to initialize SimpleGlobeRenderer: {e}")
                 self.simple_globe = None
 
-        # Fallback to enhanced globe if simple not available
-        if self.simple_globe is None and EnhancedGlobeRenderer:
-            try:
-                self.enhanced_globe = EnhancedGlobeRenderer(width=40, height=20)
-                self.enhanced_globe.rotation_x = 23.5  # Earth's axial tilt
-                self.enhanced_globe.auto_rotate = True
-                self.enhanced_globe.rotation_speed = 15.0  # degrees per second
-                logger.debug("Fallback to EnhancedGlobeRenderer")
-            except Exception as e:
-                logger.warning(f"Failed to initialize EnhancedGlobeRenderer: {e}")
-                self.enhanced_globe = None
-
-        # Final fallback to ASCII globe if neither available
-        if self.simple_globe is None and self.enhanced_globe is None and ASCIIGlobe:
-            try:
-                self.globe = ASCIIGlobe(width=40, height=20)
-                self.globe.state.rotation_x = 23.5
-                self.globe.auto_rotate = True
-                self.globe.rotation_speed = 15.0
-                logger.debug("Fallback to ASCIIGlobe")
-            except Exception as e:
-                logger.warning(f"Failed to initialize ASCIIGlobe: {e}")
-                self.globe = None
-
     def watch_globe_data(self, new_data: dict) -> None:
-        """Update globe when data changes - feed to all available renderers"""
-        if self.simple_globe is None and self.enhanced_globe is None and self.globe is None:
+        """Update globe when data changes"""
+        if self.simple_globe is None:
             return
 
         try:
             # Extract threat regions from connections
             connections = new_data.get('connections', [])
 
-            # Build threat region map and add to globes
+            # Build threat region map and add to globe
             self.threat_regions = {}
             for conn in connections[-20:]:  # Last 20 connections
                 try:
@@ -233,43 +193,18 @@ class EnhancedThreatGlobePanel(Static):
                     self.threat_regions[country]['avg_threat'] = threat
                     self.threat_regions[country]['ips'].append(conn.get('dst_ip', 'Unknown'))
 
-                    # Add to globe (source: US center)
-                    src_lat, src_lon = 39.8283, -98.5795
+                    # Add to simple visual globe
+                    src_lat, src_lon = 39.8283, -98.5795  # US center
                     dst_lat = float(conn.get('dst_lat', 0) or 0)
                     dst_lon = float(conn.get('dst_lon', 0) or 0)
 
-                    # Use simple visual globe if available (PRIMARY)
-                    if self.simple_globe:
-                        self.simple_globe.add_connection(
-                            src_lat, src_lon,
-                            dst_lat, dst_lon,
-                            threat,
-                            confidence=confidence,
-                            organization=org_type
-                        )
-                    # Fallback to enhanced globe
-                    elif self.enhanced_globe:
-                        self.enhanced_globe.add_connection(
-                            src_lat, src_lon,
-                            dst_lat, dst_lon,
-                            threat,
-                            confidence=confidence,
-                            organization=org_type
-                        )
-                    # Final fallback to ASCII globe
-                    elif self.globe:
-                        self.globe.add_connection(
-                            src_lat, src_lon,
-                            dst_lat, dst_lon,
-                            threat,
-                            metadata={
-                                'ip': conn.get('dst_ip'),
-                                'org': conn.get('dst_org'),
-                                'country': country,
-                                'port': conn.get('dst_port'),
-                                'threat': threat,
-                            }
-                        )
+                    self.simple_globe.add_connection(
+                        src_lat, src_lon,
+                        dst_lat, dst_lon,
+                        threat,
+                        confidence=confidence,
+                        organization=org_type
+                    )
                 except Exception as e:
                     logger.debug(f"Failed to process connection: {e}")
 
@@ -284,39 +219,16 @@ class EnhancedThreatGlobePanel(Static):
         self.refresh()
 
     def render(self):
-        """Threat visualization with visual globe and threat data"""
-        connections = self.globe_data.get('connections', [])
-
-        # PRIMARY: Render simple visual globe if available (MOST VISIBLE!)
+        """Render visual threat globe with animated threat markers and connections"""
+        # Render simple visual globe
         if self.simple_globe:
             try:
                 # Update animation
                 dt = 0.1  # 100ms per frame
                 self.simple_globe.update(dt)
 
-                # Render simple visual globe
+                # Render globe
                 return self.simple_globe.render()
-            except Exception as e:
-                logger.debug(f"Simple globe render failed: {e}")
-
-        # FALLBACK: Render enhanced globe if available
-        if self.enhanced_globe:
-            try:
-                # Update animation
-                dt = 0.1
-                self.enhanced_globe.update(dt)
-
-                # Render enhanced globe
-                return self.enhanced_globe.render()
-            except Exception as e:
-                logger.debug(f"Enhanced globe render failed: {e}")
-
-        # FALLBACK: Use ASCII globe if available
-        if self.globe:
-            try:
-                # Get globe rendering
-                globe_output = self.globe.render_with_overlay()
-                return globe_output
             except Exception as e:
                 logger.debug(f"Globe render failed: {e}")
 
