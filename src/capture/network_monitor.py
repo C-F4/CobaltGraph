@@ -135,9 +135,10 @@ class NetworkMonitor:
     - network: Monitor entire network segment (promiscuous mode)
     """
 
-    def __init__(self, mode="device", interface=None):
+    def __init__(self, mode="device", interface=None, callback=None):
         self.mode = mode
         self.interface = interface or self._detect_interface()
+        self.callback = callback  # Callback for pipeline integration
         self.running = False
 
         # Device tracking
@@ -361,6 +362,64 @@ class NetworkMonitor:
 
         return result
 
+    def get_cached_neighbors(self) -> list:
+        """
+        Read devices from kernel's ARP/neighbor cache.
+        PASSIVE: Only reads existing system state, never sends packets.
+        """
+        devices = []
+        try:
+            # Read kernel neighbor table (populated by system's normal operation)
+            result = subprocess.run(
+                ["ip", "neigh", "show"],
+                capture_output=True, text=True, timeout=2,
+                check=False,
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[2] == "lladdr":
+                    ip = parts[0]
+                    mac = parts[4]
+                    state = parts[-1] if len(parts) > 5 else "UNKNOWN"
+                    # Only include REACHABLE/STALE entries (confirmed devices)
+                    if state in ("REACHABLE", "STALE", "DELAY", "PROBE"):
+                        devices.append({
+                            "ip": ip,
+                            "mac": mac,
+                            "vendor": MACVendorResolver.resolve(mac),
+                            "state": state
+                        })
+        except Exception as e:
+            print(f"[Network Monitor] Neighbor cache read failed: {e}", file=sys.stderr)
+        return devices
+
+    def select_capture_method(self) -> str:
+        """Select best available capture method. All methods are PASSIVE."""
+        import os
+
+        # Check if we have root
+        is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+
+        if is_root:
+            # Test raw socket
+            try:
+                test_sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
+                test_sock.close()
+                return "raw_socket"
+            except Exception:
+                pass
+
+        # Fallback to passive cache reading
+        try:
+            from src.capture.passive_discovery import get_available_readers
+            readers = get_available_readers()
+            if readers:
+                return f"passive_cache:{readers[0].name()}"
+        except ImportError:
+            pass
+
+        return "device_monitor"  # Last resort (ss/netstat)
+
     def track_device(self, mac: str, ip: Optional[str] = None):
         """Track or update network device"""
         if mac not in self.devices:
@@ -412,7 +471,10 @@ class NetworkMonitor:
                     "is_gratuitous": arp_packet["is_gratuitous"],
                     "metadata": {"network_mode": self.mode, "interface": self.interface},
                 }
-                print(json.dumps(device_event), flush=True)
+                if self.callback:
+                    self.callback(device_event)
+                else:
+                    print(json.dumps(device_event), flush=True)
             return
 
         # Handle broadcast frames (emit device event)
@@ -432,7 +494,10 @@ class NetworkMonitor:
                     "packet_type": "broadcast",
                     "metadata": {"network_mode": self.mode, "interface": self.interface},
                 }
-                print(json.dumps(device_event), flush=True)
+                if self.callback:
+                    self.callback(device_event)
+                else:
+                    print(json.dumps(device_event), flush=True)
 
         # Only process IPv4 packets (0x0800)
         if eth_frame["eth_type"] != 0x0800:
@@ -487,7 +552,10 @@ class NetworkMonitor:
                 "metadata": {"network_mode": self.mode, "interface": self.interface},
             }
 
-            print(json.dumps(connection), flush=True)
+            if self.callback:
+                self.callback(connection)
+            else:
+                print(json.dumps(connection), flush=True)
             self.connections.append(connection)
 
             # Also emit device event for the source device making connection
@@ -503,7 +571,10 @@ class NetworkMonitor:
                 "dst_port": ip_packet["dest_port"],
                 "metadata": {"network_mode": self.mode, "interface": self.interface},
             }
-            print(json.dumps(device_event), flush=True)
+            if self.callback:
+                self.callback(device_event)
+            else:
+                print(json.dumps(device_event), flush=True)
 
     def start_capture(self):
         """Start network packet capture"""
