@@ -50,6 +50,22 @@ except ImportError:
     except ImportError:
         SimpleGlobe = None
 
+try:
+    from src.ui.globe_enhanced import EnhancedGlobe
+except ImportError:
+    try:
+        from globe_enhanced import EnhancedGlobe
+    except ImportError:
+        EnhancedGlobe = None
+
+try:
+    from src.ui.globe_flat import FlatWorldMap
+except ImportError:
+    try:
+        from globe_flat import FlatWorldMap
+    except ImportError:
+        FlatWorldMap = None
+
 
 class ThreatPostureQuickPanel(Static):
     """
@@ -148,7 +164,9 @@ class EnhancedThreatGlobePanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.world_map = None
         self.simple_globe = None
+        self.enhanced_globe = None
         self.globe_data = {
             'connections': [],
             'heatmap': {},
@@ -159,49 +177,106 @@ class EnhancedThreatGlobePanel(Static):
         self.region_pings = []
         self.last_update_time = time.time()
 
-        # Initialize simple visual globe (rotating ASCII globe with threat markers)
-        if SimpleGlobe:
+        # Initialize flat world map (primary implementation)
+        if FlatWorldMap:
+            try:
+                self.world_map = FlatWorldMap(width=140, height=30)
+                logger.debug("Initialized FlatWorldMap - flat 2D world map with countries and threat visualization")
+            except Exception as e:
+                logger.warning(f"Failed to initialize FlatWorldMap: {e}")
+                self.world_map = None
+
+        # Fallback to enhanced globe if flat map fails
+        if not self.world_map and EnhancedGlobe:
+            try:
+                self.enhanced_globe = EnhancedGlobe(width=70, height=15)
+                logger.debug("Initialized EnhancedGlobe - rotating globe with countries and connection lines")
+            except Exception as e:
+                logger.warning(f"Failed to initialize EnhancedGlobe: {e}")
+                self.enhanced_globe = None
+
+        # Fallback to simple globe if enhanced fails
+        if not self.world_map and not self.enhanced_globe and SimpleGlobe:
             try:
                 self.simple_globe = SimpleGlobe(width=70, height=15)
-                logger.debug("Initialized SimpleGlobe - visual rotating globe")
+                logger.debug("Initialized SimpleGlobe - fallback visual rotating globe")
             except Exception as e:
                 logger.warning(f"Failed to initialize SimpleGlobe: {e}")
                 self.simple_globe = None
 
     def watch_globe_data(self, new_data: dict) -> None:
         """Update globe when data changes"""
-        if self.simple_globe is None:
+        if self.world_map is None and self.enhanced_globe is None and self.simple_globe is None:
             return
 
         try:
             # Extract threat regions from connections
             connections = new_data.get('connections', [])
 
-            # Build threat region map and add to globe
+            # Build threat region map
             self.threat_regions = {}
-            for conn in connections[-20:]:  # Last 20 connections
-                try:
-                    country = (conn.get('dst_country') or 'Unknown')[:2].upper()
-                    threat = float(conn.get('threat_score', 0) or 0)
-                    confidence = float(conn.get('confidence', 0.8) or 0.8)
-                    org_type = (conn.get('dst_org_type') or 'unknown').lower()
 
-                    if country not in self.threat_regions:
-                        self.threat_regions[country] = {'count': 0, 'avg_threat': 0.0, 'ips': []}
+            # Add connections to flat world map (primary)
+            if self.world_map:
+                self.world_map.clear_threats()
+                for conn in connections[-50:]:  # Top 50 threats for flat map
+                    try:
+                        country = (conn.get('dst_country') or 'Unknown')[:2].upper()
+                        threat = float(conn.get('threat_score', 0) or 0)
+                        org_type = (conn.get('dst_org_type') or 'unknown').lower()
+                        ip = conn.get('dst_ip', 'Unknown')
 
-                    self.threat_regions[country]['count'] += 1
-                    self.threat_regions[country]['avg_threat'] = threat
-                    self.threat_regions[country]['ips'].append(conn.get('dst_ip', 'Unknown'))
+                        if country not in self.threat_regions:
+                            self.threat_regions[country] = {'count': 0, 'avg_threat': 0.0, 'ips': []}
 
-                    # Add to simple visual globe
-                    dst_lat = float(conn.get('dst_lat', 0) or 0)
-                    dst_lon = float(conn.get('dst_lon', 0) or 0)
+                        self.threat_regions[country]['count'] += 1
+                        self.threat_regions[country]['avg_threat'] = threat
+                        self.threat_regions[country]['ips'].append(ip)
 
-                    self.simple_globe.add_threat(
-                        dst_lat, dst_lon, threat
-                    )
-                except Exception as e:
-                    logger.debug(f"Failed to process connection: {e}")
+                        # Add to world map
+                        dst_lat = float(conn.get('dst_lat', 0) or 0)
+                        dst_lon = float(conn.get('dst_lon', 0) or 0)
+
+                        self.world_map.add_threat(
+                            lat=dst_lat,
+                            lon=dst_lon,
+                            ip=ip,
+                            threat_score=threat,
+                            org_type=org_type
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to process connection: {e}")
+
+            # Fallback: Add to enhanced globe if flat map not available
+            elif self.enhanced_globe:
+                src_lat, src_lon = 0.0, 0.0
+                self.enhanced_globe.clear_connections()
+                for conn in connections[-15:]:  # Top 15 threats
+                    try:
+                        threat = float(conn.get('threat_score', 0) or 0)
+                        org_type = (conn.get('dst_org_type') or 'unknown').lower()
+                        ip = conn.get('dst_ip', 'Unknown')
+                        dst_lat = float(conn.get('dst_lat', 0) or 0)
+                        dst_lon = float(conn.get('dst_lon', 0) or 0)
+
+                        self.enhanced_globe.add_connection(
+                            src_lat, src_lon, dst_lat, dst_lon,
+                            threat, org_type, ip
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to process connection: {e}")
+
+            # Fallback: Add to simple globe if enhanced not available
+            elif self.simple_globe:
+                for conn in connections[-20:]:  # Last 20 connections
+                    try:
+                        threat = float(conn.get('threat_score', 0) or 0)
+                        dst_lat = float(conn.get('dst_lat', 0) or 0)
+                        dst_lon = float(conn.get('dst_lon', 0) or 0)
+
+                        self.simple_globe.add_threat(dst_lat, dst_lon, threat)
+                    except Exception as e:
+                        logger.debug(f"Failed to process connection: {e}")
 
             # Trigger animation update
             self.animation_frame += 1
@@ -215,7 +290,31 @@ class EnhancedThreatGlobePanel(Static):
 
     def render(self):
         """Render visual threat globe with animated threat markers and connections"""
-        # Render simple visual globe
+        # Render flat world map (primary)
+        if self.world_map:
+            try:
+                # Update animation
+                dt = 0.05  # 50ms per frame
+                self.world_map.update(dt)
+
+                # Render world map
+                return self.world_map.render()
+            except Exception as e:
+                logger.debug(f"World map render failed: {e}")
+
+        # Fallback to enhanced globe
+        if self.enhanced_globe:
+            try:
+                # Update animation
+                dt = 0.05  # 50ms per frame
+                self.enhanced_globe.update(dt)
+
+                # Render globe
+                return self.enhanced_globe.render()
+            except Exception as e:
+                logger.debug(f"Enhanced globe render failed: {e}")
+
+        # Fallback to simple visual globe
         if self.simple_globe:
             try:
                 # Update animation
