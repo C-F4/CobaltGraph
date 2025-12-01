@@ -158,6 +158,58 @@ class DataManager:
             logger.debug(f"Error fetching stats: {e}")
             return {'total': 0, 'high_threat': 0, 'devices': 0}
 
+    def get_events(self, event_type: str = None, limit: int = 20) -> List[Dict]:
+        """
+        Get recent events/anomalies from database.
+
+        Args:
+            event_type: Filter by type (anomaly, high_threat, consensus_uncertain, device_discovered)
+            limit: Maximum number of events to return
+
+        Returns:
+            List of event dictionaries with timestamp, type, severity, message, IPs, etc.
+        """
+        try:
+            if event_type:
+                query = """
+                    SELECT * FROM events
+                    WHERE event_type = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """
+                params = (event_type, limit)
+            else:
+                query = """
+                    SELECT * FROM events
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """
+                params = (limit,)
+
+            results = self.execute_query(query, params)
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.debug(f"Error fetching events: {e}")
+            return []
+
+    def get_anomalies(self, limit: int = 10) -> List[Dict]:
+        """
+        Get recent anomaly detections.
+        Convenience method that filters events by anomaly-related types.
+        """
+        try:
+            query = """
+                SELECT * FROM events
+                WHERE event_type IN ('anomaly', 'high_threat', 'consensus_uncertain')
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """
+            results = self.execute_query(query, (limit,))
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.debug(f"Error fetching anomalies: {e}")
+            return []
+
 
 class VisualizationManager:
     """
