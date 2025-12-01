@@ -10,6 +10,7 @@ import os
 import platform
 import signal
 import sys
+import threading
 from pathlib import Path
 
 
@@ -190,6 +191,43 @@ class CobaltGraphMain:
             print(f"{Colors.CYAN}Database: {self.db_path}{Colors.NC}")
             print(f"{Colors.DIM}Press [Q] to quit, [R] to refresh, [?] for help{Colors.NC}\n")
 
+            # Initialize pipeline and network monitor for network mode
+            pipeline = None
+            network_monitor = None
+            monitor_thread = None
+
+            if self.mode == "network":
+                try:
+                    from src.capture.network_monitor import NetworkMonitor
+                    from src.core.orchestrator import DataPipeline
+
+                    # Initialize and start data pipeline
+                    pipeline = DataPipeline({"database_path": self.db_path})
+                    pipeline.initialize_components()
+                    pipeline.start()
+                    logger.info("✅ DataPipeline initialized and started")
+
+                    # Create network monitor with pipeline callback
+                    network_monitor = NetworkMonitor(
+                        mode="network",
+                        interface=None,  # Auto-detect
+                        callback=pipeline.submit
+                    )
+
+                    # Start capture in background thread (PASSIVE - promiscuous listen only)
+                    monitor_thread = threading.Thread(
+                        target=network_monitor.start_capture,
+                        daemon=True,
+                        name="NetworkMonitor"
+                    )
+                    monitor_thread.start()
+                    logger.info("✅ NetworkMonitor started (PASSIVE capture)")
+                    print(f"{Colors.CYAN}Network capture active (passive mode){Colors.NC}")
+
+                except Exception as e:
+                    logger.warning(f"Network monitor initialization failed: {e}")
+                    print(f"{Colors.YELLOW}⚠ Network capture unavailable: {e}{Colors.NC}")
+
             # Launch dashboard directly (no pipeline needed)
             dashboard_class = self._select_dashboard()
             logger.info(f"Launching {dashboard_class.__name__} in {self.mode} mode...")
@@ -203,6 +241,12 @@ class CobaltGraphMain:
                 dashboard = dashboard_class()
 
             dashboard.run()
+
+            # Cleanup on exit
+            if network_monitor:
+                network_monitor.stop()
+            if pipeline:
+                pipeline.stop()
 
             return 0
 

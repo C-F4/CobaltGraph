@@ -56,7 +56,7 @@ class FlatWorldMap:
 
         # Heatmap: 10° grid (36 lon × 18 lat)
         self.heatmap: Dict[Tuple[int, int], float] = defaultdict(float)
-        self.heatmap_max = 1.0
+        self.heatmap_max = 0.01  # Start low for proper gradient normalization
 
         # Rendering cache
         self._base_map_cache = None
@@ -338,6 +338,12 @@ class FlatWorldMap:
                 (0, 1),           # Below
                 (-len(label), 0), # Left
                 (0, -1),          # Above
+                (3, 1),           # Diagonal right-down
+                (3, -1),          # Diagonal right-up
+                (-len(label), 1), # Diagonal left-down
+                (-len(label), -1),# Diagonal left-up
+                (5, 0),           # Far right
+                (0, 2),           # Far below
             ]
 
             placed = False
@@ -476,4 +482,10 @@ class FlatWorldMap:
         self.threats.clear()
         self.threat_map.clear()
         self.heatmap.clear()
-        self.heatmap_max = 1.0
+        self.heatmap_max = 0.01
+
+    def resize(self, width: int, height: int) -> None:
+        """Resize the map and clear cache for dynamic panel adjustment."""
+        self.width = max(40, min(width, 300))
+        self.height = max(12, min(height, 80))
+        self._base_map_cache = None  # Force recache on next render
