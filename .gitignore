@@ -1,5 +1,12 @@
 # CobaltGraph .gitignore
 security/
+scripts/
+static/
+data/
+venv/
+
+
+
 
 # Runtime Data
 data/*.db
