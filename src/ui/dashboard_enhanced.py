@@ -351,6 +351,9 @@ class EnhancedThreatGlobePanel(Static):
         org_types = {}
         threat_stats = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 
+        # Get connections from globe_data
+        connections = self.globe_data.get('connections', [])
+
         for conn in connections:
             country = (conn.get('dst_country') or 'XX')[:2].upper()
             threat = float(conn.get('threat_score', 0) or 0)
@@ -1059,7 +1062,6 @@ class AnomalyAlertPanel(Static):
 
             # Time formatting
             if timestamp:
-                from datetime import datetime
                 time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
             else:
                 time_str = "--:--:--"
@@ -1348,15 +1350,15 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         # Update globe animation
         if self.globe_panel:
             try:
-                # Check for actual globe attributes (world_map, enhanced_globe, or simple_globe)
+                # Update the appropriate visualization component
                 if self.globe_panel.world_map:
-                    self.globe_panel.world_map.update(0.05)
-                    self.globe_panel.refresh()
+                    self.globe_panel.world_map.update(0.05)  # Update every 50ms
+                    self.globe_panel.refresh()  # Force re-render
                 elif self.globe_panel.enhanced_globe:
                     self.globe_panel.enhanced_globe.update(0.05)
                     self.globe_panel.refresh()
                 elif self.globe_panel.simple_globe:
-                    self.globe_panel.simple_globe.update(0.1)
+                    self.globe_panel.simple_globe.update(0.05)  # Consistent with other globe types
                     self.globe_panel.refresh()
             except Exception as e:
                 logger.debug(f"Globe update failed: {e}")
@@ -1445,10 +1447,6 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             topology[src_mac]['destinations'][key]['org'] = org
 
         return dict(topology)
-
-    def action_refresh(self) -> None:
-        """Manual refresh action"""
-        self._refresh_data()
 
     def action_quit(self) -> None:
         """Quit application"""
