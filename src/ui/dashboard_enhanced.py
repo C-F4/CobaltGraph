@@ -1113,11 +1113,14 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
     """
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
-        ("a", "toggle_anomalies", "Anomalies"),
-        ("escape", "close_modal", "Close"),
-        ("?", "help", "Help"),
+        ("q", "quit", "Quit Application"),
+        ("r", "refresh", "Refresh Data"),
+        ("a", "toggle_anomalies", "Toggle Anomaly Panel"),
+        ("g", "toggle_globe", "Pause/Resume Globe Animation"),
+        ("m", "toggle_mode_panel", "Toggle Mode Panel"),
+        ("escape", "close_modal", "Close Modal"),
+        ("?", "help", "Show Keybindings"),
+        ("ctrl+p", "command_palette", "Command Palette"),
     ]
 
     CSS = """
@@ -1453,8 +1456,9 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.exit()
 
     def action_help(self) -> None:
-        """Show help (could implement as modal)"""
-        self.sub_title = "Press Q to quit, R to refresh, A for anomalies, ESC to close modal"
+        """Show keybindings help in subtitle"""
+        help_text = "Keys: Q=Quit | R=Refresh | A=Anomalies | G=Globe | M=Mode Panel | ?=Help | Ctrl+P=Commands | ESC=Close"
+        self.sub_title = help_text
 
     def _show_connection_detail(self, connection: dict) -> None:
         """Show connection detail modal"""
@@ -1496,15 +1500,35 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 self.mode_specific_panel.styles.display = "none"
                 self.sub_title = "Showing anomaly alerts (press 'a' to toggle)"
 
-    def action_toggle_devices(self) -> None:
-        """Toggle devices panel visibility"""
-        if self.devices_panel:
-            self.devices_panel.visible = not self.devices_panel.visible
+    def action_toggle_globe(self) -> None:
+        """Toggle globe animation pause/resume"""
+        if self.globe_panel:
+            # Toggle animation state by controlling the update timer
+            if hasattr(self, '_globe_paused') and self._globe_paused:
+                self._globe_paused = False
+                self.sub_title = "Globe animation resumed"
+            else:
+                self._globe_paused = True
+                self.sub_title = "Globe animation paused"
 
-    def action_toggle_topology(self) -> None:
-        """Toggle topology panel visibility"""
-        if self.topology_panel:
-            self.topology_panel.visible = not self.topology_panel.visible
+    def action_toggle_mode_panel(self) -> None:
+        """Toggle between mode-specific panel and anomaly panel"""
+        if self.mode_specific_panel and self.anomaly_panel:
+            # Check current visibility state
+            anomaly_visible = self.anomaly_panel.has_class("visible")
+            if anomaly_visible:
+                # Show mode panel, hide anomaly
+                self.anomaly_panel.remove_class("visible")
+                self.anomaly_panel.styles.display = "none"
+                self.mode_specific_panel.styles.display = "block"
+                panel_name = "Network Topology" if self.mode == "network" else "Device Discovery"
+                self.sub_title = f"Showing {panel_name} panel"
+            else:
+                # Show anomaly, hide mode panel
+                self.anomaly_panel.add_class("visible")
+                self.anomaly_panel.styles.display = "block"
+                self.mode_specific_panel.styles.display = "none"
+                self.sub_title = "Showing Anomaly Alerts panel"
 
 
 if __name__ == '__main__':
