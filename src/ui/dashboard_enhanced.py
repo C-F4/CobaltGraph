@@ -343,6 +343,9 @@ class EnhancedThreatGlobePanel(Static):
         lines.append("[bold cyan]🌐 GLOBAL THREAT INTELLIGENCE MAP[/bold cyan]")
         lines.append("[bold cyan]═══════════════════════════════════════[/bold cyan]")
 
+        # Get connections from globe_data
+        connections = self.globe_data.get('connections', [])
+
         # Geographic threat analysis
         geo_data = {}
         org_types = {}
@@ -494,16 +497,33 @@ class SmartConnectionTable(Static):
     def watch_connections(self, new_connections: list) -> None:
         """Update table when connections change - text color coded by threat and type"""
         if self.table is None:
+            logger.warning("Connection table not yet initialized - skipping update")
+            return
+
+        if not new_connections:
+            logger.debug("No connections to display")
             return
 
         self.connections = new_connections
         self.table.clear()
         self._connection_map = {}
 
+        logger.debug(f"Updating connection table with {len(new_connections)} connections")
+
         # Add rows with text color coding by threat and type
         for conn in self.connections[:50]:  # Limit to 50 for performance
             try:
-                time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M:%S")
+                # Handle both float timestamps and ISO string timestamps
+                ts = conn.get('timestamp', 0)
+                if isinstance(ts, str):
+                    # Parse ISO format string (legacy data)
+                    try:
+                        time_str = datetime.fromisoformat(ts).strftime("%H:%M:%S")
+                    except ValueError:
+                        time_str = ts[:8] if len(ts) >= 8 else "??:??:??"
+                else:
+                    # Parse Unix timestamp (new data)
+                    time_str = datetime.fromtimestamp(float(ts) if ts else 0).strftime("%H:%M:%S")
                 threat = float(conn.get('threat_score', 0) or 0)
                 org_type = (conn.get('dst_org_type') or 'unknown').lower()
                 confidence = float(conn.get('confidence', 0) or 0)
@@ -576,7 +596,8 @@ class SmartConnectionTable(Static):
                     key=row_key
                 )
             except Exception as e:
-                logger.debug(f"Failed to add row: {e}")
+                # Log at warning level so errors are visible
+                logger.warning(f"Failed to add connection row for {conn.get('dst_ip', 'unknown')}: {e}")
 
     def on_data_table_row_selected(self, event) -> None:
         """Handle row selection - show detail modal"""
@@ -1257,10 +1278,15 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         """Refresh data from database"""
         try:
             if not self.data_manager.is_connected:
+                logger.warning("Data manager not connected - skipping refresh")
                 return
 
             # Get connections
             connections = self.data_manager.get_connections(limit=100)
+            if not connections:
+                logger.debug("No connections returned from database")
+            else:
+                logger.debug(f"Fetched {len(connections)} connections from database")
             self.recent_connections = deque(connections, maxlen=100)
 
             # Calculate threat statistics
@@ -1322,9 +1348,16 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         # Update globe animation
         if self.globe_panel:
             try:
-                if self.globe_panel.globe:
-                    self.globe_panel.globe.update(0.05)  # Update every 50ms
-                    self.globe_panel.refresh()  # Force re-render
+                # Check for actual globe attributes (world_map, enhanced_globe, or simple_globe)
+                if self.globe_panel.world_map:
+                    self.globe_panel.world_map.update(0.05)
+                    self.globe_panel.refresh()
+                elif self.globe_panel.enhanced_globe:
+                    self.globe_panel.enhanced_globe.update(0.05)
+                    self.globe_panel.refresh()
+                elif self.globe_panel.simple_globe:
+                    self.globe_panel.simple_globe.update(0.1)
+                    self.globe_panel.refresh()
             except Exception as e:
                 logger.debug(f"Globe update failed: {e}")
 
