@@ -436,7 +436,7 @@ class FlatWorldMap:
             content_y += 1
 
     def _canvas_to_text(self, canvas: List[List]) -> Text:
-        """Convert canvas to formatted Rich Text object preserving all styles"""
+        """Convert canvas to formatted Rich Text with proper styling preserved"""
         result = Text()
         for row_idx, row in enumerate(canvas):
             for cell in row:
