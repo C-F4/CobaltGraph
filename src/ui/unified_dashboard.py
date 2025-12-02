@@ -581,11 +581,19 @@ class UnifiedDashboard(App):
             current_threat = sum(threats) / len(threats) if threats else 0
             high_count = sum(1 for t in threats if t >= 0.7)
 
+            # Get top 3 threat connections for radar graphs
+            top_threats = sorted(
+                connections,
+                key=lambda c: float(c.get('threat_score', 0) or 0),
+                reverse=True
+            )[:3]
+
             self.threat_posture_panel.threat_data = {
                 'current_threat': current_threat,
                 'baseline_threat': sum(threats[:len(threats)//3]) / max(len(threats)//3, 1) if threats else 0,
                 'active_threats': high_count,
                 'monitored_ips': len(set(c.get('dst_ip') for c in connections)),
+                'top_threats': top_threats,  # Add top 3 for radar graphs
             }
 
         # Temporal Trends Panel (Top-Center) - update with history
