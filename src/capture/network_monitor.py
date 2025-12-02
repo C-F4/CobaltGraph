@@ -462,7 +462,7 @@ class NetworkMonitor:
                 device_event = {
                     "type": "device",
                     "event": "arp",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": time.time(),
                     "mac": arp_packet["sender_mac"],
                     "ip": arp_packet["sender_ip"],
                     "vendor": self.devices.get(arp_packet["sender_mac"], NetworkDevice("")).vendor,
@@ -487,7 +487,7 @@ class NetworkMonitor:
                 device_event = {
                     "type": "device",
                     "event": "broadcast",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": time.time(),
                     "mac": src_mac,
                     "ip": ip_packet["src_ip"],
                     "vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
@@ -542,7 +542,7 @@ class NetworkMonitor:
             # Emit connection event (includes source device info for tracking)
             connection = {
                 "type": "connection",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": time.time(),
                 "src_mac": src_mac,
                 "src_ip": src_ip,
                 "dst_ip": dest_ip,
@@ -562,7 +562,7 @@ class NetworkMonitor:
             device_event = {
                 "type": "device",
                 "event": "connection",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": time.time(),
                 "mac": src_mac,
                 "ip": src_ip,
                 "vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
@@ -613,7 +613,7 @@ class NetworkMonitor:
                     heartbeat_counter += 1
                     heartbeat = {
                         "type": "heartbeat",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": time.time(),
                         "total_packets": self.total_packets,
                         "total_connections": self.total_connections,
                         "devices_discovered": len(self.devices),
