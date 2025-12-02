@@ -733,6 +733,10 @@ class DataPipeline:
                     "ttl_initial": consensus_details.get("ttl_initial"),
                     "os_fingerprint": asn_data.get("os_fingerprint"),
                     "org_trust_score": asn_data.get("org_trust_score"),
+                    # Scoring metadata for dashboard display
+                    "confidence": confidence,
+                    "high_uncertainty": high_uncertainty,
+                    "scoring_method": scoring_method,
                 })
             except Exception as e:
                 logger.debug(f"Database storage failed: {e}")
