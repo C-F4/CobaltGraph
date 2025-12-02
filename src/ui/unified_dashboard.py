@@ -720,104 +720,70 @@ class UnifiedDashboard(App):
 
     def action_export(self) -> None:
         """Export data to JSON/CSV (override in subclasses)"""
-        pass
+        self.sub_title = "Export: Not implemented in base class"
 
     def action_show_help(self) -> None:
-        """Show help information"""
-        pass
+        """Show available keybindings in subtitle"""
+        self.sub_title = "Keys: Q=Quit | R=Refresh | ?=Help | Ctrl+P=Commands"
 
 
 # Convenience aliases for backward compatibility
 class CobaltGraphDashboard(UnifiedDashboard):
-    """Unified CobaltGraph Dashboard - alias for UnifiedDashboard"""
+    """
+    Unified CobaltGraph Dashboard - base class for dashboard implementations
+
+    Note: For the full-featured dashboard, use CobaltGraphDashboardEnhanced
+    from dashboard_enhanced.py which provides working implementations of
+    all features including globe visualization, anomaly panel, and detail modals.
+    """
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
-        ("a", "alerts", "Alerts"),
-        ("g", "toggle_globe", "Globe"),
-        ("t", "toggle_density", "Density"),
-        ("o", "organization", "Organization"),
-        ("h", "hop_topology", "Hops"),
-        ("l", "event_log", "Log"),
-        ("d", "device_panel", "Devices"),
-        ("e", "export", "Export"),
-        ("f", "filter", "Filter"),
-        ("i", "intel_report", "Intel"),
-        ("?", "show_help", "Help"),
+        ("q", "quit", "Quit Application"),
+        ("r", "refresh", "Refresh Data"),
+        ("?", "show_help", "Show Keybindings"),
+        ("ctrl+p", "command_palette", "Command Palette"),
     ]
 
-    def action_alerts(self) -> None:
-        """Show alert management dialog"""
-        logger.info("Alerts action triggered")
-
-    def action_toggle_globe(self) -> None:
-        """Toggle threat globe visibility"""
-        logger.info("Toggle globe visibility")
-
-    def action_toggle_density(self) -> None:
-        """Cycle through adaptive density modes"""
-        logger.info("Toggle density mode")
-
-    def action_organization(self) -> None:
-        """Show organization intelligence view"""
-        logger.info("Organization view triggered")
-
-    def action_hop_topology(self) -> None:
-        """Show hop topology visualization"""
-        logger.info("Hop topology view triggered")
-
-    def action_event_log(self) -> None:
-        """Show event log with filters"""
-        logger.info("Event log view triggered")
-
-    def action_device_panel(self) -> None:
-        """Toggle device discovery panel (network mode)"""
-        logger.info("Device panel toggle triggered")
-
-    def action_intel_report(self) -> None:
-        """Generate intelligence report"""
-        logger.info("Intel report generation triggered")
-
-    def action_filter(self) -> None:
-        """Open filter configuration"""
-        logger.info("Filter dialog triggered")
+    def action_show_help(self) -> None:
+        """Show available keybindings in subtitle"""
+        self.sub_title = "Keys: Q=Quit | R=Refresh | ?=Help | Ctrl+P=Commands"
 
 
 class DeviceDashboardBase(UnifiedDashboard):
-    """Base class for device mode dashboards"""
+    """
+    Base class for device mode dashboards
+
+    Note: Use CobaltGraphDashboardEnhanced with mode="device" for
+    a full-featured implementation with all working actions.
+    """
 
     def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None):
         super().__init__(db_path=db_path, mode="device", pipeline=pipeline)
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
-        ("f", "filter", "Filter"),
-        ("i", "inspect", "Inspect"),
-        ("e", "export", "Export"),
-        ("a", "alerts", "Alerts"),
-        ("o", "organization", "Organization"),
-        ("?", "show_help", "Help"),
+        ("q", "quit", "Quit Application"),
+        ("r", "refresh", "Refresh Data"),
+        ("?", "show_help", "Show Keybindings"),
+        ("ctrl+p", "command_palette", "Command Palette"),
     ]
 
 
 class NetworkDashboardBase(UnifiedDashboard):
-    """Base class for network mode dashboards"""
+    """
+    Base class for network mode dashboards
+
+    Note: Use CobaltGraphDashboardEnhanced with mode="network" for
+    a full-featured implementation with all working actions.
+    """
 
     def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None):
         super().__init__(db_path=db_path, mode="network", pipeline=pipeline)
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
-        ("d", "devices", "Devices"),
-        ("t", "topology", "Topology"),
-        ("g", "globe", "Globe"),
-        ("f", "filter", "Filter"),
-        ("e", "export", "Export"),
-        ("p", "fingerprinting", "Fingerprint"),
-        ("?", "show_help", "Help"),
+        ("q", "quit", "Quit Application"),
+        ("r", "refresh", "Refresh Data"),
+        ("?", "show_help", "Show Keybindings"),
+        ("ctrl+p", "command_palette", "Command Palette"),
     ]
 
 
