@@ -99,7 +99,7 @@ class BFTConsensus:
         """
         # Validate inputs
         if len(assessments) < self.min_scorers:
-            logger.warning("Insufficient scorers: {len(assessments)} < %s", self.min_scorers)
+            logger.warning("Insufficient scorers: %d < %d", len(assessments), self.min_scorers)
             return None
 
         # Extract scores and confidences

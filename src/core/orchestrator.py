@@ -578,10 +578,12 @@ class DataPipeline:
         except Exception:
             pass
 
-        # Track parallel speedup
+        # Track parallel speedup (estimate: 2 enrichment ops would take 2x if sequential)
         parallel_time = time.time() - start_time
+        sequential_estimate = parallel_time * 2  # 2 parallel enrichment operations
+        speedup = sequential_estimate / max(parallel_time, 0.001) if parallel_time > 0 else 1.0
         self.perf_stats["enrichment_count"] += 1
-        self.perf_stats["parallel_speedup_sum"] += (parallel_time * 2) / max(parallel_time, 0.001)
+        self.perf_stats["parallel_speedup_sum"] += speedup
 
         # Stage 3: Consensus scoring (uses results from parallel stages)
         threat_score = 0.2
