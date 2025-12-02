@@ -48,7 +48,8 @@ class Database:
         "dst_country", "dst_lat", "dst_lon", "dst_org", "dst_hostname",
         "threat_score", "device_vendor", "protocol",
         "dst_asn", "dst_asn_name", "dst_org_type", "dst_cidr",
-        "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score"
+        "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score",
+        "confidence", "high_uncertainty", "scoring_method"
     ]
 
     def __init__(self, db_path: str = "data/cobaltgraph.db"):
@@ -142,7 +143,10 @@ class Database:
                         ttl_initial INTEGER,
                         hop_count INTEGER,
                         os_fingerprint TEXT,
-                        org_trust_score REAL
+                        org_trust_score REAL,
+                        confidence REAL DEFAULT 0,
+                        high_uncertainty INTEGER DEFAULT 0,
+                        scoring_method TEXT DEFAULT 'consensus'
                     )
                 """)
 
@@ -260,6 +264,10 @@ class Database:
             ("hop_count", "INTEGER"),
             ("os_fingerprint", "TEXT"),
             ("org_trust_score", "REAL"),
+            # Scoring metadata columns for dashboard
+            ("confidence", "REAL DEFAULT 0"),
+            ("high_uncertainty", "INTEGER DEFAULT 0"),
+            ("scoring_method", "TEXT DEFAULT 'consensus'"),
         ]
 
         cursor = self.conn.execute("PRAGMA table_info(connections)")
@@ -427,6 +435,9 @@ class Database:
             conn_data.get("hop_count"),
             conn_data.get("os_fingerprint"),
             conn_data.get("org_trust_score"),
+            conn_data.get("confidence", 0),
+            1 if conn_data.get("high_uncertainty") else 0,
+            conn_data.get("scoring_method", "consensus"),
         )
 
     def _flush_batch(self):

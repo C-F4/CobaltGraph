@@ -181,7 +181,7 @@ class FlatWorldMap:
         # Layer 5: Legend (bottom-right corner)
         self._render_legend(canvas)
 
-        # Convert to text
+        # Convert to Rich Text object (preserves all styles)
         content = self._canvas_to_text(canvas)
 
         # Add stats footer
@@ -189,10 +189,12 @@ class FlatWorldMap:
         high_threat = sum(1 for t in self.threats if t.threat_score >= 0.7)
         critical = sum(1 for t in self.threats if t.threat_score >= 0.8)
 
-        stats = f"\n[dim]Threats: {threat_count} | Critical: {critical} | High: {high_threat} | Time: {self.time_elapsed:.1f}s[/dim]"
+        # Append stats to content Text object
+        content.append(f"\n")
+        content.append(f"Threats: {threat_count} | Critical: {critical} | High: {high_threat} | Time: {self.time_elapsed:.1f}s", style="dim")
 
         return Panel(
-            content + stats,
+            content,
             title="[bold cyan]🌍 World Threat Map[/bold cyan]",
             border_style="cyan"
         )
@@ -433,30 +435,19 @@ class FlatWorldMap:
 
             content_y += 1
 
-    def _canvas_to_text(self, canvas: List[List]) -> str:
-        """Convert canvas to formatted text"""
-        lines = []
-        for row in canvas:
-            line_parts = []
+    def _canvas_to_text(self, canvas: List[List]) -> Text:
+        """Convert canvas to formatted Rich Text object preserving all styles"""
+        result = Text()
+        for row_idx, row in enumerate(canvas):
             for cell in row:
                 if isinstance(cell, Text):
-                    line_parts.append(cell)
+                    result.append_text(cell)
                 else:
-                    line_parts.append(cell)
-
-            # Build line with proper formatting
-            if any(isinstance(c, Text) for c in line_parts):
-                line = Text("")
-                for cell in line_parts:
-                    if isinstance(cell, Text):
-                        line.append(cell)
-                    else:
-                        line.append(cell)
-                lines.append(line)
-            else:
-                lines.append("".join(line_parts))
-
-        return "\n".join(str(line) for line in lines)
+                    result.append(str(cell))
+            # Add newline between rows (except after last row)
+            if row_idx < len(canvas) - 1:
+                result.append("\n")
+        return result
 
     def _render_text_fallback(self) -> Panel:
         """Fallback text-based rendering"""
