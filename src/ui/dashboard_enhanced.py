@@ -67,10 +67,211 @@ except ImportError:
         FlatWorldMap = None
 
 
+class ThreatRadarGraph:
+    """
+    ASCII-based radar/spider chart renderer for threat visualization.
+    Displays multi-dimensional threat scores in a compact visual format.
+    """
+
+    # Radar chart dimensions (axes)
+    AXES = [
+        ('THR', 'Threat'),      # Threat score
+        ('CNF', 'Confidence'),  # Confidence level
+        ('RIS', 'Risk'),        # Org risk (1 - trust)
+        ('HOP', 'Distance'),    # Hop distance normalized
+        ('GEO', 'Geo Risk'),    # Geographic risk
+    ]
+
+    # ASCII characters for radar visualization
+    FULL_BLOCK = '█'
+    PARTIAL_BLOCKS = ['░', '▒', '▓', '█']
+
+    @staticmethod
+    def render_mini_radar(values: dict, width: int = 15, height: int = 7,
+                          label: str = "", color: str = "cyan") -> list:
+        """
+        Render a compact ASCII radar chart for a single connection.
+
+        Args:
+            values: Dict with keys 'threat', 'confidence', 'org_risk', 'hop_dist', 'geo_risk'
+                   Each value should be 0.0-1.0
+            width: Chart width in characters
+            height: Chart height in lines
+            label: Label for the chart (e.g., IP or connection ID)
+            color: Rich color for the chart
+
+        Returns:
+            List of strings representing the radar chart lines
+        """
+        import math
+
+        # Normalize and extract values (default to 0.5 if missing)
+        threat = float(values.get('threat', 0) or 0)
+        confidence = float(values.get('confidence', 0.5) or 0.5)
+        org_risk = 1.0 - float(values.get('org_trust', 0.5) or 0.5)  # Invert trust to risk
+        hop_dist = min(float(values.get('hop_count', 0) or 0) / 30.0, 1.0)  # Normalize to 30 hops max
+        geo_risk = float(values.get('geo_risk', 0.3) or 0.3)
+
+        # All values as list in order: THR, CNF, RIS, HOP, GEO
+        vals = [threat, confidence, org_risk, hop_dist, geo_risk]
+
+        # Calculate average for overall indicator
+        avg_val = sum(vals) / len(vals)
+
+        # Determine threat color based on average
+        if avg_val >= 0.7:
+            bar_color = "bold red"
+            level = "CRIT"
+        elif avg_val >= 0.5:
+            bar_color = "bold yellow"
+            level = "HIGH"
+        elif avg_val >= 0.3:
+            bar_color = "yellow"
+            level = "MED"
+        else:
+            bar_color = "green"
+            level = "LOW"
+
+        lines = []
+
+        # Header with label and threat level
+        header = f"[{color}]┌{'─' * (width - 2)}┐[/{color}]"
+        lines.append(header)
+
+        # Label line
+        label_text = label[:width - 4] if len(label) > width - 4 else label
+        label_line = f"[{color}]│[/{color}][{bar_color}]{label_text:^{width - 2}}[/{bar_color}][{color}]│[/{color}]"
+        lines.append(label_line)
+
+        # Render each axis as a horizontal bar
+        axis_labels = ['THR', 'CNF', 'RIS', 'HOP', 'GEO']
+        for i, (ax_label, val) in enumerate(zip(axis_labels, vals)):
+            # Calculate bar width
+            bar_width = width - 7  # Leave room for label and brackets
+            filled = int(val * bar_width)
+            empty = bar_width - filled
+
+            # Determine bar character and color based on value
+            if val >= 0.7:
+                fill_char = '█'
+                val_color = "red"
+            elif val >= 0.5:
+                fill_char = '▓'
+                val_color = "yellow"
+            elif val >= 0.3:
+                fill_char = '▒'
+                val_color = "bright_yellow"
+            else:
+                fill_char = '░'
+                val_color = "green"
+
+            bar = f"[{val_color}]{fill_char * filled}[/{val_color}][dim]{'·' * empty}[/dim]"
+            line = f"[{color}]│[/{color}]{ax_label}[dim]:[/dim]{bar}[{color}]│[/{color}]"
+            lines.append(line)
+
+        # Bottom with overall score
+        score_text = f"{avg_val:.2f} {level}"
+        bottom_line = f"[{color}]│[/{color}][{bar_color}]{score_text:^{width - 2}}[/{bar_color}][{color}]│[/{color}]"
+        lines.append(bottom_line)
+
+        footer = f"[{color}]└{'─' * (width - 2)}┘[/{color}]"
+        lines.append(footer)
+
+        return lines
+
+    @staticmethod
+    def render_comparison_radar(connections: list, width: int = 40, height: int = 12) -> str:
+        """
+        Render side-by-side comparison of top 3 threat connections.
+
+        Args:
+            connections: List of connection dicts with scoring variables
+            width: Total width for all three charts
+            height: Height of the visualization
+
+        Returns:
+            Formatted string with all three radar charts
+        """
+        if not connections:
+            return "[dim]No threat connections to display[/dim]"
+
+        # Get top 3 highest threats
+        sorted_conns = sorted(
+            connections,
+            key=lambda c: float(c.get('threat_score', 0) or 0),
+            reverse=True
+        )[:3]
+
+        if not sorted_conns:
+            return "[dim]No high-threat connections[/dim]"
+
+        # Render each connection's radar
+        chart_width = max(15, (width - 2) // max(len(sorted_conns), 1))
+        all_charts = []
+        colors = ['cyan', 'magenta', 'yellow']
+
+        for idx, conn in enumerate(sorted_conns):
+            # Extract scoring variables
+            values = {
+                'threat': conn.get('threat_score', 0),
+                'confidence': conn.get('confidence', 0.5),
+                'org_trust': conn.get('org_trust_score', 0.5),
+                'hop_count': conn.get('hop_count', 0),
+                'geo_risk': ThreatRadarGraph._calculate_geo_risk(conn),
+            }
+
+            # Create label from IP (last octet) or org
+            ip = conn.get('dst_ip', 'Unknown')
+            org = (conn.get('dst_org') or 'Unknown')[:8]
+            label = f"{ip.split('.')[-1] if '.' in ip else ip[:4]}:{org}"
+
+            chart_lines = ThreatRadarGraph.render_mini_radar(
+                values,
+                width=chart_width,
+                height=8,
+                label=label,
+                color=colors[idx % len(colors)]
+            )
+            all_charts.append(chart_lines)
+
+        # Combine charts side-by-side
+        result_lines = []
+        max_lines = max(len(c) for c in all_charts)
+
+        for line_idx in range(max_lines):
+            combined = ""
+            for chart in all_charts:
+                if line_idx < len(chart):
+                    combined += chart[line_idx] + " "
+                else:
+                    combined += " " * (chart_width + 1)
+            result_lines.append(combined)
+
+        return "\n".join(result_lines)
+
+    @staticmethod
+    def _calculate_geo_risk(conn: dict) -> float:
+        """Calculate geographic risk factor from connection data."""
+        # Base geo risk on country and org type
+        org_type = (conn.get('dst_org_type') or 'unknown').lower()
+
+        # High risk org types
+        high_risk_types = {'tor', 'vpn', 'proxy', 'hosting', 'bulletproof'}
+        medium_risk_types = {'isp', 'unknown'}
+
+        if org_type in high_risk_types:
+            return 0.8
+        elif org_type in medium_risk_types:
+            return 0.5
+        else:
+            return 0.2
+
+
 class ThreatPostureQuickPanel(Static):
     """
     Top-left (50%): Quick threat posture assessment
     Current threat level, baseline, active threats, monitored IPs
+    Now includes radar graphs for top 3 highest threat connections
     """
 
     DEFAULT_CSS = """
@@ -78,6 +279,7 @@ class ThreatPostureQuickPanel(Static):
         height: 100%;
         width: 100%;
         padding: 1;
+        overflow-y: auto;
     }
     """
 
@@ -91,6 +293,7 @@ class ThreatPostureQuickPanel(Static):
             'active_threats': 0,
             'monitored_ips': 0,
             'high_threat_count': 0,
+            'top_threats': [],  # Top 3 threat connections for radar graphs
         }
 
     def watch_threat_data(self, new_data: dict) -> None:
@@ -98,12 +301,13 @@ class ThreatPostureQuickPanel(Static):
         self.refresh()
 
     def render(self):
-        """Render threat posture"""
+        """Render threat posture with radar graphs for top 3 threats"""
         current = self.threat_data.get('current_threat', 0)
         baseline = self.threat_data.get('baseline_threat', 0)
         active = self.threat_data.get('active_threats', 0)
         ips = self.threat_data.get('monitored_ips', 0)
         high_threat = self.threat_data.get('high_threat_count', 0)
+        top_threats = self.threat_data.get('top_threats', [])
 
         # Color code threat level
         if current >= 0.7:
@@ -119,14 +323,38 @@ class ThreatPostureQuickPanel(Static):
             threat_color = "[green]"
             threat_level = "LOW"
 
-        content = f"""{threat_color}Current Threat[/]
-{current:.2f} [{threat_level}]
+        # Build content with threat posture info
+        content_lines = []
+        content_lines.append(f"{threat_color}Current Threat[/]")
+        content_lines.append(f"{current:.2f} [{threat_level}]")
+        content_lines.append("")
+        content_lines.append(f"[dim]Baseline:[/dim] {baseline:.2f}")
+        content_lines.append(f"[red]High Threats:[/red] {high_threat}")
+        content_lines.append(f"[cyan]Active:[/cyan] {active}")
+        content_lines.append(f"[cyan]Monitored:[/cyan] {ips} IPs")
 
-[dim]Baseline:[/dim] {baseline:.2f}
-[red]High Threats:[/red] {high_threat}
-[cyan]Active:[/cyan] {active}
-[cyan]Monitored:[/cyan] {ips} IPs
-"""
+        # Add separator before radar graphs
+        content_lines.append("")
+        content_lines.append("[bold cyan]─── TOP THREAT RADAR ───[/bold cyan]")
+        content_lines.append("")
+
+        # Add radar graphs for top 3 threats
+        if top_threats:
+            radar_output = ThreatRadarGraph.render_comparison_radar(
+                top_threats,
+                width=50,
+                height=10
+            )
+            content_lines.append(radar_output)
+
+            # Add legend
+            content_lines.append("")
+            content_lines.append("[dim]THR=Threat CNF=Confidence[/dim]")
+            content_lines.append("[dim]RIS=OrgRisk HOP=Distance GEO=GeoRisk[/dim]")
+        else:
+            content_lines.append("[dim]Scanning for threats...[/dim]")
+
+        content = "\n".join(content_lines)
 
         return Panel(
             content,
@@ -1299,6 +1527,13 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             current_threat = (sum(threat_scores) / len(threat_scores)) if threat_scores else 0
             high_threat_count = sum(1 for t in threat_scores if t >= 0.7)
 
+            # Get top 3 threat connections for radar graphs
+            top_threats = sorted(
+                connections,
+                key=lambda c: float(c.get('threat_score', 0) or 0),
+                reverse=True
+            )[:3]
+
             # Update threat posture panel
             if self.threat_posture_panel:
                 self.threat_posture_panel.threat_data = {
@@ -1307,6 +1542,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                     'active_threats': high_threat_count,
                     'monitored_ips': len(set(c.get('dst_ip') for c in connections)),
                     'high_threat_count': high_threat_count,
+                    'top_threats': top_threats,  # Add top 3 for radar graphs
                 }
 
             # Update connection table
