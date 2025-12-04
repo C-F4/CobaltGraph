@@ -13,6 +13,9 @@ import sys
 import threading
 from pathlib import Path
 
+# Import global heartbeat singleton
+from src.utils.heartbeat import heartbeat
+
 
 class Colors:
     """ANSI color codes for terminal output"""
@@ -39,7 +42,7 @@ class CobaltGraphMain:
         self.mode = None
         self.config_path = None
         self.running = True
-        self.db_path = "data/cobaltgraph.db"
+        self.db_path = "database/cobaltgraph.db"  # Primary database location
 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -150,11 +153,13 @@ class CobaltGraphMain:
         return run_health_check(mode=self.mode or 'device')
 
     def find_database(self) -> str:
-        """Find the database file"""
-        for path in ["data/cobaltgraph.db", "database/cobaltgraph.db"]:
-            if Path(path).exists():
-                return path
-        return "data/cobaltgraph.db"
+        """Find or create the database file in the canonical location"""
+        db_path = Path("database/cobaltgraph.db")
+
+        # Ensure database directory exists
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        return str(db_path)
 
     def _select_dashboard(self):
         """Select appropriate dashboard based on mode"""
@@ -206,6 +211,7 @@ class CobaltGraphMain:
                     pipeline.initialize_components()
                     pipeline.start()
                     logger.info("✅ DataPipeline initialized and started")
+                    heartbeat.beat("pipeline", "Pipeline started")
 
                     # Create network monitor with pipeline callback
                     network_monitor = NetworkMonitor(
@@ -222,11 +228,40 @@ class CobaltGraphMain:
                     )
                     monitor_thread.start()
                     logger.info("✅ NetworkMonitor started (PASSIVE capture)")
+                    heartbeat.beat("capture", "Network capture active")
                     print(f"{Colors.CYAN}Network capture active (passive mode){Colors.NC}")
 
                 except Exception as e:
                     logger.warning(f"Network monitor initialization failed: {e}")
+                    heartbeat.mark_offline("capture", f"Failed: {e}")
+                    heartbeat.mark_offline("pipeline", f"Not started: {e}")
                     print(f"{Colors.YELLOW}⚠ Network capture unavailable: {e}{Colors.NC}")
+            else:
+                # Device mode - try to start device monitor
+                try:
+                    from src.capture.device_monitor import DeviceMonitor
+                    from src.core.orchestrator import DataPipeline
+
+                    # Initialize pipeline for device mode
+                    pipeline = DataPipeline({"database_path": self.db_path})
+                    pipeline.initialize_components()
+                    pipeline.start()
+                    logger.info("✅ DataPipeline initialized for device mode")
+                    heartbeat.beat("pipeline", "Pipeline started (device)")
+
+                    # Create device monitor
+                    device_monitor = DeviceMonitor()
+                    device_monitor.set_callback(pipeline.submit)
+                    device_monitor.start()
+                    logger.info("✅ DeviceMonitor started")
+                    heartbeat.beat("capture", "Device capture active")
+                    print(f"{Colors.CYAN}Device capture active{Colors.NC}")
+
+                except Exception as e:
+                    logger.warning(f"Device monitor initialization failed: {e}")
+                    heartbeat.mark_offline("capture", f"Device mode unavailable: {e}")
+                    # Pipeline may still work for viewing existing data
+                    print(f"{Colors.YELLOW}⚠ Device capture unavailable: {e}{Colors.NC}")
 
             # Launch dashboard directly (no pipeline needed)
             dashboard_class = self._select_dashboard()
