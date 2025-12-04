@@ -225,8 +225,9 @@ class ThreatRadarGraph:
 
 class ThreatPosturePanel(Static):
     """
-    Top-left panel: Threat posture assessment with radar graphs
-    Shows current threat level, baseline, active threats, and radar graphs for top 3 threats
+    Top-left panel: Threat posture assessment with radar graphs and system status gumballs
+    Shows current threat level, baseline, active threats, radar graphs for top 3 threats,
+    and real-time component health indicators.
     """
 
     DEFAULT_CSS = """
@@ -238,7 +239,21 @@ class ThreatPosturePanel(Static):
     }
     """
 
+    # Component definitions for system status gumballs
+    # These must match the keys in heartbeat.COBALTGRAPH_COMPONENTS
+    SYSTEM_COMPONENTS = [
+        ("database", "Database"),
+        ("capture", "Capture"),
+        ("pipeline", "Pipeline"),
+        ("consensus", "Consensus"),
+        ("geo_engine", "GeoIP"),
+        ("asn_lookup", "ASN"),
+        ("reputation", "Reputation"),
+        ("dashboard", "Dashboard"),
+    ]
+
     threat_data = reactive(dict)
+    system_status = reactive(dict)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -249,13 +264,28 @@ class ThreatPosturePanel(Static):
             'monitored_ips': 0,
             'top_threats': [],  # Top 3 threat connections for radar graphs
         }
+        # Initialize with empty status - will be populated by heartbeat
+        self.system_status = {}
+
+    def _get_gumball(self, status: str) -> str:
+        """Return colored gumball indicator based on status"""
+        if status == "ACTIVE":
+            return "[bold bright_green]●[/bold bright_green]"
+        elif status == "DEGRADED":
+            return "[bold yellow]●[/bold yellow]"
+        else:  # DEAD
+            return "[bold red]●[/bold red]"
 
     def watch_threat_data(self, new_data: dict) -> None:
         """Trigger re-render when threat data changes"""
         self.refresh()
 
+    def watch_system_status(self, new_data: dict) -> None:
+        """Trigger re-render when system status changes"""
+        self.refresh()
+
     def render(self):
-        """Render threat posture with radar graphs for top 3 threats"""
+        """Render threat posture with system status gumballs and radar graphs"""
         current = self.threat_data.get('current_threat', 0)
         baseline = self.threat_data.get('baseline_threat', 0)
         active = self.threat_data.get('active_threats', 0)
@@ -276,8 +306,45 @@ class ThreatPosturePanel(Static):
             threat_color = "[green]"
             threat_level = "LOW"
 
-        # Build content with threat posture info
+        # Build content with system status gumballs first
         content_lines = []
+        content_lines.append("[bold cyan]─── SYSTEM STATUS ───[/bold cyan]")
+
+        # Render system status gumballs in a compact 2-column layout
+        for i in range(0, len(self.SYSTEM_COMPONENTS), 2):
+            left_comp = self.SYSTEM_COMPONENTS[i]
+            left_info = self.system_status.get(left_comp[0], {})
+            left_status = left_info.get("status", "DEAD")
+            left_gumball = self._get_gumball(left_status)
+            left_text = f"{left_gumball} {left_comp[1]:<9}"
+
+            if i + 1 < len(self.SYSTEM_COMPONENTS):
+                right_comp = self.SYSTEM_COMPONENTS[i + 1]
+                right_info = self.system_status.get(right_comp[0], {})
+                right_status = right_info.get("status", "DEAD")
+                right_gumball = self._get_gumball(right_status)
+                right_text = f"{right_gumball} {right_comp[1]}"
+            else:
+                right_text = ""
+
+            content_lines.append(f"{left_text} {right_text}")
+
+        # Calculate overall system health from actual status data
+        online_count = 0
+        total_health = 0
+        component_count = len(self.system_status) if self.system_status else len(self.SYSTEM_COMPONENTS)
+
+        for comp_id, comp_info in self.system_status.items():
+            if comp_info.get("status") == "ACTIVE":
+                online_count += 1
+            total_health += comp_info.get("health_percentage", 0)
+
+        avg_health = total_health / component_count if component_count > 0 else 0
+        content_lines.append(f"[dim]{online_count}/{component_count} online | {avg_health:.0f}% health[/dim]")
+
+        # Add separator and threat posture info
+        content_lines.append("")
+        content_lines.append("[bold cyan]─── THREAT POSTURE ───[/bold cyan]")
         content_lines.append(f"{threat_color}Current Threat[/]")
         content_lines.append(f"{current:.2f} [{threat_level}]")
         content_lines.append("")
@@ -741,3 +808,125 @@ class ThreatGlobePanel(Static):
 
         content = "\n".join(content_lines)
         return Panel(content, title="[bold cyan]Threat Globe[/bold cyan]", border_style="cyan")
+
+
+class SystemStatusPanel(Static):
+    """
+    System status panel with real-time heartbeat gumballs for each CobaltGraph component.
+    Shows ONLINE/DEGRADED/OFFLINE status via colored indicators.
+
+    Components monitored:
+    - Database: SQLite connection health
+    - Capture: Network packet capture (requires root)
+    - Pipeline: Data processing pipeline
+    - Consensus: BFT threat scoring engine
+    - GeoIP: Geolocation service
+    - ASN: ASN lookup service
+    - Reputation: IP reputation (VirusTotal/AbuseIPDB)
+    """
+
+    DEFAULT_CSS = """
+    SystemStatusPanel {
+        height: auto;
+        width: 100%;
+        padding: 0 1;
+    }
+    """
+
+    # Component definitions with display names and descriptions
+    COMPONENTS = [
+        ("database", "Database", "SQLite WAL"),
+        ("capture", "Capture", "Packet capture"),
+        ("pipeline", "Pipeline", "Data processing"),
+        ("consensus", "Consensus", "BFT scoring"),
+        ("geo_engine", "GeoIP", "Geolocation"),
+        ("asn_lookup", "ASN", "ASN lookup"),
+        ("reputation", "Reputation", "IP reputation"),
+    ]
+
+    status_data = reactive(dict)
+
+    def __init__(self, heartbeat_monitor=None, **kwargs):
+        super().__init__(**kwargs)
+        self.heartbeat_monitor = heartbeat_monitor
+        self.status_data = {
+            comp_id: {"status": "DEAD", "health": 0, "age": 999}
+            for comp_id, _, _ in self.COMPONENTS
+        }
+
+    def update_from_heartbeat(self, heartbeat_monitor) -> None:
+        """Update status from heartbeat monitor instance"""
+        self.heartbeat_monitor = heartbeat_monitor
+        if heartbeat_monitor:
+            self.status_data = heartbeat_monitor.get_status()
+            self.refresh()
+
+    def watch_status_data(self, new_data: dict) -> None:
+        """Trigger re-render when status data changes"""
+        self.refresh()
+
+    def _get_gumball(self, status: str) -> str:
+        """Return colored gumball indicator based on status"""
+        if status == "ACTIVE":
+            return "[bold bright_green]●[/bold bright_green]"
+        elif status == "DEGRADED":
+            return "[bold yellow]●[/bold yellow]"
+        else:  # DEAD
+            return "[bold red]●[/bold red]"
+
+    def _get_status_text(self, status: str) -> str:
+        """Return colored status text"""
+        if status == "ACTIVE":
+            return "[green]ONLINE[/green]"
+        elif status == "DEGRADED":
+            return "[yellow]DEGRADED[/yellow]"
+        else:
+            return "[red]OFFLINE[/red]"
+
+    def render(self):
+        """Render system status with gumball indicators"""
+        content_lines = []
+        content_lines.append("[bold cyan]─── SYSTEM STATUS ───[/bold cyan]")
+        content_lines.append("")
+
+        for comp_id, display_name, description in self.COMPONENTS:
+            comp_status = self.status_data.get(comp_id, {})
+            status = comp_status.get("status", "DEAD")
+            health = comp_status.get("health_percentage", 0)
+            age = comp_status.get("last_beat_age", 999)
+
+            gumball = self._get_gumball(status)
+            status_text = self._get_status_text(status)
+
+            # Format: ● Database    ONLINE  (100%)
+            line = f"{gumball} {display_name:<10} {status_text}"
+            content_lines.append(line)
+
+        # Add overall health bar
+        content_lines.append("")
+        total_health = sum(
+            self.status_data.get(c[0], {}).get("health_percentage", 0)
+            for c in self.COMPONENTS
+        )
+        avg_health = total_health / len(self.COMPONENTS) if self.COMPONENTS else 0
+
+        # Health bar visualization
+        bar_width = 20
+        filled = int(avg_health / 100 * bar_width)
+        if avg_health >= 80:
+            bar_color = "green"
+        elif avg_health >= 50:
+            bar_color = "yellow"
+        else:
+            bar_color = "red"
+
+        health_bar = f"[{bar_color}]{'█' * filled}[/{bar_color}][dim]{'░' * (bar_width - filled)}[/dim]"
+        content_lines.append(f"[dim]Health:[/dim] {health_bar} {avg_health:.0f}%")
+
+        content = "\n".join(content_lines)
+        return Panel(
+            content,
+            title="[bold cyan]System[/bold cyan]",
+            border_style="cyan",
+            padding=(0, 1),
+        )

@@ -2,6 +2,8 @@
 """
 CobaltGraph System Checker
 Lightweight pre-flight validation for system readiness
+
+Integrates with the global heartbeat monitor to report component status.
 """
 
 import importlib
@@ -14,6 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Import global heartbeat singleton
+from src.utils.heartbeat import heartbeat
+
 
 @dataclass
 class CheckResult:
@@ -22,6 +27,7 @@ class CheckResult:
     passed: bool
     message: str
     critical: bool = True
+    component: str = ""  # Maps to heartbeat component name
 
 
 class SystemChecker:
@@ -215,30 +221,37 @@ class SystemChecker:
     def _check_database(self):
         """Verify SQLite database access"""
         db_dir = self.project_root / "database"
-        db_file = db_dir / "cobaltgraph.db"
+        data_dir = self.project_root / "data"
 
         try:
             # Test SQLite availability
             conn = sqlite3.connect(":memory:")
             conn.close()
 
-            # Check database directory
+            # Check database directories
             if not db_dir.exists():
                 db_dir.mkdir(parents=True, exist_ok=True)
+            if not data_dir.exists():
+                data_dir.mkdir(parents=True, exist_ok=True)
 
             self.results.append(CheckResult(
                 name="Database",
                 passed=True,
                 message=f"SQLite available, directory ready ✓",
-                critical=True
+                critical=True,
+                component="database"
             ))
+            # Update heartbeat
+            heartbeat.beat("database", "SQLite ready")
         except Exception as e:
             self.results.append(CheckResult(
                 name="Database",
                 passed=False,
                 message=f"Database check failed: {e}",
-                critical=True
+                critical=True,
+                component="database"
             ))
+            heartbeat.mark_offline("database", f"Check failed: {e}")
 
     def _check_directories(self):
         """Ensure required directories exist"""
@@ -299,7 +312,7 @@ class SystemChecker:
                 ))
 
     def _check_optional_services(self):
-        """Check optional features (non-critical)"""
+        """Check optional features (non-critical) and update heartbeat"""
         # Check consensus system
         try:
             from src.consensus import ConsensusThreatScorer
@@ -307,15 +320,19 @@ class SystemChecker:
                 name="Consensus System",
                 passed=True,
                 message="Multi-agent consensus available ✓",
-                critical=False
+                critical=False,
+                component="consensus"
             ))
+            heartbeat.beat("consensus", "BFT scoring ready")
         except ImportError:
             self.results.append(CheckResult(
                 name="Consensus System",
                 passed=False,
                 message="Consensus system not available (degraded mode)",
-                critical=False
+                critical=False,
+                component="consensus"
             ))
+            heartbeat.mark_offline("consensus", "Module not available")
 
         # Check ASN/Organization lookup service
         try:
@@ -324,15 +341,61 @@ class SystemChecker:
                 name="ASN Lookup Service",
                 passed=True,
                 message="ASN/Organization lookup with TTL hop detection available ✓",
-                critical=False
+                critical=False,
+                component="asn_lookup"
             ))
+            heartbeat.beat("asn_lookup", "ASN service ready")
         except ImportError:
             self.results.append(CheckResult(
                 name="ASN Lookup Service",
                 passed=False,
                 message="ASN lookup service not available (reduced intelligence)",
-                critical=False
+                critical=False,
+                component="asn_lookup"
             ))
+            heartbeat.mark_offline("asn_lookup", "Module not available")
+
+        # Check geolocation service
+        try:
+            from src.services.geo_lookup import GeoLookup
+            self.results.append(CheckResult(
+                name="Geolocation Service",
+                passed=True,
+                message="GeoIP lookup available ✓",
+                critical=False,
+                component="geo_engine"
+            ))
+            heartbeat.beat("geo_engine", "GeoIP ready")
+        except ImportError:
+            self.results.append(CheckResult(
+                name="Geolocation Service",
+                passed=False,
+                message="Geolocation service not available",
+                critical=False,
+                component="geo_engine"
+            ))
+            heartbeat.mark_offline("geo_engine", "Module not available")
+
+        # Check IP reputation service
+        try:
+            from src.services.ip_reputation import IPReputation
+            self.results.append(CheckResult(
+                name="IP Reputation Service",
+                passed=True,
+                message="IP reputation lookup available ✓",
+                critical=False,
+                component="reputation"
+            ))
+            heartbeat.beat("reputation", "Reputation APIs ready")
+        except ImportError:
+            self.results.append(CheckResult(
+                name="IP Reputation Service",
+                passed=False,
+                message="IP reputation service not available",
+                critical=False,
+                component="reputation"
+            ))
+            heartbeat.mark_offline("reputation", "Module not available")
 
         # Check export system
         try:

@@ -52,7 +52,7 @@ class Database:
         "confidence", "high_uncertainty", "scoring_method"
     ]
 
-    def __init__(self, db_path: str = "data/cobaltgraph.db"):
+    def __init__(self, db_path: str = "database/cobaltgraph.db"):
         """Initialize optimized database connection"""
         self.db_path = db_path
         self.lock = Lock()

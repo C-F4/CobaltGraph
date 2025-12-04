@@ -28,6 +28,9 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Footer
 from textual.reactive import reactive
 
+# Import global heartbeat singleton
+from src.utils.heartbeat import heartbeat
+
 logger = logging.getLogger(__name__)
 
 
@@ -374,7 +377,7 @@ class UnifiedDashboard(App):
         'SEVERE': 'bold red',
     }
 
-    def __init__(self, db_path: str = "data/cobaltgraph.db", mode: str = "device", pipeline=None):
+    def __init__(self, db_path: str = "database/cobaltgraph.db", mode: str = "device", pipeline=None):
         """Initialize unified dashboard"""
         super().__init__()
         self.mode = mode
@@ -383,6 +386,9 @@ class UnifiedDashboard(App):
         # Core managers
         self.data_manager = DataManager(db_path=db_path, cache_ttl=2.0)
         self.viz_manager = VisualizationManager()
+
+        # Use global heartbeat singleton (already initialized by system_check)
+        # Components are registered and marked online/offline during system checks
 
         # Statistics (updated by data_manager)
         self.stats = {
@@ -484,6 +490,9 @@ class UnifiedDashboard(App):
         if not self.is_connected:
             return
 
+        # Send database heartbeat since we're connected
+        heartbeat.beat("database", "DB connected")
+
         # Invalidate cache on every refresh to ensure fresh data
         self.data_manager.invalidate_cache()
 
@@ -575,6 +584,31 @@ class UnifiedDashboard(App):
         if not connections:
             return
 
+        # Check connection data for evidence of working components and send heartbeats
+        for conn in connections[:10]:  # Sample first 10 connections
+            # GeoIP heartbeat: if we have geo data, the service is working
+            if conn.get('dst_lat') or conn.get('dst_lon') or conn.get('dst_country'):
+                heartbeat.beat("geo_engine", "GeoIP data flowing")
+                break
+
+        for conn in connections[:10]:
+            # ASN heartbeat: if we have ASN data, the service is working
+            if conn.get('dst_asn') or conn.get('dst_org'):
+                heartbeat.beat("asn_lookup", "ASN data flowing")
+                break
+
+        for conn in connections[:10]:
+            # Consensus heartbeat: if we have threat scores, consensus is working
+            if conn.get('threat_score') is not None:
+                heartbeat.beat("consensus", "Threat scoring active")
+                break
+
+        # Check if capture is active based on recent timestamps
+        if connections:
+            latest_ts = connections[0].get('timestamp', 0)
+            if latest_ts and (time.time() - latest_ts) < 60:  # Connection within last minute
+                heartbeat.beat("capture", "Receiving connections")
+
         # Threat Posture Panel (Top-Left)
         if self.threat_posture_panel:
             threats = [c.get('threat_score', 0) or 0 for c in connections]
@@ -657,6 +691,9 @@ class UnifiedDashboard(App):
     def _on_connection_event(self, event) -> None:
         """Callback from DataPipeline for real-time events"""
         try:
+            # Send pipeline heartbeat since we're receiving events
+            heartbeat.beat("pipeline", "Processing events")
+
             # Convert event to dictionary
             conn_dict = event.to_dict() if hasattr(event, 'to_dict') else \
                        (dict(event) if isinstance(event, dict) else {})
@@ -681,10 +718,21 @@ class UnifiedDashboard(App):
             logger.error(f"Connection event error: {e}")
 
     def _update_heartbeat(self) -> None:
-        """Update heartbeat timestamp in subtitle (called every 0.5s)"""
+        """Update heartbeat timestamp and system status gumballs (called every 0.5s)"""
         from datetime import datetime
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.sub_title = f"Last update: {timestamp} | Status: {'Connected' if self.is_connected else 'Offline'}"
+
+        # Mark dashboard as alive
+        heartbeat.beat("dashboard", "UI active")
+
+        # Update system status in ThreatPosturePanel
+        if self.threat_posture_panel:
+            self.threat_posture_panel.system_status = heartbeat.get_status()
+
+        # Get summary from heartbeat
+        online, total = heartbeat.get_online_count()
+
+        self.sub_title = f"Last update: {timestamp} | Components: {online}/{total} online | DB: {'Connected' if self.is_connected else 'Offline'}"
 
     def _update_ui(self) -> None:
         """Called every 1s for UI animations"""
@@ -765,7 +813,7 @@ class DeviceDashboardBase(UnifiedDashboard):
     a full-featured implementation with all working actions.
     """
 
-    def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None):
+    def __init__(self, db_path: str = "database/cobaltgraph.db", pipeline=None):
         super().__init__(db_path=db_path, mode="device", pipeline=pipeline)
 
     BINDINGS = [
@@ -784,7 +832,7 @@ class NetworkDashboardBase(UnifiedDashboard):
     a full-featured implementation with all working actions.
     """
 
-    def __init__(self, db_path: str = "data/cobaltgraph.db", pipeline=None):
+    def __init__(self, db_path: str = "database/cobaltgraph.db", pipeline=None):
         super().__init__(db_path=db_path, mode="network", pipeline=pipeline)
 
     BINDINGS = [
