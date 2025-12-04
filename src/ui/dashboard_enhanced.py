@@ -1435,7 +1435,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
     }
     """
 
-    def __init__(self, db_path: str = "data/cobaltgraph.db", mode: str = "device"):
+    def __init__(self, db_path: str = "database/cobaltgraph.db", mode: str = "device"):
         """Initialize enhanced dashboard with mode"""
         super().__init__(db_path=db_path, mode=mode)
         self.title = f"CobaltGraph - {mode.upper()} Mode"
@@ -1771,7 +1771,7 @@ if __name__ == '__main__':
     import sys
 
     mode = "device"
-    db_path = "data/cobaltgraph.db"
+    db_path = "database/cobaltgraph.db"
 
     if len(sys.argv) > 1:
         mode = sys.argv[1]
