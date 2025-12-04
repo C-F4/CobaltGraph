@@ -1497,13 +1497,21 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def on_mount(self) -> None:
         """Initialize dashboard on mount"""
+        # Import heartbeat singleton for component health tracking
+        from src.utils.heartbeat import heartbeat
+
         self.title = f"CobaltGraph Enhanced - {self.mode.upper()} Mode"
 
         if self.data_manager.connect():
             self.is_connected = True
             self.set_interval(2.0, self._refresh_data)
             self.set_interval(0.1, self._update_display)  # 100ms for smooth animations
+            self.set_interval(0.5, self._update_heartbeat)  # Heartbeat updates every 0.5s
             self._refresh_data()
+
+            # Send initial heartbeats for all operational components
+            heartbeat.beat("dashboard", "UI active")
+            heartbeat.beat("database", "DB connected")
         else:
             self.sub_title = "Database connection failed"
 
@@ -1601,6 +1609,62 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                     self.globe_panel.refresh()
             except Exception as e:
                 logger.debug(f"Globe update failed: {e}")
+
+    def _update_heartbeat(self) -> None:
+        """
+        Update component heartbeats every 0.5s.
+        Sends heartbeats for all operational components to keep them marked as ACTIVE.
+        """
+        from src.utils.heartbeat import heartbeat
+
+        # Always send dashboard heartbeat - we're running
+        heartbeat.beat("dashboard", "UI active")
+
+        # Send database heartbeat if connected
+        if self.data_manager.is_connected:
+            heartbeat.beat("database", "DB connected")
+
+        # Send pipeline heartbeat if we have recent connections
+        if self.recent_connections:
+            heartbeat.beat("pipeline", "Data flowing")
+
+            # Check connection data for evidence of working services
+            for conn in list(self.recent_connections)[:10]:
+                # GeoIP heartbeat: if we have geo data, the service is working
+                if conn.get('dst_lat') or conn.get('dst_lon') or conn.get('dst_country'):
+                    heartbeat.beat("geo_engine", "GeoIP data flowing")
+                    break
+
+            for conn in list(self.recent_connections)[:10]:
+                # ASN heartbeat: if we have ASN data, the service is working
+                if conn.get('dst_asn') or conn.get('dst_org'):
+                    heartbeat.beat("asn_lookup", "ASN data flowing")
+                    break
+
+            for conn in list(self.recent_connections)[:10]:
+                # Consensus heartbeat: if we have threat scores, consensus is working
+                if conn.get('threat_score') is not None:
+                    heartbeat.beat("consensus", "Threat scoring active")
+                    break
+
+            # Check if capture is active based on recent timestamps
+            if self.recent_connections:
+                latest = list(self.recent_connections)[0]
+                latest_ts = latest.get('timestamp', 0)
+                if latest_ts and (time.time() - float(latest_ts)) < 60:
+                    heartbeat.beat("capture", "Receiving connections")
+
+            # Reputation service heartbeat - check if reputation data exists
+            for conn in list(self.recent_connections)[:10]:
+                # If we have detailed org_type data, reputation likely contributed
+                if conn.get('dst_org_type') and conn.get('dst_org_type') not in ('unknown', None):
+                    heartbeat.beat("reputation", "Reputation data active")
+                    break
+
+        # Update subtitle with component status
+        online, total = heartbeat.get_online_count()
+        db_status = "Connected" if self.data_manager.is_connected else "Offline"
+        self.sub_title = f"Last update: {datetime.now().strftime('%H:%M:%S')} | Components: {online}/{total} online | DB: {db_status}"
 
     def _calculate_heatmap(self, connections: List[Dict]) -> Dict:
         """Calculate geographic heatmap from connections"""
