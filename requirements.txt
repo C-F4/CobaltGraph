@@ -1,71 +1,50 @@
 # CobaltGraph - Network Security Platform
-# Terminal-Only Mode with Multi-Dimensional Visualization
+# Blue-Team Network Intelligence with Multi-Agent Consensus Threat Scoring
 #
 # Installation: pip3 install -r requirements.txt
-# Minimal Install: pip3 install -r requirements-minimal.txt
+#
+# Python Version: 3.10+ required, 3.12+ recommended
+# SQLite: Built-in to Python (no install needed)
 
 # ============================================================================
 # CORE DEPENDENCIES (Required)
 # ============================================================================
 
-# HTTP requests for threat intelligence APIs
+# HTTP client for threat intelligence APIs (VirusTotal, AbuseIPDB, ip-api)
 requests>=2.32.3
 
-# Network packet capture (requires root for network-wide mode)
-# Note: scapy can be skipped for device-only mode
+# Network packet capture for network-wide mode (requires root/sudo)
+# Can be skipped for device-only mode using 'python start.py --mode device'
 scapy>=2.6.1
 
 # ============================================================================
-# ENHANCED TERMINAL UI (Recommended)
+# TERMINAL UI (Required)
 # ============================================================================
 
 # Beautiful terminal formatting, tables, and panels
 rich>=13.9.4
 
-# Modern TUI framework with reactive widgets
+# Modern reactive Terminal UI framework (Textual TUI)
 textual>=1.0.0
 
 # ============================================================================
-# GEOLOCATION (Optional but Recommended)
+# CONSENSUS & DATA PROCESSING (Required)
 # ============================================================================
 
-# MaxMind GeoIP2 database reader (requires database file)
-geoip2>=4.8.1
-
-# Fast IP geolocation lookups
-maxminddb>=2.6.2
-
-# ============================================================================
-# DATA PROCESSING & ANALYTICS (Required for full functionality)
-# ============================================================================
-
-# High-performance arrays for consensus calculations and threat vectors
+# High-performance arrays for Byzantine Fault Tolerant consensus calculations
 numpy>=2.3.5
 
-# Efficient data analysis for export processing
+# Data analysis and DataFrame operations for connection export processing
 pandas>=2.3.3
 
-# Scientific computing for statistical analysis
+# Scientific computing for statistical threat scoring (Z-score, distributions)
 scipy>=1.16.3
 
-# Network graph analysis for connection topology
+# Network graph analysis for connection topology visualization and hop counting
 networkx>=3.4.2
 
-# Visualization and plotting
-matplotlib>=3.9.2
-
 # ============================================================================
-# MULTI-DIMENSIONAL VISUALIZATION ENGINE
-# ============================================================================
-
-# Terminal graphics and Unicode support
-wcwidth>=0.2.13
-
-# Color manipulation for threat visualization
-colorama>=0.4.6
-
-# ============================================================================
-# DEVELOPMENT TOOLS (Optional)
+# DEVELOPMENT TOOLS (Optional - for development/testing)
 # ============================================================================
 
 # Testing framework
@@ -79,26 +58,3 @@ pylint>=3.3.2
 
 # Import sorting
 isort>=5.13.2
-
-# ============================================================================
-# NOTES
-# ============================================================================
-#
-# Python Version: 3.10+ required, 3.12+ recommended
-# SQLite: Built-in to Python (no install needed)
-#
-# For minimal installation (terminal UI only):
-#   pip3 install -r requirements-minimal.txt
-#
-# For development:
-#   pip3 install -r requirements.txt
-#
-# Visualization Features:
-#   - N-dimensional threat vector projection
-#   - Heatmap rendering
-#   - Organization triage with trust scoring
-#   - Hop count network topology visualization
-#   - Time-series anomaly detection
-#   - Parallel coordinate threat analysis
-#
-# ============================================================================
