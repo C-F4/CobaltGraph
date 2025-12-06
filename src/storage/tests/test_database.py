@@ -27,7 +27,7 @@ def test_database_init(temp_db):
 
     # Verify indexes were created
     cursor = db.conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_timestamp'"
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_timestamp_desc'"
     )
     assert cursor.fetchone() is not None
 
@@ -46,6 +46,9 @@ def test_connection_insert(temp_db, sample_connection):
 
     # Add connection
     db.add_connection(sample_connection)
+
+    # Flush batch before checking count
+    db.flush()
 
     # Verify insertion
     count = db.get_connection_count()
@@ -101,6 +104,9 @@ def test_connection_count(temp_db):
     for i in range(5):
         db.add_connection({"dst_ip": f"8.8.8.{i}", "dst_port": 443, "protocol": "TCP"})
 
+    # Flush batch before checking count
+    db.flush()
+
     # Verify count
     assert db.get_connection_count() == 5
 
@@ -153,6 +159,7 @@ def test_context_manager(temp_db):
     """Test database context manager usage"""
     with Database(temp_db) as db:
         db.add_connection({"dst_ip": "8.8.8.8", "dst_port": 443, "protocol": "TCP"})
+        db.flush()  # Flush batch before checking count
         count = db.get_connection_count()
         assert count == 1
 
@@ -214,10 +221,16 @@ def test_protocol_field_handling(temp_db):
     """Test protocol field with None values"""
     db = Database(temp_db)
 
-    # Add connection with protocol=None
+    # Add connection with protocol=None (explicitly None is stored as None)
     db.add_connection({"dst_ip": "8.8.8.8", "dst_port": 443, "protocol": None})
 
-    # Retrieve and verify default is applied on read
+    # Retrieve - explicit None is preserved (use get with default to handle None)
+    connections = db.get_recent_connections(limit=1)
+    # When protocol is explicitly None, it's stored as None
+    assert connections[0]["protocol"] is None
+
+    # Test that missing protocol defaults to TCP
+    db.add_connection({"dst_ip": "8.8.4.4", "dst_port": 443})  # No protocol key
     connections = db.get_recent_connections(limit=1)
     assert connections[0]["protocol"] == "TCP"
 

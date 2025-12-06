@@ -34,26 +34,26 @@ textual>=1.0.0
 # ============================================================================
 
 # High-performance arrays for Byzantine Fault Tolerant consensus calculations
-numpy>=2.3.5
+numpy>=1.24.0
 
 # Data analysis and DataFrame operations for connection export processing
-pandas>=2.3.3
+pandas>=2.0.0
 
 # Scientific computing for statistical threat scoring (Z-score, distributions)
-scipy>=1.16.3
+scipy>=1.11.0
 
 # Network graph analysis for connection topology visualization and hop counting
-networkx>=3.4.2
+networkx>=3.1
 
 # ============================================================================
 # GEOLOCATION (Optional but Recommended)
 # ============================================================================
 
 # MaxMind GeoIP2 database reader (requires database file)
-geoip2>=4.8.1
+geoip2>=4.7.0
 
 # Fast IP geolocation lookups
-maxminddb>=2.6.2
+maxminddb>=2.4.0
 
 # ============================================================================
 # VISUALIZATION (Optional)
