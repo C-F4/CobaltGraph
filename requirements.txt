@@ -1,23 +1,17 @@
 # CobaltGraph - Network Security Platform
-<<<<<<< HEAD
 # Blue-Team Network Intelligence with Multi-Agent Consensus Threat Scoring
-#
-# Installation: pip3 install -r requirements.txt
-#
-# Python Version: 3.10+ required, 3.12+ recommended
-# SQLite: Built-in to Python (no install needed)
-=======
 # Terminal-Only Mode with Multi-Dimensional Visualization
 #
 # Installation: pip3 install -r requirements.txt
 # Minimal Install: pip3 install -r requirements-minimal.txt
->>>>>>> 8e375a7e8116f4eaf47ed22956457887197fe2d4
+#
+# Python Version: 3.10+ required, 3.12+ recommended
+# SQLite: Built-in to Python (no install needed)
 
 # ============================================================================
 # CORE DEPENDENCIES (Required)
 # ============================================================================
 
-<<<<<<< HEAD
 # HTTP client for threat intelligence APIs (VirusTotal, AbuseIPDB, ip-api)
 requests>=2.32.3
 
@@ -27,23 +21,11 @@ scapy>=2.6.1
 
 # ============================================================================
 # TERMINAL UI (Required)
-=======
-# HTTP requests for threat intelligence APIs
-requests>=2.32.3
-
-# Network packet capture (requires root for network-wide mode)
-# Note: scapy can be skipped for device-only mode
-scapy>=2.6.1
-
-# ============================================================================
-# ENHANCED TERMINAL UI (Recommended)
->>>>>>> 8e375a7e8116f4eaf47ed22956457887197fe2d4
 # ============================================================================
 
 # Beautiful terminal formatting, tables, and panels
 rich>=13.9.4
 
-<<<<<<< HEAD
 # Modern reactive Terminal UI framework (Textual TUI)
 textual>=1.0.0
 
@@ -64,12 +46,6 @@ scipy>=1.16.3
 networkx>=3.4.2
 
 # ============================================================================
-# DEVELOPMENT TOOLS (Optional - for development/testing)
-=======
-# Modern TUI framework with reactive widgets
-textual>=1.0.0
-
-# ============================================================================
 # GEOLOCATION (Optional but Recommended)
 # ============================================================================
 
@@ -80,27 +56,11 @@ geoip2>=4.8.1
 maxminddb>=2.6.2
 
 # ============================================================================
-# DATA PROCESSING & ANALYTICS (Required for full functionality)
+# VISUALIZATION (Optional)
 # ============================================================================
-
-# High-performance arrays for consensus calculations and threat vectors
-numpy>=2.3.5
-
-# Efficient data analysis for export processing
-pandas>=2.3.3
-
-# Scientific computing for statistical analysis
-scipy>=1.16.3
-
-# Network graph analysis for connection topology
-networkx>=3.4.2
 
 # Visualization and plotting
 matplotlib>=3.9.2
-
-# ============================================================================
-# MULTI-DIMENSIONAL VISUALIZATION ENGINE
-# ============================================================================
 
 # Terminal graphics and Unicode support
 wcwidth>=0.2.13
@@ -109,8 +69,7 @@ wcwidth>=0.2.13
 colorama>=0.4.6
 
 # ============================================================================
-# DEVELOPMENT TOOLS (Optional)
->>>>>>> 8e375a7e8116f4eaf47ed22956457887197fe2d4
+# DEVELOPMENT TOOLS (Optional - for development/testing)
 # ============================================================================
 
 # Testing framework
@@ -124,8 +83,6 @@ pylint>=3.3.2
 
 # Import sorting
 isort>=5.13.2
-<<<<<<< HEAD
-=======
 
 # ============================================================================
 # NOTES
@@ -149,4 +106,3 @@ isort>=5.13.2
 #   - Parallel coordinate threat analysis
 #
 # ============================================================================
->>>>>>> 8e375a7e8116f4eaf47ed22956457887197fe2d4
