@@ -127,33 +127,32 @@ class SystemChecker:
                     critical=True
                 ))
 
-        # Optional dependencies (non-critical)
-        optional_deps = [
-            ("scapy", "Network packet capture (for network-wide mode)"),
-            ("rich", "Beautiful terminal formatting"),
-            ("textual", "Enhanced Terminal UI framework"),
-            ("numpy", "High-performance arrays for consensus calculations"),
-            ("pandas", "Data analysis for export processing"),
-            ("scipy", "Scientific computing for statistical analysis"),
-            ("networkx", "Network graph analysis for connection topology"),
-            ("matplotlib", "Visualization and plotting"),
+        # Additional dependencies (required for full functionality)
+        additional_deps = [
+            ("scapy", "Network packet capture for network-wide mode"),
+            ("rich", "Terminal formatting and tables"),
+            ("textual", "Reactive Terminal UI framework"),
+            ("numpy", "Consensus calculations and threat vectors"),
+            ("pandas", "Data analysis and export processing"),
+            ("scipy", "Statistical threat scoring"),
+            ("networkx", "Network topology and connection analysis"),
         ]
 
-        for module_name, description in optional_deps:
+        for module_name, description in additional_deps:
             try:
                 importlib.import_module(module_name)
                 self.results.append(CheckResult(
-                    name=f"Optional: {module_name}",
+                    name=f"Dependency: {module_name}",
                     passed=True,
                     message=f"{module_name} ({description}) ✓",
-                    critical=False
+                    critical=True
                 ))
             except ImportError:
                 self.results.append(CheckResult(
-                    name=f"Optional: {module_name}",
+                    name=f"Dependency: {module_name}",
                     passed=False,
-                    message=f"{module_name} not installed - install with: pip3 install {module_name}",
-                    critical=False
+                    message=f"{module_name} not installed - run: pip3 install {module_name}",
+                    critical=True
                 ))
 
     def _check_cobaltgraph_modules(self):
