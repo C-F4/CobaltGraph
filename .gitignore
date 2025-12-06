@@ -5,7 +5,7 @@ static/
 data/
 venv/
 database/
-
+data/
 
 
 # Runtime Data
