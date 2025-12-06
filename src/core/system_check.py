@@ -127,6 +127,7 @@ class SystemChecker:
                     critical=True
                 ))
 
+<<<<<<< HEAD
         # Additional dependencies (required for full functionality)
         additional_deps = [
             ("scapy", "Network packet capture for network-wide mode"),
@@ -153,6 +154,35 @@ class SystemChecker:
                     passed=False,
                     message=f"{module_name} not installed - run: pip3 install {module_name}",
                     critical=True
+=======
+        # Optional dependencies (non-critical)
+        optional_deps = [
+            ("scapy", "Network packet capture (for network-wide mode)"),
+            ("rich", "Beautiful terminal formatting"),
+            ("textual", "Enhanced Terminal UI framework"),
+            ("numpy", "High-performance arrays for consensus calculations"),
+            ("pandas", "Data analysis for export processing"),
+            ("scipy", "Scientific computing for statistical analysis"),
+            ("networkx", "Network graph analysis for connection topology"),
+            ("matplotlib", "Visualization and plotting"),
+        ]
+
+        for module_name, description in optional_deps:
+            try:
+                importlib.import_module(module_name)
+                self.results.append(CheckResult(
+                    name=f"Optional: {module_name}",
+                    passed=True,
+                    message=f"{module_name} ({description}) ✓",
+                    critical=False
+                ))
+            except ImportError:
+                self.results.append(CheckResult(
+                    name=f"Optional: {module_name}",
+                    passed=False,
+                    message=f"{module_name} not installed - install with: pip3 install {module_name}",
+                    critical=False
+>>>>>>> 8e375a7e8116f4eaf47ed22956457887197fe2d4
                 ))
 
     def _check_cobaltgraph_modules(self):
