@@ -14,7 +14,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Import global heartbeat singleton
 from src.utils.heartbeat import heartbeat
@@ -36,6 +36,120 @@ class SystemChecker:
     def __init__(self):
         self.results: List[CheckResult] = []
         self.project_root = Path(__file__).parent.parent.parent
+
+    def _parse_requirements(self) -> List[Dict]:
+        """
+        Parse requirements.txt and categorize packages as required vs optional.
+
+        Returns list of dicts with: module, description, critical, category
+        """
+        requirements_path = self.project_root / "requirements.txt"
+        deps = []
+
+        # Map package names to import names (when they differ)
+        import_map = {
+            "geoip2": "geoip2",
+            "maxminddb": "maxminddb",
+            "scikit-learn": "sklearn",
+        }
+
+        # Categories from requirements.txt and their criticality
+        category_critical = {
+            "CORE DEPENDENCIES": True,
+            "TERMINAL UI": True,
+            "CONSENSUS & DATA PROCESSING": True,
+            "GEOLOCATION": False,  # Optional but Recommended
+            "VISUALIZATION": False,  # Optional
+            "DEVELOPMENT TOOLS": False,  # Optional
+        }
+
+        if not requirements_path.exists():
+            # Fallback to hardcoded if requirements.txt missing
+            return self._get_fallback_deps()
+
+        try:
+            current_category = "UNKNOWN"
+            current_description = ""
+            in_section_header = False
+
+            with open(requirements_path, "r") as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                line = line.strip()
+
+                # Skip empty lines
+                if not line:
+                    continue
+
+                # Detect section separators (=== lines mark section boundaries)
+                if line.startswith("# ==="):
+                    in_section_header = True
+                    continue
+
+                # Detect category headers - only right after === separator
+                if in_section_header and line.startswith("# "):
+                    line_upper = line.upper()
+                    for cat in category_critical.keys():
+                        if cat in line_upper:
+                            current_category = cat
+                            break
+                    in_section_header = False
+                    continue
+
+                # Regular comment (description for next package)
+                if line.startswith("#"):
+                    current_description = line[1:].strip()
+                    continue
+
+                # Parse package line (e.g., "requests>=2.28.0")
+                if not line.startswith("#"):
+                    # Extract package name
+                    pkg_name = None
+                    for sep in [">=", "==", "<=", "<", ">", "~="]:
+                        if sep in line:
+                            pkg_name = line.split(sep)[0].strip()
+                            break
+
+                    if not pkg_name:
+                        continue
+
+                    # Get import name (some packages have different import names)
+                    import_name = import_map.get(pkg_name, pkg_name.replace("-", "_"))
+
+                    # Determine if critical based on category
+                    is_critical = category_critical.get(current_category, False)
+
+                    deps.append({
+                        "module": import_name,
+                        "package": pkg_name,
+                        "description": current_description or pkg_name,
+                        "critical": is_critical,
+                        "category": current_category,
+                    })
+
+                    current_description = ""
+
+            return deps
+
+        except Exception as e:
+            # Fallback on parse error
+            return self._get_fallback_deps()
+
+    def _get_fallback_deps(self) -> List[Dict]:
+        """Fallback hardcoded deps if requirements.txt can't be parsed"""
+        return [
+            {"module": "requests", "package": "requests", "description": "HTTP library", "critical": True, "category": "CORE"},
+            {"module": "scapy", "package": "scapy", "description": "Network packet capture", "critical": True, "category": "CORE"},
+            {"module": "rich", "package": "rich", "description": "Terminal formatting", "critical": True, "category": "UI"},
+            {"module": "textual", "package": "textual", "description": "Terminal UI framework", "critical": True, "category": "UI"},
+            {"module": "numpy", "package": "numpy", "description": "Array operations", "critical": True, "category": "DATA"},
+            {"module": "pandas", "package": "pandas", "description": "Data analysis", "critical": True, "category": "DATA"},
+            {"module": "scipy", "package": "scipy", "description": "Scientific computing", "critical": True, "category": "DATA"},
+            {"module": "networkx", "package": "networkx", "description": "Graph analysis", "critical": True, "category": "DATA"},
+            {"module": "geoip2", "package": "geoip2", "description": "GeoIP lookups", "critical": False, "category": "GEO"},
+            {"module": "matplotlib", "package": "matplotlib", "description": "Plotting", "critical": False, "category": "VIZ"},
+        ]
 
     def check_all(self, mode: str = "device") -> bool:
         """
@@ -104,42 +218,15 @@ class SystemChecker:
                     critical=True
                 ))
 
-        # External dependencies (from requirements.txt)
-        # Core dependencies (critical)
-        core_deps = [
-            ("requests", "HTTP library for threat intelligence"),
-        ]
+        # Parse requirements.txt dynamically
+        deps = self._parse_requirements()
 
-        for module_name, description in core_deps:
-            try:
-                importlib.import_module(module_name)
-                self.results.append(CheckResult(
-                    name=f"Dependency: {module_name}",
-                    passed=True,
-                    message=f"{module_name} ({description}) ✓",
-                    critical=True
-                ))
-            except ImportError:
-                self.results.append(CheckResult(
-                    name=f"Dependency: {module_name}",
-                    passed=False,
-                    message=f"{module_name} missing - run: pip3 install {module_name}",
-                    critical=True
-                ))
+        for dep in deps:
+            module_name = dep["module"]
+            description = dep["description"]
+            is_critical = dep["critical"]
+            category = dep["category"]
 
-        # Core dependencies (required for full functionality)
-        core_extra_deps = [
-            ("scapy", "Network packet capture for network-wide mode", True),
-            ("rich", "Terminal formatting and tables", False),
-            ("textual", "Reactive Terminal UI framework", True),
-            ("numpy", "Consensus calculations and threat vectors", True),
-            ("pandas", "Data analysis and export processing", True),
-            ("scipy", "Statistical threat scoring", True),
-            ("networkx", "Network topology and connection analysis", True),
-            ("matplotlib", "Visualization and plotting", False),
-        ]
-
-        for module_name, description, is_critical in core_extra_deps:
             try:
                 importlib.import_module(module_name)
                 self.results.append(CheckResult(
@@ -149,10 +236,11 @@ class SystemChecker:
                     critical=is_critical
                 ))
             except ImportError:
+                status = "REQUIRED" if is_critical else "OPTIONAL"
                 self.results.append(CheckResult(
                     name=f"Dependency: {module_name}",
                     passed=False,
-                    message=f"{module_name} not installed - run: pip3 install {module_name}",
+                    message=f"[{status}] {module_name} missing - {description}",
                     critical=is_critical
                 ))
 
