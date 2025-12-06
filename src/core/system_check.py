@@ -127,62 +127,33 @@ class SystemChecker:
                     critical=True
                 ))
 
-<<<<<<< HEAD
-        # Additional dependencies (required for full functionality)
-        additional_deps = [
-            ("scapy", "Network packet capture for network-wide mode"),
-            ("rich", "Terminal formatting and tables"),
-            ("textual", "Reactive Terminal UI framework"),
-            ("numpy", "Consensus calculations and threat vectors"),
-            ("pandas", "Data analysis and export processing"),
-            ("scipy", "Statistical threat scoring"),
-            ("networkx", "Network topology and connection analysis"),
+        # Core dependencies (required for full functionality)
+        core_extra_deps = [
+            ("scapy", "Network packet capture for network-wide mode", True),
+            ("rich", "Terminal formatting and tables", False),
+            ("textual", "Reactive Terminal UI framework", True),
+            ("numpy", "Consensus calculations and threat vectors", True),
+            ("pandas", "Data analysis and export processing", True),
+            ("scipy", "Statistical threat scoring", True),
+            ("networkx", "Network topology and connection analysis", True),
+            ("matplotlib", "Visualization and plotting", False),
         ]
 
-        for module_name, description in additional_deps:
+        for module_name, description, is_critical in core_extra_deps:
             try:
                 importlib.import_module(module_name)
                 self.results.append(CheckResult(
                     name=f"Dependency: {module_name}",
                     passed=True,
                     message=f"{module_name} ({description}) ✓",
-                    critical=True
+                    critical=is_critical
                 ))
             except ImportError:
                 self.results.append(CheckResult(
                     name=f"Dependency: {module_name}",
                     passed=False,
                     message=f"{module_name} not installed - run: pip3 install {module_name}",
-                    critical=True
-=======
-        # Optional dependencies (non-critical)
-        optional_deps = [
-            ("scapy", "Network packet capture (for network-wide mode)"),
-            ("rich", "Beautiful terminal formatting"),
-            ("textual", "Enhanced Terminal UI framework"),
-            ("numpy", "High-performance arrays for consensus calculations"),
-            ("pandas", "Data analysis for export processing"),
-            ("scipy", "Scientific computing for statistical analysis"),
-            ("networkx", "Network graph analysis for connection topology"),
-            ("matplotlib", "Visualization and plotting"),
-        ]
-
-        for module_name, description in optional_deps:
-            try:
-                importlib.import_module(module_name)
-                self.results.append(CheckResult(
-                    name=f"Optional: {module_name}",
-                    passed=True,
-                    message=f"{module_name} ({description}) ✓",
-                    critical=False
-                ))
-            except ImportError:
-                self.results.append(CheckResult(
-                    name=f"Optional: {module_name}",
-                    passed=False,
-                    message=f"{module_name} not installed - install with: pip3 install {module_name}",
-                    critical=False
->>>>>>> 8e375a7e8116f4eaf47ed22956457887197fe2d4
+                    critical=is_critical
                 ))
 
     def _check_cobaltgraph_modules(self):
