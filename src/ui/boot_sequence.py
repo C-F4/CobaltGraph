@@ -91,14 +91,19 @@ def threat_scan_animation(width: int = 80):
 
 
 def system_status():
-    """Display system status with indicators"""
+    """Display system status with indicators for actual system components"""
     print(f"{Colors.BRIGHT_CYAN}[SYSTEM STATUS]{Colors.RESET}")
+
+    # These are the actual components used by CobaltGraph
     checks = [
         ("Database Connection", True),
         ("Threat Consensus Engine", True),
         ("Geolocation Service", True),
         ("ASN Lookup Service", True),
-        ("Cryptocurrency Analysis", random.choice([True, False])),
+        ("Network Capture Engine", True),
+        ("IP Reputation Service", True),
+        ("MAC Vendor Resolution", True),
+        ("Dashboard Renderer", True),
     ]
 
     for check_name, status in checks:
@@ -106,7 +111,7 @@ def system_status():
         status_text = "ONLINE" if status else "OFFLINE"
         color = Colors.GREEN if status else Colors.YELLOW
         print(f"  {status_str} {check_name:<35} {color}{status_text}{Colors.RESET}")
-        time.sleep(0.2)
+        time.sleep(0.15)
 
     print()
 
@@ -114,12 +119,12 @@ def system_status():
 def boot_banner():
     """Display CobaltGraph boot banner"""
     banner = """
-    ███████╗ ██████╗ ██████╗ █████╗ ██╗  ████████╗ ██████╗ ██╗      █████╗ ██████╗ ██╗  ██╗
-    ██╔════╝██╔═══██╗██╔════╝██╔══██╗██║  ╚══██╔══╝██╔════╝ ██║     ██╔══██╗██╔══██╗██║  ██║
-    ██║     ██║   ██║██║     ███████║██║     ██║   ██║  ███╗██║     ███████║██████╔╝███████║
-    ██║     ██║   ██║██║     ██╔══██║██║     ██║   ██║   ██║██║     ██╔══██║██╔═══╝ ██╔══██║
-    ███████╗╚██████╔╝╚██████╗██║  ██║███████╗██║   ╚██████╔╝███████╗██║  ██║██║     ██║  ██║
-    ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝    ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
+     ██████╗ ██████╗ ██████╗  █████╗ ██╗  ████████╗     ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗
+    ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║  ╚══██╔══╝    ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║
+    ██║     ██║   ██║██████╔╝███████║██║     ██║       ██║  ███╗██████╔╝███████║██████╔╝███████║
+    ██║     ██║   ██║██╔══██╗██╔══██║██║     ██║       ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║
+    ╚██████╗╚██████╔╝██████╔╝██║  ██║███████╗██║       ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║
+     ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝        ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
 
     {cyan}UNIFIED THREAT MONITORING & INTELLIGENCE PLATFORM{reset}
     {dim}Blue-Team Network Security | Byzantine Fault Tolerant Consensus{reset}
@@ -178,13 +183,15 @@ def initialization_sequence():
     print(f"{Colors.DIM}Loading security modules...{Colors.RESET}\n")
 
     modules = [
-        "Consensus Threat Scorer",
-        "Byzantine Fault Detection",
+        "Database Connection",
+        "Network Capture Engine",
+        "MAC Vendor Resolver",
         "Geolocation Engine",
-        "ASN Intelligence Database",
-        "Event Log Parser",
-        "Cryptographic Verification",
-        "Real-time Analytics",
+        "ASN Intelligence Lookup",
+        "IP Reputation Service",
+        "Consensus Threat Scorer",
+        "Byzantine Fault Tolerance",
+        "Threat Analytics Engine",
         "Dashboard Renderer",
     ]
 
