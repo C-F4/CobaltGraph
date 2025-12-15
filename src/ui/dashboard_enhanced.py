@@ -843,15 +843,17 @@ class SmartConnectionTable(Static):
         return self._connection_map.get(row_key, {})
 
 
-class NetworkTopologyPanel(Static):
+class NetworkDevicePanel(Static):
     """
-    Network mode specific: Device → Destination topology
-    Shows which devices are communicating with what destinations
-    Displays MAC addresses, IP addresses, flow types, and network range
+    Unified panel for both network and device modes.
+    Shows discovered devices with MAC addresses, IPs, vendors, and connection flows.
+
+    In network mode: Shows destination flows per device
+    In device mode: Shows device inventory with connection counts
     """
 
     DEFAULT_CSS = """
-    NetworkTopologyPanel {
+    NetworkDevicePanel {
         height: 100%;
         width: 100%;
         padding: 1;
@@ -860,140 +862,157 @@ class NetworkTopologyPanel(Static):
     """
 
     topology_data = reactive(dict)
+    devices = reactive(list)
     network_info = reactive(dict)
 
-    def __init__(self, **kwargs):
+    def __init__(self, mode: str = "device", **kwargs):
         super().__init__(**kwargs)
+        self.mode = mode
         self.flows = {}
         self.topology_data = {}
+        self.devices = []
         self.network_info = {
-            'interface': 'auto',
             'ip_range': 'detecting...',
-            'mode': 'network'
         }
 
     def watch_topology_data(self, new_data: dict) -> None:
-        """Update topology when data changes"""
+        """Update topology when data changes (network mode)"""
         self.flows = new_data
-        # Extract network info from flows
         self._update_network_info()
         self.refresh()
 
+    def watch_devices(self, new_devices: list) -> None:
+        """Update devices when data changes (device mode)"""
+        self.devices = new_devices
+        self._update_network_info_from_devices()
+        self.refresh()
+
     def _update_network_info(self):
-        """Extract network range from observed IPs"""
+        """Extract network range from observed IPs in flows"""
         if not self.flows:
             return
 
-        # Collect all source IPs to determine network range
         src_ips = set()
         for src_mac, flow_data in self.flows.items():
-            for dest_key, dest_data in flow_data.get('destinations', {}).items():
-                # The key is dst_ip:port, extract IP
-                if ':' in dest_key:
-                    continue  # Skip, this is destination
-            # Get src_ip from the flow data if available
             if 'src_ip' in flow_data:
                 src_ips.add(flow_data['src_ip'])
 
-        # Determine the most common network range
-        if src_ips:
-            # Try to detect the network range
-            for ip in src_ips:
-                if ip.startswith('192.168.'):
-                    parts = ip.split('.')
-                    self.network_info['ip_range'] = f"192.168.{parts[2]}.0/24"
-                    break
-                elif ip.startswith('10.'):
-                    parts = ip.split('.')
-                    self.network_info['ip_range'] = f"10.{parts[1]}.{parts[2]}.0/24"
-                    break
-                elif ip.startswith('172.'):
-                    parts = ip.split('.')
-                    second = int(parts[1])
-                    if 16 <= second <= 31:
-                        self.network_info['ip_range'] = f"172.{parts[1]}.{parts[2]}.0/24"
-                        break
+        self._detect_network_range(src_ips)
+
+    def _update_network_info_from_devices(self):
+        """Extract network range from device IPs"""
+        if not self.devices:
+            return
+
+        src_ips = set()
+        for device in self.devices:
+            ip_addresses = device.get('ip_addresses', [])
+            for ip in ip_addresses:
+                src_ips.add(ip)
+
+        self._detect_network_range(src_ips)
+
+    def _detect_network_range(self, src_ips: set):
+        """Determine network range from a set of IPs"""
+        for ip in src_ips:
+            if ip.startswith('192.168.'):
+                parts = ip.split('.')
+                self.network_info['ip_range'] = f"192.168.{parts[2]}.0/24"
+                return
+            elif ip.startswith('10.'):
+                parts = ip.split('.')
+                self.network_info['ip_range'] = f"10.{parts[1]}.{parts[2]}.0/24"
+                return
+            elif ip.startswith('172.'):
+                parts = ip.split('.')
+                second = int(parts[1])
+                if 16 <= second <= 31:
+                    self.network_info['ip_range'] = f"172.{parts[1]}.{parts[2]}.0/24"
+                    return
 
     def render(self):
-        """Render device→destination topology with full network details"""
-        if not self.flows:
+        """Render unified device panel based on mode"""
+        # Check if we have data
+        has_flow_data = bool(self.flows)
+        has_device_data = bool(self.devices)
+
+        if not has_flow_data and not has_device_data:
             return Panel(
-                "[dim]Scanning network topology...[/dim]\n\n"
+                "[dim]Scanning network...[/dim]\n\n"
                 "[cyan]Waiting for network traffic...[/cyan]\n"
-                "[dim]MAC addresses, IPs, and flow types\n"
-                "will appear as devices are detected.[/dim]",
-                title="[bold cyan]NETWORK TOPOLOGY[/bold cyan]",
+                "[dim]Devices will appear with:\n"
+                "- MAC address\n"
+                "- IP address\n"
+                "- Connection flows[/dim]",
+                title="[bold cyan]NETWORK DEVICES[/bold cyan]",
                 border_style="cyan"
             )
 
         lines = []
 
-        # Network monitoring header with IP range
+        # Header
         lines.append("[bold cyan]┌─────────────────────────────────────────┐[/bold cyan]")
-        lines.append("[bold cyan]│         NETWORK MONITORING              │[/bold cyan]")
+        lines.append("[bold cyan]│           NETWORK DEVICES               │[/bold cyan]")
         lines.append("[bold cyan]└─────────────────────────────────────────┘[/bold cyan]")
 
-        # Show monitored network info
+        # Show monitored network range
         ip_range = self.network_info.get('ip_range', 'detecting...')
-        lines.append(f"[bold]Monitoring:[/bold] [cyan]{ip_range}[/cyan]")
+        lines.append(f"[bold]Network:[/bold] [cyan]{ip_range}[/cyan]")
         lines.append("")
 
+        # Render based on available data
+        if has_flow_data:
+            self._render_with_flows(lines)
+        elif has_device_data:
+            self._render_devices_only(lines)
+
+        content = "\n".join(lines)
+        return Panel(
+            content,
+            title="[bold cyan]NETWORK DEVICES[/bold cyan]",
+            border_style="cyan"
+        )
+
+    def _render_with_flows(self, lines: list):
+        """Render devices with their destination flows"""
         device_count = len(self.flows)
         total_flows = sum(len(f.get('destinations', {})) for f in self.flows.values())
 
-        # Statistics bar
         lines.append(f"[dim]Devices: {device_count} | Flows: {total_flows}[/dim]")
         lines.append("")
 
-        # Device list with full details
-        lines.append("[bold]DISCOVERED DEVICES:[/bold]")
-        lines.append("")
-
-        device_list = list(self.flows.items())[:6]  # Top 6 devices for space
+        device_list = list(self.flows.items())[:5]  # Top 5 devices
 
         for idx, (src_mac, flow_data) in enumerate(device_list):
-            vendor = (flow_data.get('device_vendor') or 'Unknown')[:14]
-            dest_count = len(flow_data.get('destinations', {}))
+            vendor = (flow_data.get('device_vendor') or 'Unknown')[:12]
+            src_ip = flow_data.get('src_ip', '')
             threat_score = float(flow_data.get('threat_avg', 0) or 0)
 
             is_last = idx == len(device_list) - 1
             prefix = "[cyan]└[/cyan]" if is_last else "[cyan]├[/cyan]"
 
             # Threat indicator
-            if threat_score >= 0.7:
-                threat_icon = "[bold red]![/bold red]"
-                threat_color = "bold red"
-            elif threat_score >= 0.5:
-                threat_icon = "[bold yellow]![/bold yellow]"
-                threat_color = "bold yellow"
-            elif threat_score >= 0.3:
-                threat_icon = "[yellow]~[/yellow]"
-                threat_color = "yellow"
-            else:
-                threat_icon = "[green].[/green]"
-                threat_color = "green"
+            threat_icon, threat_color = self._get_threat_style(threat_score)
 
-            # Format MAC address (show full MAC)
-            mac_display = src_mac if src_mac != 'Unknown' else 'Unknown MAC'
+            # Device line
+            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:12s}[/{threat_color}]")
+            lines.append(f"[dim]│  MAC: {src_mac}[/dim]")
+            if src_ip:
+                lines.append(f"[dim]│  IP:  [/dim][cyan]{src_ip}[/cyan]")
 
-            # Device line with MAC and vendor
-            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:14s}[/{threat_color}]")
-            lines.append(f"[dim]│   MAC: {mac_display}[/dim]")
-
-            # Show top destination flows with IP, port, and protocol
+            # Show top 2 destination flows
             destinations = sorted(
                 flow_data.get('destinations', {}).items(),
                 key=lambda x: float(x[1].get('threat', 0) or 0),
                 reverse=True
-            )[:2]  # Top 2 destinations per device
+            )[:2]
 
             for dest_idx, (dest_key, data) in enumerate(destinations):
                 threat = float(data.get('threat', 0) or 0)
                 count = data.get('count', 0)
                 protocol = data.get('protocol', 'TCP')
-                org = (data.get('org') or '')[:10]
 
-                # Parse dest_key which is IP:port format
+                # Parse IP:port
                 if ':' in dest_key:
                     parts = dest_key.rsplit(':', 1)
                     dst_ip = parts[0][:15]
@@ -1002,168 +1021,71 @@ class NetworkTopologyPanel(Static):
                     dst_ip = dest_key[:15]
                     dst_port = '?'
 
-                # Flow type indicator
-                if protocol == 'UDP':
-                    proto_icon = "[magenta]U[/magenta]"
-                elif protocol == 'TCP':
-                    proto_icon = "[cyan]T[/cyan]"
-                else:
-                    proto_icon = "[dim]?[/dim]"
+                # Protocol indicator
+                proto = "U" if protocol == "UDP" else "T"
+                proto_color = "magenta" if protocol == "UDP" else "cyan"
 
-                # Threat color for destination
-                if threat >= 0.7:
-                    dest_color = "bold red"
-                elif threat >= 0.5:
-                    dest_color = "bold yellow"
-                else:
-                    dest_color = "green"
+                _, dest_color = self._get_threat_style(threat)
 
                 is_dest_last = dest_idx == len(destinations) - 1
-                flow_prefix = "│   └─" if is_dest_last else "│   ├─"
+                flow_prefix = "│  └─" if is_dest_last else "│  ├─"
 
-                # Show flow: Protocol, IP:Port, count, org
-                lines.append(f"[dim]{flow_prefix}[/dim] {proto_icon} [{dest_color}]{dst_ip}:{dst_port}[/{dest_color}] x{count} [dim]{org}[/dim]")
+                lines.append(f"[dim]{flow_prefix}[/dim] [{proto_color}]{proto}[/{proto_color}] [{dest_color}]{dst_ip}:{dst_port}[/{dest_color}] x{count}")
 
         lines.append("")
-        lines.append("[bold cyan]═══════════════════════════════════════════[/bold cyan]")
+        lines.append("[dim]T=TCP U=UDP | !=Crit ~=Med .=Low[/dim]")
 
-        # Legend
-        lines.append("[dim]T=TCP U=UDP | !=High ~=Med .=Low threat[/dim]")
+    def _render_devices_only(self, lines: list):
+        """Render device inventory without flow details"""
+        total_flows = sum(d.get('connection_count', 0) for d in self.devices)
+        high_risk = len([d for d in self.devices if float(d.get('threat_score', 0) or 0) >= 0.5])
 
-        content = "\n".join(lines)
-        return Panel(
-            content,
-            title="[bold cyan]NETWORK TOPOLOGY[/bold cyan]",
-            border_style="cyan"
-        )
-
-
-class DeviceDiscoveryPanel(Static):
-    """
-    Device mode specific: Discovered devices on network
-    Shows MAC addresses, IP addresses, vendors, flow types, and activity summary
-    """
-
-    DEFAULT_CSS = """
-    DeviceDiscoveryPanel {
-        height: 100%;
-        width: 100%;
-        padding: 1;
-        overflow: auto;
-    }
-    """
-
-    devices = reactive(list)
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.devices = []
-
-    def watch_devices(self, new_devices: list) -> None:
-        """Update devices when data changes"""
-        self.devices = new_devices
-        self.refresh()
-
-    def render(self):
-        """Render discovered devices with full network details"""
-        if not self.devices:
-            return Panel(
-                "[dim]Scanning for connected devices...[/dim]\n\n"
-                "[cyan]Waiting for network activity...[/cyan]\n"
-                "[dim]Device MAC addresses, IPs, and\n"
-                "connection types will appear here.[/dim]",
-                title="[bold cyan]DEVICE DISCOVERY[/bold cyan]",
-                border_style="cyan"
-            )
-
-        lines = []
-        lines.append("[bold cyan]┌─────────────────────────────────────────┐[/bold cyan]")
-        lines.append("[bold cyan]│         DEVICE DISCOVERY                │[/bold cyan]")
-        lines.append("[bold cyan]└─────────────────────────────────────────┘[/bold cyan]")
+        lines.append(f"[dim]Devices: {len(self.devices)} | Flows: {total_flows} | High Risk: {high_risk}[/dim]")
         lines.append("")
 
-        # Sort by threat score
         sorted_devices = sorted(
             self.devices,
             key=lambda d: float(d.get('threat_score', 0) or 0),
             reverse=True
-        )[:8]  # Show top 8 for space
-
-        # Statistics summary
-        total_connections = sum(d.get('connection_count', 0) for d in self.devices)
-        high_threat_devices = len([d for d in self.devices if float(d.get('threat_score', 0) or 0) >= 0.5])
-
-        lines.append(f"[dim]Devices: {len(self.devices)} | Flows: {total_connections} | High Risk: {high_threat_devices}[/dim]")
-        lines.append("")
-
-        lines.append("[bold]DISCOVERED DEVICES:[/bold]")
-        lines.append("")
+        )[:6]
 
         for idx, device in enumerate(sorted_devices):
             mac = device.get('mac', 'Unknown')
-            vendor = (device.get('vendor') or 'Unknown')[:14]
+            vendor = (device.get('vendor') or 'Unknown')[:12]
             threat = float(device.get('threat_score', 0) or 0)
             conn_count = device.get('connection_count', 0)
 
-            # Get IP addresses if available
             ip_addresses = device.get('ip_addresses', [])
-            primary_ip = ip_addresses[0] if ip_addresses else 'No IP'
+            primary_ip = ip_addresses[0] if ip_addresses else ''
 
             is_last = idx == len(sorted_devices) - 1
             prefix = "[cyan]└[/cyan]" if is_last else "[cyan]├[/cyan]"
 
-            # Threat indicator with color
-            if threat >= 0.7:
-                threat_icon = "[bold red]![/bold red]"
-                threat_color = "bold red"
-                threat_label = "CRIT"
-            elif threat >= 0.5:
-                threat_icon = "[bold yellow]![/bold yellow]"
-                threat_color = "bold yellow"
-                threat_label = "HIGH"
-            elif threat >= 0.3:
-                threat_icon = "[yellow]~[/yellow]"
-                threat_color = "yellow"
-                threat_label = "MED"
-            else:
-                threat_icon = "[green].[/green]"
-                threat_color = "green"
-                threat_label = "LOW"
+            threat_icon, threat_color = self._get_threat_style(threat)
 
-            # Device header with vendor and threat
-            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:14s}[/{threat_color}] [{threat_label}]")
-
-            # MAC address line
-            lines.append(f"[dim]│   MAC: {mac}[/dim]")
-
-            # IP address line
-            if primary_ip and primary_ip != 'No IP':
-                lines.append(f"[dim]│   IP:  [/dim][cyan]{primary_ip}[/cyan]")
-
-            # Flow count and signal type
-            # Determine predominant signal type based on packet count or connection patterns
-            signal_type = "TCP/UDP"  # Default
-            if device.get('packet_count', 0) > 0:
-                signal_type = "Active"
-            elif conn_count > 0:
-                signal_type = "Connected"
-            else:
-                signal_type = "Passive"
-
-            lines.append(f"[dim]│   Flows: {conn_count} | Signal: {signal_type}[/dim]")
+            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:12s}[/{threat_color}] {conn_count} flows")
+            lines.append(f"[dim]│  MAC: {mac}[/dim]")
+            if primary_ip:
+                lines.append(f"[dim]│  IP:  [/dim][cyan]{primary_ip}[/cyan]")
 
         lines.append("")
-        lines.append("[bold cyan]═══════════════════════════════════════════[/bold cyan]")
+        lines.append("[dim]!=Crit ~=Med .=Low threat[/dim]")
 
-        # Legend
-        lines.append("[dim]!=High Risk  ~=Medium  .=Low | Signal types shown[/dim]")
+    def _get_threat_style(self, threat_score: float) -> tuple:
+        """Return (icon, color) based on threat score"""
+        if threat_score >= 0.7:
+            return "[bold red]![/bold red]", "bold red"
+        elif threat_score >= 0.5:
+            return "[bold yellow]![/bold yellow]", "bold yellow"
+        elif threat_score >= 0.3:
+            return "[yellow]~[/yellow]", "yellow"
+        else:
+            return "[green].[/green]", "green"
 
-        content = "\n".join(lines)
-        return Panel(
-            content,
-            title="[bold cyan]DEVICE DISCOVERY[/bold cyan]",
-            border_style="cyan"
-        )
+
+# Keep aliases for backwards compatibility
+NetworkTopologyPanel = NetworkDevicePanel
+DeviceDiscoveryPanel = NetworkDevicePanel
 
 
 class ConnectionDetailModal(Static):
@@ -1564,12 +1486,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 )
                 yield self.connection_table
 
-                # Mode-specific panel
-                if self.mode == "network":
-                    self.mode_specific_panel = NetworkTopologyPanel(id="bottom_right")
-                else:
-                    self.mode_specific_panel = DeviceDiscoveryPanel(id="bottom_right")
-
+                # Unified device panel (adapts based on available data)
+                self.mode_specific_panel = NetworkDevicePanel(mode=self.mode, id="bottom_right")
                 yield self.mode_specific_panel
 
                 # Anomaly panel (hidden by default, toggle with 'a')
@@ -1657,15 +1575,12 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                     'heatmap': self._calculate_heatmap(connections),
                 }
 
-            # Mode-specific updates
-            if self.mode == "network":
+            # Update unified device panel with both topology and device data
+            if self.mode_specific_panel:
                 devices = self.data_manager.get_devices() if hasattr(self.data_manager, 'get_devices') else []
-                if self.mode_specific_panel and isinstance(self.mode_specific_panel, NetworkTopologyPanel):
-                    self.mode_specific_panel.topology_data = self._build_topology(connections, devices)
-            else:
-                devices = self.data_manager.get_devices() if hasattr(self.data_manager, 'get_devices') else []
-                if self.mode_specific_panel and isinstance(self.mode_specific_panel, DeviceDiscoveryPanel):
-                    self.mode_specific_panel.devices = devices
+                # Always provide topology data (shows flows) and device data
+                self.mode_specific_panel.topology_data = self._build_topology(connections, devices)
+                self.mode_specific_panel.devices = devices
 
             # Fetch and update anomalies
             if self.anomaly_panel:
