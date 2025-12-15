@@ -69,6 +69,16 @@ wcwidth>=0.2.13
 colorama>=0.4.6
 
 # ============================================================================
+# ADVANCED TUI VISUALIZATION (Dashboard Evolution)
+# ============================================================================
+
+# Plotext integration for Textual - terminal charts and graphs
+textual-plotext>=1.0.0
+
+# Terminal heatmaps and scatter plots
+plotille>=5.0.0
+
+# ============================================================================
 # DEVELOPMENT TOOLS (Optional - for development/testing)
 # ============================================================================
 

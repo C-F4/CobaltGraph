@@ -13,6 +13,7 @@ Features:
 
 import logging
 import time
+import traceback
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -130,7 +131,29 @@ class AlertEngine:
             "rate_limited": 0,
         }
 
+        # Callback functions for alert notifications (Dashboard Evolution)
+        # Each callback receives: (alert: Alert) -> None
+        self._alert_callbacks: List[callable] = []
+
         logger.info("Alert Engine initialized with %d rules", len(self._rules))
+
+    def register_alert_callback(self, callback: callable) -> None:
+        """
+        Register a callback to be called when alerts are generated.
+        Used to integrate with dashboard toast notifications.
+
+        Args:
+            callback: Function that takes an Alert object as argument
+        """
+        with self._lock:
+            self._alert_callbacks.append(callback)
+        logger.debug(f"Alert callback registered: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}")
+
+    def unregister_alert_callback(self, callback: callable) -> None:
+        """Remove a previously registered callback."""
+        with self._lock:
+            if callback in self._alert_callbacks:
+                self._alert_callbacks.remove(callback)
 
     def _initialize_rules(self) -> List[AlertRule]:
         """Initialize alert detection rules"""
@@ -329,7 +352,11 @@ class AlertEngine:
                     alerts.append(alert)
 
             except Exception as e:
-                logger.error(f"Error evaluating rule {rule.name}: {e}")
+                logger.error(
+                    f"Error evaluating rule {rule.name}: {e}\n"
+                    f"  Connection: {connection.get('dst_ip')}:{connection.get('dst_port')}\n"
+                    f"  Traceback: {traceback.format_exc()}"
+                )
 
         return alerts
 
@@ -442,6 +469,17 @@ class AlertEngine:
         if self.db:
             self._log_alert_to_db(alert)
 
+        # Call registered callbacks for toast notifications (Dashboard Evolution)
+        for callback in self._alert_callbacks:
+            try:
+                callback(alert)
+            except Exception as e:
+                logger.error(
+                    f"Alert callback failed: {e}\n"
+                    f"  Alert: [{alert.severity.value}] {alert.title}\n"
+                    f"  Traceback: {traceback.format_exc()}"
+                )
+
         logger.info(f"Alert generated: [{alert.severity.value}] {alert.title}")
 
         return alert
@@ -463,7 +501,10 @@ class AlertEngine:
                 metadata=json.dumps(alert.metadata),
             )
         except Exception as e:
-            logger.error(f"Failed to log alert to database: {e}")
+            logger.error(
+                f"Failed to log alert to database: {e}\n"
+                f"  Traceback: {traceback.format_exc()}"
+            )
 
     def generate_smart_alerts(
         self,

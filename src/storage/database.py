@@ -49,7 +49,10 @@ class Database:
         "threat_score", "device_vendor", "protocol",
         "dst_asn", "dst_asn_name", "dst_org_type", "dst_cidr",
         "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score",
-        "confidence", "high_uncertainty", "scoring_method"
+        "confidence", "high_uncertainty", "scoring_method",
+        # Individual scorer results (Phase 1 - Dashboard Evolution)
+        "score_statistical", "score_rule_based", "score_ml_based", "score_organization",
+        "anomaly_score", "score_spread"
     ]
 
     def __init__(self, db_path: str = "database/cobaltgraph.db"):
@@ -146,7 +149,14 @@ class Database:
                         org_trust_score REAL,
                         confidence REAL DEFAULT 0,
                         high_uncertainty INTEGER DEFAULT 0,
-                        scoring_method TEXT DEFAULT 'consensus'
+                        scoring_method TEXT DEFAULT 'consensus',
+                        -- Individual scorer results (Dashboard Evolution)
+                        score_statistical REAL,
+                        score_rule_based REAL,
+                        score_ml_based REAL,
+                        score_organization REAL,
+                        anomaly_score REAL,
+                        score_spread REAL
                     )
                 """)
 
@@ -268,6 +278,13 @@ class Database:
             ("confidence", "REAL DEFAULT 0"),
             ("high_uncertainty", "INTEGER DEFAULT 0"),
             ("scoring_method", "TEXT DEFAULT 'consensus'"),
+            # Individual scorer results (Dashboard Evolution)
+            ("score_statistical", "REAL"),
+            ("score_rule_based", "REAL"),
+            ("score_ml_based", "REAL"),
+            ("score_organization", "REAL"),
+            ("anomaly_score", "REAL"),
+            ("score_spread", "REAL"),
         ]
 
         cursor = self.conn.execute("PRAGMA table_info(connections)")
@@ -438,6 +455,13 @@ class Database:
             conn_data.get("confidence", 0),
             1 if conn_data.get("high_uncertainty") else 0,
             conn_data.get("scoring_method", "consensus"),
+            # Individual scorer results (Phase 1 - Dashboard Evolution)
+            conn_data.get("score_statistical"),
+            conn_data.get("score_rule_based"),
+            conn_data.get("score_ml_based"),
+            conn_data.get("score_organization"),
+            conn_data.get("anomaly_score"),
+            conn_data.get("score_spread"),
         )
 
     def _flush_batch(self):

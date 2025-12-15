@@ -24,6 +24,7 @@ import signal
 import sys
 import threading
 import time
+import traceback
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -539,7 +540,11 @@ class DataPipeline:
             logger.debug(f"Device event: {packet_type} from {mac} ({vendor or 'Unknown'})")
 
         except Exception as e:
-            logger.debug(f"Device event processing error: {e}")
+            logger.debug(
+                f"Device event processing error: {e}\n"
+                f"  MAC: {mac}, IP: {ip}, Packet: {packet_type}\n"
+                f"  Traceback: {traceback.format_exc()}"
+            )
 
     def _process_connection(self, raw_conn: Dict) -> Optional[ConnectionEvent]:
         """
@@ -739,6 +744,13 @@ class DataPipeline:
                     "confidence": confidence,
                     "high_uncertainty": high_uncertainty,
                     "scoring_method": scoring_method,
+                    # Individual scorer results (Dashboard Evolution)
+                    "score_statistical": consensus_details.get("score_statistical"),
+                    "score_rule_based": consensus_details.get("score_rule_based"),
+                    "score_ml_based": consensus_details.get("score_ml_based"),
+                    "score_organization": consensus_details.get("score_organization"),
+                    "score_spread": consensus_details.get("score_spread"),
+                    "anomaly_score": anomaly_score if anomaly_score > 0 else None,
                 })
             except Exception as e:
                 logger.debug(f"Database storage failed: {e}")

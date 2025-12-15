@@ -52,6 +52,19 @@ class Connection:
     # Trust scoring
     org_trust_score: Optional[float] = None # Organization trust (0.0-1.0)
 
+    # Consensus metadata
+    confidence: Optional[float] = None      # Consensus confidence (0.0-1.0)
+    high_uncertainty: bool = False          # Scorers disagreed significantly
+    scoring_method: str = "consensus"       # Method used for final score
+
+    # Individual scorer results (Dashboard Evolution)
+    score_statistical: Optional[float] = None   # Statistical scorer result
+    score_rule_based: Optional[float] = None    # Rule-based scorer result
+    score_ml_based: Optional[float] = None      # ML model scorer result
+    score_organization: Optional[float] = None  # Organization scorer result
+    anomaly_score: Optional[float] = None       # Anomaly detection score
+    score_spread: Optional[float] = None        # Max - min of scorer votes
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
         return {
@@ -81,6 +94,17 @@ class Connection:
             "os_fingerprint": self.os_fingerprint,
             # Trust
             "org_trust_score": self.org_trust_score,
+            # Consensus metadata
+            "confidence": self.confidence,
+            "high_uncertainty": self.high_uncertainty,
+            "scoring_method": self.scoring_method,
+            # Individual scorer results
+            "score_statistical": self.score_statistical,
+            "score_rule_based": self.score_rule_based,
+            "score_ml_based": self.score_ml_based,
+            "score_organization": self.score_organization,
+            "anomaly_score": self.anomaly_score,
+            "score_spread": self.score_spread,
         }
 
 

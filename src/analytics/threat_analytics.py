@@ -18,6 +18,7 @@ Features:
 
 import logging
 import time
+import traceback
 from collections import defaultdict
 from dataclasses import dataclass, field
 from threading import Lock
@@ -475,7 +476,14 @@ class ConnectionGraph:
     def get_graph_metrics(self) -> Dict:
         """Get overall graph metrics"""
         if len(self.graph) == 0:
-            return {"nodes": 0, "edges": 0}
+            return {
+                "nodes": 0,
+                "edges": 0,
+                "density": 0.0,
+                "avg_degree": 0.0,
+                "unique_asns": 0,
+                "unique_orgs": 0,
+            }
 
         return {
             "nodes": self.graph.number_of_nodes(),
@@ -483,7 +491,7 @@ class ConnectionGraph:
             "density": nx.density(self.graph),
             "avg_degree": sum(dict(self.graph.degree()).values()) / max(len(self.graph), 1),
             "unique_asns": len(self.asn_stats),
-            "unique_orgs": self.org_graph.number_of_nodes() - 1,  # Exclude "local"
+            "unique_orgs": max(0, self.org_graph.number_of_nodes() - 1),  # Exclude "local"
         }
 
 
@@ -525,6 +533,8 @@ class ThreatAnalytics:
         hop_count: int = 0,
         geo_risk: float = 0.5,
         timestamp: Optional[float] = None,
+        dst_country: Optional[str] = None,
+        org_trust_score: Optional[float] = None,
     ) -> Dict:
         """
         Process a new connection through the analytics pipeline
@@ -535,6 +545,9 @@ class ThreatAnalytics:
         - Trend analysis
         """
         timestamp = timestamp or time.time()
+
+        # Use org_trust_score if provided, otherwise fall back to org_trust
+        effective_org_trust = org_trust_score if org_trust_score is not None else org_trust
 
         # Add to graph
         self.connection_graph.add_connection(
@@ -561,11 +574,11 @@ class ThreatAnalytics:
                 confidence=confidence,
                 connection_count=1,
                 unique_ports=1,
-                org_trust=org_trust,
+                org_trust=effective_org_trust,
                 hop_distance=hop_count,
                 geo_risk=geo_risk,
                 time_pattern=0.5,
-                asn_reputation=org_trust,
+                asn_reputation=effective_org_trust,
             )
             self.threat_vectors[dst_ip] = tv
 
