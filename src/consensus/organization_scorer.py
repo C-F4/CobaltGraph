@@ -94,7 +94,7 @@ class OrganizationScorer(ThreatScorer):
         Args:
             asn_service: Optional ASNLookup service instance (creates one if None)
         """
-        super().__init__(scorer_id="organization_based")
+        super().__init__(scorer_id="organization")
 
         # Initialize ASN lookup service
         if ASN_AVAILABLE:

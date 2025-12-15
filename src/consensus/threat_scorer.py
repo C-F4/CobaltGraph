@@ -17,6 +17,7 @@ Scorers:
 
 import logging
 import time
+import traceback
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from functools import lru_cache
@@ -192,7 +193,10 @@ class ConsensusThreatScorer:
             )
 
         except Exception as e:
-            logger.debug(f"ASN enrichment failed for {dst_ip}: {e}")
+            logger.debug(
+                f"ASN enrichment failed for {dst_ip}: {e}\n"
+                f"  Traceback: {traceback.format_exc()}"
+            )
 
         return enrichment
 
@@ -233,7 +237,10 @@ class ConsensusThreatScorer:
                 connection_metadata=connection_metadata,
             )
         except Exception as e:
-            logger.error(f"Scorer {scorer.scorer_id} failed for {dst_ip}: {e}")
+            logger.error(
+                f"Scorer {scorer.scorer_id} failed for {dst_ip}: {e}\n"
+                f"  Traceback: {traceback.format_exc()}"
+            )
             return None
 
     def check_ip(
@@ -291,7 +298,10 @@ class ConsensusThreatScorer:
             except FuturesTimeoutError:
                 logger.warning(f"Scorer {scorer_id} timed out for {dst_ip}")
             except Exception as e:
-                logger.error(f"Scorer {scorer_id} failed: {e}")
+                logger.error(
+                    f"Scorer {scorer_id} failed for {dst_ip}: {e}\n"
+                    f"  Traceback: {traceback.format_exc()}"
+                )
 
         # Track parallel speedup
         elapsed = time.time() - start_time
@@ -369,6 +379,8 @@ class ConsensusThreatScorer:
 
         # Format return value to match ip_reputation.check_ip() interface
         threat_score = consensus_result.consensus_score
+        metadata = consensus_result.metadata
+
         details = {
             "source": "consensus",
             "is_malicious": threat_score >= 0.7,
@@ -378,7 +390,7 @@ class ConsensusThreatScorer:
             "votes": consensus_result.votes,
             "outliers": consensus_result.outliers,
             "method": consensus_result.method,
-            "metadata": consensus_result.metadata,
+            "metadata": metadata,
             # ASN/Organization enrichment for all UIs
             "asn_enrichment": asn_enrichment,
             "dst_asn": asn_enrichment.get("dst_asn"),
@@ -391,6 +403,13 @@ class ConsensusThreatScorer:
             "ttl_initial": asn_enrichment.get("ttl_initial"),
             "os_fingerprint": asn_enrichment.get("os_fingerprint"),
             "org_trust_score": asn_enrichment.get("org_trust_score"),
+            # Individual scorer results (Dashboard Evolution)
+            "score_statistical": metadata.get("score_statistical"),
+            "score_rule_based": metadata.get("score_rule_based"),
+            "score_ml_based": metadata.get("score_ml_based"),
+            "score_organization": metadata.get("score_organization"),
+            "score_spread": metadata.get("score_spread"),
+            "scoring_method": consensus_result.method,
         }
 
         # Cache the result for future lookups

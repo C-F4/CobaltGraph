@@ -25,6 +25,7 @@ from rich.text import Text
 from textual.widgets import Static, DataTable
 from textual.reactive import reactive
 from textual.app import ComposeResult
+from textual.message import Message
 
 logger = logging.getLogger(__name__)
 
@@ -497,6 +498,171 @@ class TemporalTrendsPanel(Static):
 ThreatRadarGraph._build_sparkline = TemporalTrendsPanel._build_sparkline
 
 
+class ConsensusBreakdownPanel(Static):
+    """
+    Dashboard panel showing compact 4-scorer consensus breakdown.
+    Shows individual scorer bars at-a-glance with agreement indicator.
+
+    Replaces TemporalTrendsPanel in the top-center position for
+    enhanced consensus visibility.
+    """
+
+    DEFAULT_CSS = """
+    ConsensusBreakdownPanel {
+        height: 100%;
+        width: 100%;
+    }
+    """
+
+    consensus_data = reactive(dict)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.consensus_data = {
+            'last_consensus': None,
+            'scorer_history': {
+                'statistical': [],
+                'rule_based': [],
+                'ml_based': [],
+                'organization': [],
+            },
+            'agreement_rate': 1.0,
+            'total_assessments': 0,
+        }
+
+    def watch_consensus_data(self, new_data: dict) -> None:
+        """Trigger re-render when consensus data changes"""
+        self.refresh()
+
+    def update_from_connection(self, conn: Dict) -> None:
+        """Update consensus display from a connection record"""
+        score_statistical = conn.get('score_statistical')
+        score_rule_based = conn.get('score_rule_based')
+        score_ml_based = conn.get('score_ml_based')
+        score_organization = conn.get('score_organization')
+        score_spread = conn.get('score_spread')
+        high_uncertainty = conn.get('high_uncertainty', False)
+
+        self.consensus_data = {
+            'last_consensus': {
+                'statistical': score_statistical,
+                'rule_based': score_rule_based,
+                'ml_based': score_ml_based,
+                'organization': score_organization,
+                'spread': score_spread,
+                'high_uncertainty': high_uncertainty,
+                'final_score': conn.get('threat_score', 0),
+                'confidence': conn.get('confidence', 0),
+            },
+            'scorer_history': self.consensus_data.get('scorer_history', {}),
+            'agreement_rate': 1.0 - (score_spread or 0),
+            'total_assessments': self.consensus_data.get('total_assessments', 0) + 1,
+        }
+
+    def render(self):
+        """Render compact 4-scorer breakdown with bars"""
+        last = self.consensus_data.get('last_consensus')
+        agreement_rate = self.consensus_data.get('agreement_rate', 1.0)
+        total = self.consensus_data.get('total_assessments', 0)
+
+        content_lines = []
+        content_lines.append("[bold cyan]─── SCORER CONSENSUS ───[/bold cyan]")
+        content_lines.append("")
+
+        # Agreement indicator
+        if last:
+            spread = last.get('spread') or 0
+            high_uncertainty = last.get('high_uncertainty', False)
+
+            if high_uncertainty:
+                agreement_indicator = "[bold yellow]⚠ DISAGREEMENT[/bold yellow]"
+            elif spread < 0.15:
+                agreement_indicator = "[bold green]✓ STRONG AGREEMENT[/bold green]"
+            elif spread < 0.25:
+                agreement_indicator = "[green]◐ MODERATE[/green]"
+            else:
+                agreement_indicator = "[yellow]◐ WEAK[/yellow]"
+
+            content_lines.append(f"Status: {agreement_indicator}")
+            content_lines.append("")
+
+            # Final score summary
+            final = last.get('final_score', 0)
+            confidence = last.get('confidence', 0)
+
+            if final >= 0.7:
+                final_color = "red"
+            elif final >= 0.5:
+                final_color = "yellow"
+            else:
+                final_color = "green"
+
+            content_lines.append(f"Final: [{final_color}]{final:.2f}[/{final_color}] | Conf: {confidence:.2f}")
+            content_lines.append("")
+
+            # 4 Scorer compact bars
+            content_lines.append("[bold]Scorer Breakdown[/bold]")
+
+            scorers = [
+                ("STAT", last.get('statistical'), "cyan"),
+                ("RULE", last.get('rule_based'), "magenta"),
+                ("ML  ", last.get('ml_based'), "blue"),
+                ("ORG ", last.get('organization'), "yellow"),
+            ]
+
+            bar_width = 15
+            for name, score, base_color in scorers:
+                if score is None:
+                    content_lines.append(f"{name} [dim]{'─' * bar_width}[/dim] N/A")
+                    continue
+
+                score = float(score)
+                filled = int(score * bar_width)
+
+                # Color based on score level
+                if score >= 0.7:
+                    color = "red"
+                elif score >= 0.5:
+                    color = "yellow"
+                else:
+                    color = "green"
+
+                bar = f"[{color}]{'█' * filled}[/{color}][dim]{'░' * (bar_width - filled)}[/dim]"
+                content_lines.append(f"{name} {bar} [{color}]{score:.2f}[/{color}]")
+
+            content_lines.append("")
+
+            # Spread indicator
+            if spread is not None:
+                spread_bar_width = 20
+                spread_filled = int(spread * spread_bar_width * 2)  # Scale for visibility
+                spread_filled = min(spread_bar_width, spread_filled)
+
+                spread_color = "green" if spread < 0.15 else "yellow" if spread < 0.25 else "red"
+                spread_bar = f"[{spread_color}]{'█' * spread_filled}[/{spread_color}][dim]{'░' * (spread_bar_width - spread_filled)}[/dim]"
+                content_lines.append(f"[dim]Spread:[/dim] {spread_bar} [{spread_color}]{spread:.3f}[/{spread_color}]")
+
+        else:
+            content_lines.append("[dim]Awaiting consensus data...[/dim]")
+            content_lines.append("")
+            content_lines.append("[dim]Scorers:[/dim]")
+            content_lines.append("  STAT  Rule-based statistical")
+            content_lines.append("  RULE  Pattern matching")
+            content_lines.append("  ML    Machine learning")
+            content_lines.append("  ORG   Organization trust")
+
+        content_lines.append("")
+        content_lines.append(f"[dim]Assessments: {total}[/dim]")
+
+        content = "\n".join(content_lines)
+
+        return Panel(
+            content,
+            title="[bold cyan]Consensus[/bold cyan]",
+            border_style="cyan"
+        )
+
+
 class GeographicAlertsPanel(Static):
     """
     Top-right panel: Geographic alerts and heatmap
@@ -633,7 +799,10 @@ class OrganizationIntelPanel(Static):
 class ConnectionTablePanel(Static):
     """
     Bottom-center panel: Primary connection table
-    Shows all connections with full enrichment data
+    Shows all connections with full enrichment data.
+
+    Click any row to open the Connection Intelligence Modal
+    with full details about that connection.
     """
 
     DEFAULT_CSS = """
@@ -646,6 +815,14 @@ class ConnectionTablePanel(Static):
     ConnectionTablePanel DataTable {
         background: $surface;
     }
+
+    ConnectionTablePanel DataTable > .datatable--cursor {
+        background: $primary 30%;
+    }
+
+    ConnectionTablePanel DataTable > .datatable--hover {
+        background: $primary 20%;
+    }
     """
 
     connections = reactive(list)
@@ -654,18 +831,20 @@ class ConnectionTablePanel(Static):
         super().__init__(**kwargs)
         self.table = None
         self.connections = []
+        self._row_to_connection: Dict[Any, Dict] = {}  # Map row keys to connection data
 
     def compose(self) -> ComposeResult:
-        """Create data table"""
-        self.table = DataTable(id="connection_table")
+        """Create data table with cursor enabled for selection"""
+        self.table = DataTable(id="connection_table", cursor_type="row")
 
-        # Add columns
+        # Add columns - include confidence indicator
         self.table.add_column("Time", key="time", width=8)
         self.table.add_column("Dst IP", key="dst_ip", width=15)
         self.table.add_column("Port", key="port", width=5)
         self.table.add_column("Org", key="org", width=12)
         self.table.add_column("Type", key="org_type", width=8)
         self.table.add_column("Threat", key="threat", width=6)
+        self.table.add_column("", key="indicator", width=3)  # Status indicator
 
         yield self.table
 
@@ -676,12 +855,15 @@ class ConnectionTablePanel(Static):
 
         self.connections = new_connections
         self.table.clear()
+        self._row_to_connection.clear()
 
-        for conn in self.connections[:50]:
+        for idx, conn in enumerate(self.connections[:50]):
             try:
                 time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M:%S")
                 threat = float(conn.get('threat_score', 0) or 0)
+                confidence = float(conn.get('confidence', 0) or 0)
                 org_type = (conn.get('dst_org_type') or 'unknown').lower()
+                high_uncertainty = conn.get('high_uncertainty', False)
 
                 # Color based on threat
                 if threat >= 0.7:
@@ -691,16 +873,84 @@ class ConnectionTablePanel(Static):
                 else:
                     threat_color = "green"
 
-                self.table.add_row(
+                # Status indicator
+                if high_uncertainty:
+                    indicator = "[yellow]⚠[/yellow]"  # Uncertainty warning
+                elif threat >= 0.7:
+                    indicator = "[red]●[/red]"  # Critical
+                elif threat >= 0.5:
+                    indicator = "[yellow]●[/yellow]"  # Warning
+                elif confidence >= 0.8:
+                    indicator = "[green]●[/green]"  # High confidence clean
+                else:
+                    indicator = "[dim]○[/dim]"  # Normal
+
+                # Add row and store the connection data mapping
+                row_key = self.table.add_row(
                     f"[dim]{time_str}[/]",
                     f"[cyan]{conn.get('dst_ip', 'Unknown')[:15]}[/]",
                     f"[magenta]{conn.get('dst_port', '-')}[/]",
                     f"[white]{(conn.get('dst_org') or 'Unknown')[:12]}[/]",
                     f"[dim]{org_type:>8}[/]",
                     f"[{threat_color}]{threat:.2f}[/{threat_color}]",
+                    indicator,
                 )
+                self._row_to_connection[row_key] = conn
+
             except Exception as e:
                 logger.debug(f"Failed to add row: {e}")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """
+        Handle row selection - post message to parent to open modal.
+        The parent dashboard will handle opening the ConnectionIntelligenceModal.
+        """
+        row_key = event.row_key
+        connection_data = self._row_to_connection.get(row_key)
+
+        if connection_data:
+            # Post a custom message to the app to open the modal
+            self.post_message(ConnectionSelected(connection_data))
+            logger.debug(f"Row selected: {connection_data.get('dst_ip')}")
+
+
+class ConnectionSelected(Message):
+    """Message posted when a connection row is selected in the table."""
+
+    def __init__(self, connection_data: Dict[str, Any]):
+        super().__init__()
+        self.connection_data = connection_data
+
+
+class ThreatAlert(Message):
+    """
+    Message posted when a threat alert should be shown as a toast notification.
+    Used by the alert engine to surface critical events to the user.
+    """
+
+    # Severity levels matching Textual's notify severity
+    SEVERITY_CRITICAL = "error"      # Red toast
+    SEVERITY_WARNING = "warning"     # Yellow toast
+    SEVERITY_INFO = "information"    # Blue toast
+
+    def __init__(
+        self,
+        title: str,
+        message: str,
+        severity: str = "information",
+        dst_ip: Optional[str] = None,
+        rule_matched: Optional[str] = None,
+        threat_score: Optional[float] = None,
+        timeout: float = 5.0,
+    ):
+        super().__init__()
+        self.title = title
+        self.message = message
+        self.severity = severity
+        self.dst_ip = dst_ip
+        self.rule_matched = rule_matched
+        self.threat_score = threat_score
+        self.timeout = timeout
 
 
 class ThreatGlobePanel(Static):

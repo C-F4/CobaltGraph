@@ -201,8 +201,8 @@ class DeviceMonitor:
 
             # Parse local address for src_ip
             if local_addr.startswith("["):
-                match = re.match(r'\[(.+)\]:(\d+)', local_addr)
-                src_ip = match.group(1) if match else "local"
+                local_match = re.match(r'\[(.+)\]:(\d+)', local_addr)
+                src_ip = local_match.group(1) if local_match else "local"
             else:
                 src_ip = local_addr.rsplit(":", 1)[0] if ":" in local_addr else "local"
 

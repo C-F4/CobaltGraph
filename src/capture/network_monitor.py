@@ -178,24 +178,60 @@ class NetworkMonitor:
         except Exception as e:
             print(f"[Network Monitor] Interface detection failed: {e}", file=sys.stderr)
 
-        # Fallback to common interface names
-        for iface in ["eth0", "ens33", "enp0s3", "wlan0", "wlp2s0"]:
-            try:
-                # Check if interface exists
-                result = subprocess.run(
-                    ["ip", "link", "show", iface],
-                    capture_output=True,
-                    timeout=1,
-                    check=False,  # Don't raise on non-zero exit, we check returncode
-                )
-                if result.returncode == 0:
-                    print(f"[Network Monitor] Using interface: {iface}", file=sys.stderr)
-                    return iface
-            except:
-                continue
+        # Fallback: enumerate all interfaces dynamically (no hardcoded names)
+        try:
+            result = subprocess.run(
+                ["ip", "-o", "link", "show", "up"],  # Only UP interfaces
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                candidates = []
+                for line in result.stdout.splitlines():
+                    # Format: "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> ..."
+                    iface_match = re.search(r'^\d+:\s+(\S+?)[@:]', line)
+                    if iface_match:
+                        iface = iface_match.group(1)
+                        # Skip virtual/container interfaces
+                        skip_prefixes = ("lo", "veth", "docker", "br-", "virbr", "vnet", "tun", "tap")
+                        if any(iface.startswith(p) for p in skip_prefixes):
+                            continue
+                        # Check if interface has BROADCAST capability (physical interfaces)
+                        if "BROADCAST" in line and "LOOPBACK" not in line:
+                            candidates.append(iface)
 
-        # Ultimate fallback
-        print("[Network Monitor] WARNING: Using fallback interface 'eth0'", file=sys.stderr)
+                # Return first valid physical interface found
+                if candidates:
+                    interface = candidates[0]
+                    print(f"[Network Monitor] Using interface: {interface}", file=sys.stderr)
+                    return interface
+        except Exception:
+            pass
+
+        # Ultimate fallback - try to find ANY non-loopback interface
+        try:
+            result = subprocess.run(
+                ["ip", "-o", "link", "show"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    iface_match = re.search(r'^\d+:\s+(\S+?)[@:]', line)
+                    if iface_match:
+                        iface = iface_match.group(1)
+                        if iface != "lo" and "LOOPBACK" not in line:
+                            print(f"[Network Monitor] Using interface: {iface}", file=sys.stderr)
+                            return iface
+        except Exception:
+            pass
+
+        # No interfaces found
+        print("[Network Monitor] WARNING: No suitable interface found, using 'eth0'", file=sys.stderr)
         return "eth0"
 
     def enable_promiscuous_mode(self) -> bool:
