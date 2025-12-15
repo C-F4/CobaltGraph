@@ -17,6 +17,7 @@ Each mode (device/network) extends UnifiedDashboard with mode-specific component
 import json
 import logging
 import sqlite3
+import traceback
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Callable, Any
@@ -30,6 +31,10 @@ from textual.reactive import reactive
 
 # Import global heartbeat singleton
 from src.utils.heartbeat import heartbeat
+
+# Import connection intelligence modal and messages
+from src.ui.connection_modal import ConnectionIntelligenceModal
+from src.ui.unified_components import ConnectionSelected, ThreatAlert
 
 logger = logging.getLogger(__name__)
 
@@ -136,21 +141,30 @@ class DataManager:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get overall statistics"""
+        def safe_count(results) -> int:
+            """Safely extract count from query results"""
+            try:
+                if results and results[0] is not None:
+                    return dict(results[0]).get('count', 0) or 0
+            except (IndexError, TypeError, KeyError):
+                pass
+            return 0
+
         try:
             # Total connections
             total_query = "SELECT COUNT(*) as count FROM connections"
             total_results = self.execute_query(total_query)
-            total = dict(total_results[0]).get('count', 0) if total_results else 0
+            total = safe_count(total_results)
 
             # High threat count
             threat_query = "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
             threat_results = self.execute_query(threat_query)
-            high_threat = dict(threat_results[0]).get('count', 0) if threat_results else 0
+            high_threat = safe_count(threat_results)
 
             # Device count
             device_query = "SELECT COUNT(*) as count FROM devices WHERE is_active = 1"
             device_results = self.execute_query(device_query)
-            devices = dict(device_results[0]).get('count', 0) if device_results else 0
+            devices = safe_count(device_results)
 
             return {
                 'total': total,
@@ -387,6 +401,27 @@ class UnifiedDashboard(App):
         self.data_manager = DataManager(db_path=db_path, cache_ttl=2.0)
         self.viz_manager = VisualizationManager()
 
+        # Alert engine for toast notifications (Dashboard Evolution)
+        self.alert_engine = None
+        try:
+            from src.analytics.alert_engine import create_alert_engine
+            self.alert_engine = create_alert_engine()
+            # Register callback for toast notifications
+            self.alert_engine.register_alert_callback(self._on_alert_generated)
+            logger.info("Alert engine integrated with dashboard")
+        except ImportError as e:
+            logger.warning(f"Alert engine not available: {e}")
+
+        # Graph analytics engine for periodic computation (Dashboard Evolution)
+        self.threat_analytics = None
+        self.graph_analytics_cache: Dict[str, Any] = {}  # Cached graph results
+        try:
+            from src.analytics.threat_analytics import ThreatAnalytics
+            self.threat_analytics = ThreatAnalytics()
+            logger.info("Graph analytics engine initialized")
+        except ImportError as e:
+            logger.warning(f"Graph analytics not available: {e}")
+
         # Use global heartbeat singleton (already initialized by system_check)
         # Components are registered and marked online/offline during system checks
 
@@ -428,6 +463,7 @@ class UnifiedDashboard(App):
         from src.ui.unified_components import (
             ThreatPosturePanel,
             TemporalTrendsPanel,
+            ConsensusBreakdownPanel,
             GeographicAlertsPanel,
             OrganizationIntelPanel,
             ConnectionTablePanel,
@@ -438,13 +474,14 @@ class UnifiedDashboard(App):
 
         # Main content grid with 2 rows
         with Vertical(id="main_grid"):
-            # Top row (50% height): Threat Context + Trends + Alerts
+            # Top row (50% height): Threat Context + Consensus + Alerts
             with Horizontal(id="top_row"):
                 self.threat_posture_panel = ThreatPosturePanel(id="top_left")
                 yield self.threat_posture_panel
 
-                self.temporal_trends_panel = TemporalTrendsPanel(id="top_center")
-                yield self.temporal_trends_panel
+                # Consensus Breakdown Panel (replaces Temporal Trends for scorer visibility)
+                self.consensus_panel = ConsensusBreakdownPanel(id="top_center")
+                yield self.consensus_panel
 
                 self.geographic_alerts_panel = GeographicAlertsPanel(id="top_right")
                 yield self.geographic_alerts_panel
@@ -476,10 +513,12 @@ class UnifiedDashboard(App):
         self.set_interval(2.0, self._refresh_data)  # DB sync (forces cache invalidation)
         self.set_interval(0.5, self._update_heartbeat)  # Update heartbeat timestamp (0.5s)
         self.set_interval(1.0, self._update_ui)     # UI animation
+        self.set_interval(30.0, self._refresh_graph_analytics)  # Graph analytics (30s)
 
         # Force initial data load
         self.data_manager.invalidate_cache()
         self._refresh_data()
+        self._refresh_graph_analytics()  # Initial graph analytics computation
 
     def on_unmount(self) -> None:
         """Clean up on exit"""
@@ -496,11 +535,14 @@ class UnifiedDashboard(App):
         # Invalidate cache on every refresh to ensure fresh data
         self.data_manager.invalidate_cache()
 
-        # Query connections
+        # Query connections with individual scorer data
         conn_query = """
         SELECT timestamp, src_ip, src_mac, dst_ip, dst_port, protocol,
                threat_score, dst_org, dst_org_type, org_trust_score,
-               dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor
+               dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor,
+               confidence, high_uncertainty, scoring_method,
+               score_statistical, score_rule_based, score_ml_based, score_organization,
+               anomaly_score, score_spread
         FROM connections
         ORDER BY timestamp DESC LIMIT 100
         """
@@ -545,24 +587,33 @@ class UnifiedDashboard(App):
 
     def _update_statistics(self) -> None:
         """Update statistics from database"""
+        # Helper to safely extract count from query result
+        def safe_count(result) -> int:
+            try:
+                if result and result[0] is not None:
+                    return result[0]['count'] or 0
+            except (IndexError, TypeError, KeyError):
+                pass
+            return 0
+
         # Total connections
         total_result = self.data_manager.execute_query(
             "SELECT COUNT(*) as count FROM connections"
         )
-        self.stats['total_connections'] = total_result[0]['count'] if total_result else 0
+        self.stats['total_connections'] = safe_count(total_result)
 
         # High threat count
         threat_result = self.data_manager.execute_query(
             "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
         )
-        self.stats['high_threat_count'] = threat_result[0]['count'] if threat_result else 0
+        self.stats['high_threat_count'] = safe_count(threat_result)
 
         # Unique devices (network mode)
         if self.mode == "network":
             device_result = self.data_manager.execute_query(
                 "SELECT COUNT(DISTINCT mac) as count FROM devices WHERE is_active = 1"
             )
-            self.stats['unique_devices'] = device_result[0]['count'] if device_result else 0
+            self.stats['unique_devices'] = safe_count(device_result)
         else:
             self.stats['unique_devices'] = 1
 
@@ -570,13 +621,13 @@ class UnifiedDashboard(App):
         org_result = self.data_manager.execute_query(
             "SELECT COUNT(DISTINCT dst_org) as count FROM connections WHERE dst_org IS NOT NULL"
         )
-        self.stats['unique_organizations'] = org_result[0]['count'] if org_result else 0
+        self.stats['unique_organizations'] = safe_count(org_result)
 
         # Anomalies
         anomaly_result = self.data_manager.execute_query(
             "SELECT COUNT(*) as count FROM events WHERE event_type = 'anomaly'"
         )
-        self.stats['anomalies_detected'] = anomaly_result[0]['count'] if anomaly_result else 0
+        self.stats['anomalies_detected'] = safe_count(anomaly_result)
         self.stats['last_update'] = time.time()
 
     def _update_unified_panels(self, connections: List[Dict], devices: List[Dict], events: List[Dict]) -> None:
@@ -630,17 +681,17 @@ class UnifiedDashboard(App):
                 'top_threats': top_threats,  # Add top 3 for radar graphs
             }
 
-        # Temporal Trends Panel (Top-Center) - update with history
-        if self.temporal_trends_panel:
-            threats = [c.get('threat_score', 0) or 0 for c in connections]
-            if threats:
-                self.temporal_trends_panel.trend_data['threat_history'].append(
-                    sum(threats) / len(threats)
-                )
-                self.temporal_trends_panel.trend_data['volume_history'].append(len(threats))
-
-            anomaly_count = sum(1 for e in events if e.get('event_type') == 'anomaly')
-            self.temporal_trends_panel.trend_data['anomaly_count'] = anomaly_count
+        # Consensus Breakdown Panel (Top-Center) - update with latest scorer data
+        if hasattr(self, 'consensus_panel') and self.consensus_panel:
+            # Find the most recent connection with scorer data
+            for conn in connections:
+                if conn.get('score_statistical') is not None or conn.get('score_spread') is not None:
+                    self.consensus_panel.update_from_connection(conn)
+                    break
+            else:
+                # No scorer data yet, use first connection for basic stats
+                if connections:
+                    self.consensus_panel.update_from_connection(connections[0])
 
         # Geographic Alerts Panel (Top-Right)
         if self.geographic_alerts_panel:
@@ -710,12 +761,26 @@ class UnifiedDashboard(App):
             # Notify visualization components
             self.viz_manager.update_connections(list(self.recent_connections))
 
+            # Process through alert engine for toast notifications (Dashboard Evolution)
+            if self.alert_engine:
+                try:
+                    self.alert_engine.process_connection(conn_dict)
+                except Exception as alert_err:
+                    logger.debug(
+                        f"Alert processing error: {alert_err}\n"
+                        f"  Connection: {conn_dict.get('dst_ip')}:{conn_dict.get('dst_port')}\n"
+                        f"  Traceback: {traceback.format_exc()}"
+                    )
+
             # Subclass-specific handler
             if hasattr(self, '_on_live_connection'):
                 self._on_live_connection(conn_dict)
 
         except Exception as e:
-            logger.error(f"Connection event error: {e}")
+            logger.error(
+                f"Connection event error: {e}\n"
+                f"  Traceback: {traceback.format_exc()}"
+            )
 
     def _update_heartbeat(self) -> None:
         """Update heartbeat timestamp and system status gumballs (called every 0.5s)"""
@@ -738,6 +803,54 @@ class UnifiedDashboard(App):
         """Called every 1s for UI animations"""
         # Subclass panels update themselves via VisualizationManager callbacks
         pass
+
+    def _refresh_graph_analytics(self) -> None:
+        """
+        Periodic graph analytics computation (called every 30s).
+        Computes PageRank centrality, threat clusters, attack paths, and ASN rankings.
+        Results are cached for the connection intelligence modal.
+        """
+        if not self.threat_analytics:
+            return
+
+        try:
+            # Feed recent connections to the analytics engine
+            connections = list(self.recent_connections)
+            for conn in connections[-50:]:  # Process last 50 connections
+                try:
+                    self.threat_analytics.process_connection(
+                        src_ip=conn.get('src_ip', ''),
+                        dst_ip=conn.get('dst_ip', ''),
+                        threat_score=conn.get('threat_score', 0) or 0,
+                        confidence=conn.get('confidence', 0.8) or 0.8,
+                        dst_port=conn.get('dst_port', 443),
+                        dst_org=conn.get('dst_org'),
+                        dst_org_type=conn.get('dst_org_type'),
+                        dst_asn=conn.get('dst_asn'),
+                        hop_count=conn.get('hop_count'),
+                        dst_country=conn.get('dst_country'),
+                        org_trust_score=conn.get('org_trust_score'),
+                    )
+                except Exception as proc_err:
+                    logger.debug(
+                        f"Connection processing error: {proc_err}\n"
+                        f"  Connection: src={conn.get('src_ip')} dst={conn.get('dst_ip')}:{conn.get('dst_port')}\n"
+                        f"  Traceback: {traceback.format_exc()}"
+                    )
+
+            # Get comprehensive report and cache it
+            report = self.threat_analytics.get_comprehensive_report()
+            self.graph_analytics_cache = report
+
+            # Send analytics heartbeat
+            heartbeat.beat("analytics", "Graph analytics computed")
+            logger.debug(f"Graph analytics refreshed: {report.get('summary', {})}")
+
+        except Exception as e:
+            logger.error(
+                f"Graph analytics refresh failed: {e}\n"
+                f"  Traceback: {traceback.format_exc()}"
+            )
 
     def get_threat_color(self, score: float) -> str:
         """Get color string for threat score"""
@@ -780,7 +893,108 @@ class UnifiedDashboard(App):
 
     def action_show_help(self) -> None:
         """Show available keybindings in subtitle"""
-        self.sub_title = "Keys: Q=Quit | R=Refresh | ?=Help | Ctrl+P=Commands"
+        self.sub_title = "Keys: Q=Quit | R=Refresh | ?=Help | Ctrl+P=Commands | Enter=Details"
+
+    def _on_alert_generated(self, alert) -> None:
+        """
+        Callback for alert engine - converts Alert to ThreatAlert message.
+        This bridges the alert_engine's callback mechanism with Textual's message system.
+
+        Args:
+            alert: Alert object from alert_engine with severity, title, message, etc.
+        """
+        try:
+            # Map AlertSeverity enum to Textual notify severity strings
+            severity_map = {
+                "CRITICAL": ThreatAlert.SEVERITY_CRITICAL,  # "error"
+                "WARNING": ThreatAlert.SEVERITY_WARNING,     # "warning"
+                "INFO": ThreatAlert.SEVERITY_INFO,           # "information"
+            }
+
+            # Get severity string from alert
+            alert_severity = getattr(alert.severity, 'value', str(alert.severity))
+            severity = severity_map.get(alert_severity, ThreatAlert.SEVERITY_INFO)
+
+            # Set timeout based on severity (critical stays longer)
+            timeout = 10.0 if alert_severity == "CRITICAL" else (7.0 if alert_severity == "WARNING" else 5.0)
+
+            # Post the ThreatAlert message to trigger on_threat_alert handler
+            self.post_message(ThreatAlert(
+                title=alert.title,
+                message=alert.message,
+                severity=severity,
+                dst_ip=alert.dst_ip,
+                rule_matched=getattr(alert, 'category', None),
+                threat_score=alert.threat_score,
+                timeout=timeout,
+            ))
+
+            logger.debug(f"Alert posted to dashboard: {alert.title}")
+
+        except Exception as e:
+            logger.error(f"Failed to post alert to dashboard: {e}")
+
+    def on_connection_selected(self, message: ConnectionSelected) -> None:
+        """
+        Handle connection row selection from ConnectionTablePanel.
+        Opens the Connection Intelligence Modal with full details.
+        """
+        connection_data = message.connection_data
+        dst_ip = connection_data.get('dst_ip', 'Unknown')
+
+        logger.info(f"Opening intelligence modal for {dst_ip}")
+        self.sub_title = f"Opening details for {dst_ip}..."
+
+        # Push the modal screen
+        self.push_screen(ConnectionIntelligenceModal(connection_data))
+
+    def on_threat_alert(self, message: ThreatAlert) -> None:
+        """
+        Handle threat alert messages by showing toast notifications.
+        Uses Textual's built-in notify() for non-intrusive alerts.
+        """
+        # Build the notification message
+        title = message.title
+        body = message.message
+
+        # Add extra context if available
+        if message.dst_ip:
+            body = f"{body}\nIP: {message.dst_ip}"
+        if message.rule_matched:
+            body = f"{body}\nRule: {message.rule_matched}"
+        if message.threat_score is not None:
+            body = f"{body}\nScore: {message.threat_score:.2f}"
+
+        # Show the toast notification
+        self.notify(
+            body,
+            title=title,
+            severity=message.severity,
+            timeout=message.timeout,
+        )
+
+        logger.info(f"Alert toast: {title} - {message.message}")
+
+    def show_threat_alert(
+        self,
+        title: str,
+        message: str,
+        severity: str = "information",
+        dst_ip: str = None,
+        rule_matched: str = None,
+        threat_score: float = None,
+        timeout: float = 5.0,
+    ) -> None:
+        """
+        Convenience method to show a threat alert toast directly.
+        Can be called from anywhere with access to the app instance.
+        """
+        self.notify(
+            message + (f"\nIP: {dst_ip}" if dst_ip else ""),
+            title=title,
+            severity=severity,
+            timeout=timeout,
+        )
 
 
 # Convenience aliases for backward compatibility

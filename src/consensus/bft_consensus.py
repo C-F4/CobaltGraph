@@ -160,6 +160,13 @@ class BFTConsensus:
         if high_uncertainty:
             avg_confidence *= 0.7  # Penalty for disagreement
 
+        # Extract individual scorer scores for dashboard display
+        individual_scores = {}
+        for assessment in assessments:
+            # Normalize scorer IDs for database columns
+            scorer_key = assessment.scorer_id.replace("-", "_").replace(" ", "_")
+            individual_scores[f"score_{scorer_key}"] = assessment.score
+
         # Build result
         result = ConsensusResult(
             consensus_score=consensus_score,
@@ -175,6 +182,8 @@ class BFTConsensus:
                 "median_score": median_score,
                 "min_score": min(scores),
                 "max_score": max(scores),
+                # Individual scorer scores for dashboard (Dashboard Evolution)
+                **individual_scores,
             },
         )
 

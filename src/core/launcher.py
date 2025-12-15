@@ -8,13 +8,114 @@ import argparse
 import logging
 import os
 import platform
+import re
 import signal
+import subprocess
 import sys
 import threading
 from pathlib import Path
 
 # Import global heartbeat singleton
 from src.utils.heartbeat import heartbeat
+
+
+def setup_promiscuous_mode_linux() -> tuple[bool, str]:
+    """
+    Enable promiscuous mode on Linux for network-wide capture.
+
+    This function:
+    1. Verifies we're on Linux
+    2. Detects the primary network interface (WiFi or Ethernet)
+    3. Enables promiscuous mode on that interface
+
+    Returns:
+        tuple: (success: bool, interface_name: str)
+    """
+    # Only run on verified Linux systems
+    if platform.system() != 'Linux':
+        return False, ""
+
+    # Check if we have root privileges
+    if not hasattr(os, 'geteuid') or os.geteuid() != 0:
+        return False, ""
+
+    interface = None
+
+    # First, try to get the default route interface
+    try:
+        result = subprocess.run(
+            ["ip", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        match = re.search(r"dev\s+(\S+)", result.stdout)
+        if match:
+            interface = match.group(1)
+    except Exception:
+        pass
+
+    # Fallback: find any UP physical interface (WiFi or Ethernet)
+    if not interface:
+        try:
+            result = subprocess.run(
+                ["ip", "-o", "link", "show", "up"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            for line in result.stdout.splitlines():
+                iface_match = re.search(r'^\d+:\s+(\S+?)[@:]', line)
+                if iface_match:
+                    iface = iface_match.group(1)
+                    # Skip virtual interfaces
+                    skip_prefixes = ("lo", "veth", "docker", "br-", "virbr", "vnet", "tun", "tap")
+                    if any(iface.startswith(p) for p in skip_prefixes):
+                        continue
+                    # Must be a broadcast-capable interface
+                    if "BROADCAST" in line and "LOOPBACK" not in line:
+                        interface = iface
+                        break
+        except Exception:
+            pass
+
+    if not interface:
+        return False, ""
+
+    # Enable promiscuous mode on the detected interface
+    try:
+        result = subprocess.run(
+            ["ip", "link", "set", interface, "promisc", "on"],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 0:
+            print(f"{Colors.GREEN}✓ Promiscuous mode enabled on {interface}{Colors.NC}")
+            return True, interface
+        else:
+            print(f"{Colors.YELLOW}⚠ Could not enable promiscuous mode on {interface}{Colors.NC}")
+            return False, interface
+    except Exception as e:
+        print(f"{Colors.YELLOW}⚠ Promiscuous mode setup failed: {e}{Colors.NC}")
+        return False, ""
+
+
+def disable_promiscuous_mode_linux(interface: str):
+    """Disable promiscuous mode on cleanup"""
+    if not interface or platform.system() != 'Linux':
+        return
+    try:
+        subprocess.run(
+            ["ip", "link", "set", interface, "promisc", "off"],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        pass
 
 
 class Colors:
@@ -177,6 +278,8 @@ class CobaltGraphMain:
 
     def launch_dashboard(self) -> int:
         """Launch the CobaltGraph Dashboard (simplified V2)"""
+        promisc_interface = None  # Track interface for cleanup
+
         try:
             from src.utils.logging_config import setup_logging
 
@@ -206,6 +309,13 @@ class CobaltGraphMain:
                     from src.capture.network_monitor import NetworkMonitor
                     from src.core.orchestrator import DataPipeline
 
+                    # Setup promiscuous mode on Linux for subnet-wide capture
+                    promisc_success, promisc_interface = setup_promiscuous_mode_linux()
+                    if promisc_success:
+                        logger.info(f"✅ Promiscuous mode enabled on {promisc_interface}")
+                    elif platform.system() == 'Linux':
+                        logger.warning("Promiscuous mode not enabled - may miss subnet traffic")
+
                     # Initialize and start data pipeline
                     pipeline = DataPipeline({"database_path": self.db_path})
                     pipeline.initialize_components()
@@ -214,9 +324,10 @@ class CobaltGraphMain:
                     heartbeat.beat("pipeline", "Pipeline started")
 
                     # Create network monitor with pipeline callback
+                    # Pass the detected interface if promiscuous mode was set up
                     network_monitor = NetworkMonitor(
                         mode="network",
-                        interface=None,  # Auto-detect
+                        interface=promisc_interface if promisc_interface else None,
                         callback=pipeline.submit
                     )
 
@@ -282,6 +393,9 @@ class CobaltGraphMain:
                 network_monitor.stop()
             if pipeline:
                 pipeline.stop()
+            # Disable promiscuous mode if we enabled it
+            if promisc_interface:
+                disable_promiscuous_mode_linux(promisc_interface)
 
             return 0
 
@@ -290,11 +404,17 @@ class CobaltGraphMain:
             return 1
         except KeyboardInterrupt:
             print(f"\n{Colors.YELLOW}Stopped by user{Colors.NC}")
+            # Cleanup promiscuous mode on interrupt
+            if promisc_interface:
+                disable_promiscuous_mode_linux(promisc_interface)
             return 130
         except Exception as e:
             print(f"\n{Colors.RED}Error: {e}{Colors.NC}")
             import traceback
             traceback.print_exc()
+            # Cleanup promiscuous mode on error
+            if promisc_interface:
+                disable_promiscuous_mode_linux(promisc_interface)
             return 1
 
     def parse_arguments(self):
