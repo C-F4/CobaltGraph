@@ -1,26 +1,24 @@
 # CobaltGraph - Network Security Platform
 # Blue-Team Network Intelligence with Multi-Agent Consensus Threat Scoring
-# Terminal-Only Mode with Multi-Dimensional Visualization
+# Terminal-Only Mode with Pure Python Dependencies
 #
 # Installation: pip3 install -r requirements.txt
-# Minimal Install: pip3 install -r requirements-minimal.txt
 #
 # Python Version: 3.10+ required, 3.12+ recommended
 # SQLite: Built-in to Python (no install needed)
+#
+# NOTE: All C/C++ dependencies have been removed for maximum portability
+# and cross-platform compatibility. Pure Python implementations only.
 
 # ============================================================================
-# CORE DEPENDENCIES (Required)
+# CORE DEPENDENCIES (Required - Pure Python)
 # ============================================================================
 
 # HTTP client for threat intelligence APIs (VirusTotal, AbuseIPDB, ip-api)
 requests>=2.32.3
 
-# Network packet capture for network-wide mode (requires root/sudo)
-# Can be skipped for device-only mode using 'python start.py --mode device'
-scapy>=2.6.1
-
 # ============================================================================
-# TERMINAL UI (Required)
+# TERMINAL UI (Required - Pure Python)
 # ============================================================================
 
 # Beautiful terminal formatting, tables, and panels
@@ -30,37 +28,15 @@ rich>=13.9.4
 textual>=1.0.0
 
 # ============================================================================
-# CONSENSUS & DATA PROCESSING (Required)
+# NETWORK ANALYSIS (Required - Pure Python)
 # ============================================================================
-
-# High-performance arrays for Byzantine Fault Tolerant consensus calculations
-numpy>=2.3.5
-
-# Data analysis and DataFrame operations for connection export processing
-pandas>=2.3.3
-
-# Scientific computing for statistical threat scoring (Z-score, distributions)
-scipy>=1.16.3
 
 # Network graph analysis for connection topology visualization and hop counting
 networkx>=3.4.2
 
 # ============================================================================
-# GEOLOCATION (Optional but Recommended)
+# VISUALIZATION (Optional - Pure Python)
 # ============================================================================
-
-# MaxMind GeoIP2 database reader (requires database file)
-geoip2>=4.8.1
-
-# Fast IP geolocation lookups
-maxminddb>=2.6.2
-
-# ============================================================================
-# VISUALIZATION (Optional)
-# ============================================================================
-
-# Visualization and plotting
-matplotlib>=3.9.2
 
 # Terminal graphics and Unicode support
 wcwidth>=0.2.13
@@ -69,7 +45,7 @@ wcwidth>=0.2.13
 colorama>=0.4.6
 
 # ============================================================================
-# ADVANCED TUI VISUALIZATION (Dashboard Evolution)
+# ADVANCED TUI VISUALIZATION (Optional - Pure Python)
 # ============================================================================
 
 # Plotext integration for Textual - terminal charts and graphs
@@ -79,7 +55,7 @@ textual-plotext>=1.0.0
 plotille>=5.0.0
 
 # ============================================================================
-# DEVELOPMENT TOOLS (Optional - for development/testing)
+# DEVELOPMENT TOOLS (Optional - Pure Python)
 # ============================================================================
 
 # Testing framework
@@ -95,24 +71,48 @@ pylint>=3.3.2
 isort>=5.13.2
 
 # ============================================================================
+# DEPRECATED / REMOVED
+# ============================================================================
+#
+# The following packages have been REMOVED due to C/C++ dependencies:
+#
+# - numpy (C/C++ numerical computing)
+#   → Replaced with pure Python math operations
+#
+# - pandas (C/C++ data frames, depends on numpy)
+#   → Replaced with native Python data structures and CSV stdlib
+#
+# - scipy (C/C++ scientific computing)
+#   → Replaced with pure Python statistical functions
+#
+# - matplotlib (C/C++ rendering backends)
+#   → Replaced with terminal-based visualization (plotille, textual-plotext)
+#
+# - scapy (C extensions for packet processing)
+#   → Replaced with native socket/subprocess approaches
+#
+# - geoip2/maxminddb (C library bindings)
+#   → Using web API (ip-api.com) for geolocation instead
+#
+# ============================================================================
 # NOTES
 # ============================================================================
 #
 # Python Version: 3.10+ required, 3.12+ recommended
 # SQLite: Built-in to Python (no install needed)
 #
-# For minimal installation (terminal UI only):
-#   pip3 install -r requirements-minimal.txt
-#
-# For development:
-#   pip3 install -r requirements.txt
+# All dependencies are pure Python for:
+#   - Maximum cross-platform compatibility
+#   - No compiler requirements
+#   - Faster installation
+#   - WSL/Windows compatibility
+#   - ARM/x86 architecture independence
 #
 # Visualization Features:
-#   - N-dimensional threat vector projection
-#   - Heatmap rendering
+#   - Terminal-based threat visualization
+#   - ASCII/Unicode heatmaps
 #   - Organization triage with trust scoring
-#   - Hop count network topology visualization
+#   - Network topology visualization
 #   - Time-series anomaly detection
-#   - Parallel coordinate threat analysis
 #
 # ============================================================================
