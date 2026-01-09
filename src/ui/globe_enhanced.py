@@ -310,15 +310,40 @@ class EnhancedGlobe:
                 if isinstance(canvas[y][x], str):
                     canvas[y][x] = Text('·', style="dim cyan")
 
+    def render_legend(self, canvas: List[List]) -> None:
+        """Render legend in bottom-right corner"""
+        legend_lines = [
+            ("Threat Level:", "dim white"),
+            ("● Critical", "bold red"),
+            ("◉ High", "bold yellow"),
+            ("○ Medium", "yellow"),
+            ("· Low", "cyan"),
+            (". Info", "green"),
+        ]
+
+        # Position in bottom-right
+        start_x = max(0, self.width - 14)
+        start_y = max(0, self.height - len(legend_lines) - 1)
+
+        for i, (text, style) in enumerate(legend_lines):
+            y = start_y + i
+            if y >= self.height:
+                break
+            for j, ch in enumerate(text):
+                x = start_x + j
+                if x < self.width:
+                    canvas[y][x] = Text(ch, style=style)
+
     def render(self) -> Panel:
         """Render the enhanced globe"""
         # Create canvas
         canvas = [[' ' for _ in range(self.width)] for _ in range(self.height)]
 
-        # Render in order: globe outline, coastlines, connections
+        # Render in order: globe outline, coastlines, connections, legend
         self.render_globe_outline(canvas)
         self.render_coastlines(canvas)
         self.render_connections(canvas)
+        self.render_legend(canvas)
 
         # Convert canvas to text
         lines = []

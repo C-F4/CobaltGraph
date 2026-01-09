@@ -272,6 +272,7 @@ class ThreatPostureQuickPanel(Static):
     Top-left (50%): Quick threat posture assessment
     Current threat level, baseline, active threats, monitored IPs
     Now includes radar graphs for top 3 highest threat connections
+    Plus: subtle pulse animation for active threat awareness
     """
 
     DEFAULT_CSS = """
@@ -285,8 +286,14 @@ class ThreatPostureQuickPanel(Static):
 
     threat_data = reactive(dict)
 
+    # Pulse animation characters for "breathing" effect
+    PULSE_CHARS = ['◦', '○', '◎', '●', '◉', '●', '◎', '○']
+    ACTIVITY_CHARS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._pulse_frame = 0
+        self._activity_frame = 0
         self.threat_data = {
             'current_threat': 0.0,
             'baseline_threat': 0.0,
@@ -298,6 +305,12 @@ class ThreatPostureQuickPanel(Static):
 
     def watch_threat_data(self, new_data: dict) -> None:
         """Trigger re-render when threat data changes"""
+        self._activity_frame = (self._activity_frame + 1) % len(self.ACTIVITY_CHARS)
+        self.refresh()
+
+    def pulse(self) -> None:
+        """Advance pulse animation frame"""
+        self._pulse_frame = (self._pulse_frame + 1) % len(self.PULSE_CHARS)
         self.refresh()
 
     def render(self):
@@ -309,24 +322,32 @@ class ThreatPostureQuickPanel(Static):
         high_threat = self.threat_data.get('high_threat_count', 0)
         top_threats = self.threat_data.get('top_threats', [])
 
-        # Color code threat level
+        # Pulse character for activity indication
+        pulse = self.PULSE_CHARS[self._pulse_frame]
+        activity = self.ACTIVITY_CHARS[self._activity_frame]
+
+        # Color code threat level with pulse
         if current >= 0.7:
             threat_color = "[bold red]"
             threat_level = "CRITICAL"
+            pulse_color = "[bold red]"
         elif current >= 0.5:
             threat_color = "[bold yellow]"
             threat_level = "HIGH"
+            pulse_color = "[bold yellow]"
         elif current >= 0.3:
             threat_color = "[yellow]"
             threat_level = "MEDIUM"
+            pulse_color = "[yellow]"
         else:
             threat_color = "[green]"
             threat_level = "LOW"
+            pulse_color = "[green]"
 
         # Build content with threat posture info
         content_lines = []
-        content_lines.append(f"{threat_color}Current Threat[/]")
-        content_lines.append(f"{current:.2f} [{threat_level}]")
+        content_lines.append(f"{pulse_color}{pulse}[/] {threat_color}Threat Level[/] {pulse_color}{pulse}[/]")
+        content_lines.append(f"  {threat_color}{current:.2f}[/] [{threat_level}]")
         content_lines.append("")
         content_lines.append(f"[dim]Baseline:[/dim] {baseline:.2f}")
         content_lines.append(f"[red]High Threats:[/red] {high_threat}")
@@ -698,11 +719,16 @@ class SmartConnectionTable(Static):
 
     connections = reactive(list)
 
+    # Data flow indicators
+    FLOW_CHARS = ['▸', '▹', '▸', '▹']
+
     def __init__(self, on_row_selected: callable = None, **kwargs):
         super().__init__(**kwargs)
         self.table = None
         self.connections = []
         self.on_row_selected = on_row_selected
+        self._flow_frame = 0
+        self._last_count = 0
 
     def compose(self) -> ComposeResult:
         """Create data table"""
@@ -1450,11 +1476,16 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
     }
     """
 
+    # Activity spinners for live feel
+    SPINNERS = ['◐', '◓', '◑', '◒']
+    DATA_FLOW = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+
     def __init__(self, db_path: str = "database/cobaltgraph.db", mode: str = "device"):
         """Initialize enhanced dashboard with mode"""
         super().__init__(db_path=db_path, mode=mode)
         self.title = f"CobaltGraph - {mode.upper()} Mode"
         self.sub_title = "Loading..."
+        self._spinner_frame = 0
 
         # Panels
         self.threat_posture_panel = None
@@ -1516,8 +1547,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         if self.data_manager.connect():
             self.is_connected = True
             self.set_interval(2.0, self._refresh_data)
-            self.set_interval(0.1, self._update_display)  # 100ms for smooth animations
-            self.set_interval(0.5, self._update_heartbeat)  # Heartbeat updates every 0.5s
+            self.set_interval(0.2, self._update_display)  # 200ms for animations (5 FPS - sufficient)
+            self.set_interval(1.0, self._update_heartbeat)  # Heartbeat updates every 1s (reduced)
             self._refresh_data()
 
             # Send initial heartbeats for all operational components
@@ -1592,35 +1623,42 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
                 self.anomaly_panel.anomalies = anomalies
 
-            # Update stats
+            # Update stats with activity spinner
             stats = self.data_manager.get_stats()
-            self.sub_title = f"Updated: {datetime.now().strftime('%H:%M:%S')} | Connections: {stats.get('total', 0)} | Risk: {current_threat:.2f}"
+            self._spinner_frame = (self._spinner_frame + 1) % len(self.DATA_FLOW)
+            spinner = self.DATA_FLOW[self._spinner_frame]
+            self.sub_title = f"{spinner} {datetime.now().strftime('%H:%M:%S')} │ ▶ {stats.get('total', 0)} │ ⚡ {current_threat:.2f}"
 
         except Exception as e:
             logger.error(f"Refresh failed: {e}")
             self.sub_title = f"Error: {str(e)[:30]}"
 
     def _update_display(self) -> None:
-        """Quick display updates (animations, etc)"""
-        # Update globe animation
+        """Quick display updates (animations, etc) - optimized for 200ms intervals"""
+        # Update globe animation (single refresh per cycle)
         if self.globe_panel:
             try:
-                # Update the appropriate visualization component
-                if self.globe_panel.world_map:
-                    self.globe_panel.world_map.update(0.05)  # Update every 50ms
-                    self.globe_panel.refresh()  # Force re-render
-                elif self.globe_panel.enhanced_globe:
-                    self.globe_panel.enhanced_globe.update(0.05)
-                    self.globe_panel.refresh()
-                elif self.globe_panel.simple_globe:
-                    self.globe_panel.simple_globe.update(0.05)  # Consistent with other globe types
+                globe_component = (
+                    self.globe_panel.world_map or
+                    self.globe_panel.enhanced_globe or
+                    self.globe_panel.simple_globe
+                )
+                if globe_component:
+                    globe_component.update(0.2)  # Match interval timing
                     self.globe_panel.refresh()
             except Exception as e:
                 logger.debug(f"Globe update failed: {e}")
 
+        # Pulse the threat indicator for "breathing" effect
+        if self.threat_posture_panel:
+            try:
+                self.threat_posture_panel.pulse()
+            except Exception:
+                pass
+
     def _update_heartbeat(self) -> None:
         """
-        Update component heartbeats every 0.5s.
+        Update component heartbeats every 1s (reduced from 0.5s for performance).
         Sends heartbeats for all operational components to keep them marked as ACTIVE.
         """
         from src.utils.heartbeat import heartbeat

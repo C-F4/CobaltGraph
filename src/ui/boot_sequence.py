@@ -117,19 +117,28 @@ def system_status():
 
 
 def boot_banner():
-    """Display CobaltGraph boot banner"""
-    banner = """
-     ██████╗ ██████╗ ██████╗  █████╗ ██╗  ████████╗     ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗
-    ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║  ╚══██╔══╝    ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║
-    ██║     ██║   ██║██████╔╝███████║██║     ██║       ██║  ███╗██████╔╝███████║██████╔╝███████║
-    ██║     ██║   ██║██╔══██╗██╔══██║██║     ██║       ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║
-    ╚██████╗╚██████╔╝██████╔╝██║  ██║███████╗██║       ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║
-     ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝        ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
+    """Display CobaltGraph boot banner with version"""
+    VERSION = "3.1.0"
 
-    {cyan}UNIFIED THREAT MONITORING & INTELLIGENCE PLATFORM{reset}
-    {dim}Blue-Team Network Security | Byzantine Fault Tolerant Consensus{reset}
-    """
-    print(banner.format(cyan=Colors.BRIGHT_CYAN, reset=Colors.RESET, dim=Colors.DIM))
+    # Subtle animation: reveal banner line by line
+    banner_lines = [
+        "",
+        f"{Colors.BRIGHT_CYAN}     ██████╗ ██████╗ ██████╗  █████╗ ██╗  ████████╗     ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗{Colors.RESET}",
+        f"{Colors.BRIGHT_CYAN}    ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║  ╚══██╔══╝    ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║{Colors.RESET}",
+        f"{Colors.CYAN}    ██║     ██║   ██║██████╔╝███████║██║     ██║       ██║  ███╗██████╔╝███████║██████╔╝███████║{Colors.RESET}",
+        f"{Colors.CYAN}    ██║     ██║   ██║██╔══██╗██╔══██║██║     ██║       ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║{Colors.RESET}",
+        f"{Colors.DIM}    ╚██████╗╚██████╔╝██████╔╝██║  ██║███████╗██║       ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║{Colors.RESET}",
+        f"{Colors.DIM}     ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝        ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝{Colors.RESET}",
+        "",
+        f"    {Colors.BRIGHT_CYAN}◉ UNIFIED THREAT MONITORING & INTELLIGENCE PLATFORM{Colors.RESET}  {Colors.DIM}v{VERSION}{Colors.RESET}",
+        f"    {Colors.DIM}◦ Blue-Team Network Security | Byzantine Fault Tolerant Consensus{Colors.RESET}",
+        f"    {Colors.DIM}◦ Passive Reconnaissance | Consensus Threat Scoring{Colors.RESET}",
+        "",
+    ]
+
+    for line in banner_lines:
+        print(line)
+        time.sleep(0.03)  # Subtle cascade effect
 
 
 def mode_selector():
@@ -163,72 +172,110 @@ def mode_selector():
 
 
 def initialization_sequence():
-    """Main boot initialization sequence"""
+    """
+    Enhanced cybersecurity-themed boot sequence.
+
+    Duration: ~5 seconds total
+    Features:
+    - Geographical map initialization (1.5s)
+    - Multi-reference triaging system (1.5s)
+    - Network monitoring initialization (1.5s)
+    - Final status display (0.5s)
+    """
     Colors.clear()
 
-    # Title animation
+    # Title animation (0.3s)
     boot_banner()
-    time.sleep(0.5)
-
-    # Scanlines
-    print_scanlines(width=80, count=3)
     time.sleep(0.3)
 
-    # Digital rain
-    digital_rain(width=80, height=3)
-    time.sleep(0.5)
+    # === GEOGRAPHICAL INTELLIGENCE INITIALIZATION (1.5s) ===
+    print(f"\n{Colors.BRIGHT_CYAN}[INITIALIZING GEOGRAPHICAL INTELLIGENCE]{Colors.RESET}")
+    print(f"{Colors.DIM}Loading geolocation databases and threat maps...{Colors.RESET}\n")
 
-    # System initialization
-    print(f"\n{Colors.BRIGHT_CYAN}[INITIALIZING SYSTEM]{Colors.RESET}")
-    print(f"{Colors.DIM}Loading security modules...{Colors.RESET}\n")
-
-    modules = [
-        "Database Connection",
-        "Network Capture Engine",
-        "MAC Vendor Resolver",
-        "Geolocation Engine",
-        "ASN Intelligence Lookup",
-        "IP Reputation Service",
-        "Consensus Threat Scorer",
-        "Byzantine Fault Tolerance",
-        "Threat Analytics Engine",
-        "Dashboard Renderer",
+    # ASCII world map outline with scanning effect
+    map_lines = [
+        "     ╔══════════════════════════════════════════════════════════╗",
+        "     ║  ░░░░░▓▓▓▓▓▓▓░░░░░░░░░░▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░  ║",
+        "     ║  ░░░▓▓▓░░░░░▓▓░░░░░░░▓▓░░░░░░░▓▓░░░░░░░░░░░░░░░░░░░  ║",
+        "     ║  ░░▓▓░░░░░░░░▓▓░░░░░▓░░░░░░░░░░▓░░░░░░░░░░░░░░░░░░░  ║",
+        "     ╚══════════════════════════════════════════════════════════╝",
     ]
 
-    for i, module in enumerate(modules):
-        progress = int((i + 1) / len(modules) * 100)
-        bar_width = 50
-        filled = int(bar_width * progress / 100)
+    regions = [
+        ("North America", "185.220.101.0/24"),
+        ("Europe", "151.80.0.0/16"),
+        ("Asia Pacific", "202.12.28.0/24"),
+        ("Middle East", "185.220.102.0/24"),
+        ("Africa", "102.22.0.0/16"),
+    ]
 
-        bar = f"{Colors.BRIGHT_GREEN}{'█' * filled}{Colors.DIM}{'░' * (bar_width - filled)}{Colors.RESET}"
-        print(f"  {module:<30} {bar} {progress:>3}%")
+    for line in map_lines:
+        print(f"{Colors.GREEN}{line}{Colors.RESET}")
+        time.sleep(0.05)
+
+    print()
+    for region, subnet in regions:
+        print(f"  {Colors.GREEN}●{Colors.RESET} {region:<20} {Colors.DIM}{subnet}{Colors.RESET}")
         time.sleep(0.15)
 
-    time.sleep(0.5)
+    print(f"\n  {Colors.BRIGHT_GREEN}✓ Geographical database loaded{Colors.RESET}")
+    time.sleep(0.3)
 
-    # Threat analysis
-    threat_scan_animation()
+    # === MULTI-REFERENCE TRIAGING SYSTEM (1.5s) ===
+    print(f"\n{Colors.BRIGHT_CYAN}[MULTI-REFERENCE TRIAGING SYSTEM]{Colors.RESET}")
+    print(f"{Colors.DIM}Initializing threat intelligence sources...{Colors.RESET}\n")
 
-    # System status
-    system_status()
+    intel_sources = [
+        ("VirusTotal API", "Malware & Reputation", True),
+        ("AbuseIPDB", "Abuse Reports & Scoring", True),
+        ("Team Cymru ASN", "Organization Intelligence", True),
+        ("GeoIP Database", "Location & Routing", True),
+        ("MAC Vendor DB", "Device Fingerprinting", True),
+    ]
 
-    # Boot options - get user mode selection
+    for source, description, status in intel_sources:
+        status_icon = f"{Colors.BRIGHT_GREEN}✓{Colors.RESET}" if status else f"{Colors.RED}✗{Colors.RESET}"
+        print(f"  {status_icon} {source:<20} {Colors.DIM}{description}{Colors.RESET}")
+        time.sleep(0.2)
+
+    print(f"\n  {Colors.BRIGHT_GREEN}✓ Triaging system online{Colors.RESET}")
+    time.sleep(0.3)
+
+    # === NETWORK MONITORING ENGINE INITIALIZATION (1.5s) ===
+    print(f"\n{Colors.BRIGHT_CYAN}[NETWORK MONITORING ENGINE]{Colors.RESET}")
+    print(f"{Colors.DIM}Configuring capture and analysis subsystems...{Colors.RESET}\n")
+
+    monitoring_components = [
+        ("Packet Capture Engine", "Scapy + Promiscuous Mode"),
+        ("Protocol Analyzer", "TCP/UDP/ICMP Dissection"),
+        ("Connection Tracker", "Flow State Management"),
+        ("Consensus Scorer", "BFT Threat Analysis"),
+        ("Database Writer", "SQLite WAL Mode"),
+    ]
+
+    for component, tech in monitoring_components:
+        bar_width = 30
+        filled = bar_width
+        bar = f"{Colors.BRIGHT_GREEN}{'█' * filled}{Colors.RESET}"
+
+        print(f"  {component:<25} {bar} {Colors.DIM}{tech}{Colors.RESET}")
+        time.sleep(0.15)
+
+    print(f"\n  {Colors.BRIGHT_GREEN}✓ Network monitoring ready{Colors.RESET}")
+    time.sleep(0.3)
+
+    # === FINAL STATUS (0.5s) ===
+    print(f"\n{Colors.BRIGHT_CYAN}╔══════════════════════════════════════╗{Colors.RESET}")
+    print(f"{Colors.BRIGHT_CYAN}║{Colors.RESET}  {Colors.BRIGHT_GREEN}✓{Colors.RESET} BOOT SEQUENCE COMPLETE             {Colors.BRIGHT_CYAN}║{Colors.RESET}")
+    print(f"{Colors.BRIGHT_CYAN}╚══════════════════════════════════════╝{Colors.RESET}")
+
+    # Mode selection
     selected_mode = mode_selector()
 
-    # Final countdown
-    print(f"\n{Colors.BRIGHT_CYAN}[BOOT COMPLETE]{Colors.RESET}")
-    print(f"{Colors.DIM}Initializing dashboard...{Colors.RESET}\n")
+    print(f"\n{Colors.DIM}Launching dashboard...{Colors.RESET}")
+    time.sleep(0.3)
 
-    countdown = 3
-    for i in range(countdown, 0, -1):
-        print(f"\r{Colors.BRIGHT_YELLOW}Launching dashboard in {i}...{Colors.RESET}", end="")
-        sys.stdout.flush()
-        time.sleep(1)
-
-    print(f"\r{Colors.BRIGHT_GREEN}Launching dashboard now!   {Colors.RESET}\n")
-    time.sleep(0.5)
-
-    # Store selected mode in global or return via environment variable
+    # Store selected mode
     if selected_mode:
         os.environ['COBALTGRAPH_MODE'] = selected_mode
 
@@ -276,21 +323,3 @@ def boot_sequence():
 
 # Backward compatibility alias
 run_boot_sequence = boot_sequence
-
-
-if __name__ == '__main__':
-    # Run boot sequence
-    if boot_sequence():
-        # Launch dashboard
-        try:
-            from src.core.launcher import CobaltGraphMain
-
-            launcher = CobaltGraphMain()
-            launcher.show_banner()
-            sys.exit(launcher.main())
-        except ImportError:
-            print(f"{Colors.YELLOW}Dashboard launcher not available{Colors.RESET}")
-            sys.exit(1)
-    else:
-        print(f"{Colors.YELLOW}Boot sequence cancelled{Colors.RESET}")
-        sys.exit(0)

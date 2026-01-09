@@ -343,20 +343,22 @@ class ASNLookup:
                 cached.initial_ttl, cached.estimated_hops = self._estimate_hops(ttl)
             return cached
 
-        # Try Team Cymru DNS first (most reliable for ASN)
-        result = self._lookup_cymru(ip_address)
+        # Try ip-api FIRST - most reliable, no external tools needed
+        result = self._lookup_ipapi(ip_address)
 
-        # If Cymru fails or has limited data, try ip-api
-        if result.asn == 0 or not result.organization:
-            ipapi_result = self._lookup_ipapi(ip_address)
+        # If ip-api has limited data, try Team Cymru DNS as backup
+        if result.asn == 0:
+            cymru_result = self._lookup_cymru(ip_address)
             # Merge results
-            if ipapi_result.asn > 0 and result.asn == 0:
-                result.asn = ipapi_result.asn
-                result.asn_name = ipapi_result.asn_name
-            if ipapi_result.organization and not result.organization:
-                result.organization = ipapi_result.organization
-            if ipapi_result.country and not result.country:
-                result.country = ipapi_result.country
+            if cymru_result.asn > 0:
+                result.asn = cymru_result.asn
+                result.asn_name = cymru_result.asn_name or result.asn_name
+            if cymru_result.cidr and not result.cidr:
+                result.cidr = cymru_result.cidr
+            if cymru_result.rir and not result.rir:
+                result.rir = cymru_result.rir
+            if cymru_result.organization and not result.organization:
+                result.organization = cymru_result.organization
 
         # Classify organization
         result = self._classify_organization(result)
@@ -380,6 +382,8 @@ class ASNLookup:
 
         Query format: Reverse IP octets + .origin.asn.cymru.com
         Response: ASN | IP/Prefix | Country | RIR | Allocated Date
+
+        Uses dnspython if available, falls back to subprocess dig, then to socket
         """
         result = ASNInfo(lookup_source="cymru")
 
@@ -392,27 +396,40 @@ class ASNLookup:
             reversed_ip = '.'.join(reversed(octets))
             query = f"{reversed_ip}.origin.asn.cymru.com"
 
-            # DNS TXT lookup
+            txt_response = None
+
+            # Method 1: Try dnspython if available (most reliable)
             try:
-                answers = socket.gethostbyname_ex(query)
-                # gethostbyname_ex doesn't give TXT records, use different approach
-            except socket.gaierror:
-                pass
+                import dns.resolver
+                answers = dns.resolver.resolve(query, 'TXT')
+                for rdata in answers:
+                    txt_response = str(rdata).strip('"')
+                    break
+            except ImportError:
+                pass  # dnspython not installed
+            except Exception:
+                pass  # DNS query failed
 
-            # Use DNS resolver for TXT records
-            import subprocess
-            proc = subprocess.run(
-                ['dig', '+short', 'TXT', query],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            # Method 2: Try subprocess dig (if available)
+            if not txt_response:
+                try:
+                    import subprocess
+                    import shutil
+                    if shutil.which('dig'):
+                        proc = subprocess.run(
+                            ['dig', '+short', 'TXT', query],
+                            capture_output=True,
+                            text=True,
+                            timeout=3
+                        )
+                        if proc.returncode == 0 and proc.stdout.strip():
+                            txt_response = proc.stdout.strip().strip('"')
+                except Exception:
+                    pass
 
-            if proc.returncode == 0 and proc.stdout.strip():
-                # Parse response: "ASN | IP/Prefix | Country | RIR | Date"
-                txt = proc.stdout.strip().strip('"')
-                parts = [p.strip() for p in txt.split('|')]
-
+            # Parse response if we got one
+            if txt_response:
+                parts = [p.strip() for p in txt_response.split('|')]
                 if len(parts) >= 3:
                     result.asn = int(parts[0]) if parts[0].isdigit() else 0
                     result.cidr = parts[1] if len(parts) > 1 else ""
@@ -422,16 +439,37 @@ class ASNLookup:
                     # Get AS name with second query
                     if result.asn > 0:
                         as_query = f"AS{result.asn}.asn.cymru.com"
-                        proc2 = subprocess.run(
-                            ['dig', '+short', 'TXT', as_query],
-                            capture_output=True,
-                            text=True,
-                            timeout=5
-                        )
-                        if proc2.returncode == 0 and proc2.stdout.strip():
-                            # "ASN | Country | RIR | Date | AS Name"
-                            txt2 = proc2.stdout.strip().strip('"')
-                            parts2 = [p.strip() for p in txt2.split('|')]
+                        as_txt = None
+
+                        # Try dnspython first
+                        try:
+                            import dns.resolver
+                            answers = dns.resolver.resolve(as_query, 'TXT')
+                            for rdata in answers:
+                                as_txt = str(rdata).strip('"')
+                                break
+                        except Exception:
+                            pass
+
+                        # Fallback to dig
+                        if not as_txt:
+                            try:
+                                import subprocess
+                                import shutil
+                                if shutil.which('dig'):
+                                    proc2 = subprocess.run(
+                                        ['dig', '+short', 'TXT', as_query],
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=3
+                                    )
+                                    if proc2.returncode == 0 and proc2.stdout.strip():
+                                        as_txt = proc2.stdout.strip().strip('"')
+                            except Exception:
+                                pass
+
+                        if as_txt:
+                            parts2 = [p.strip() for p in as_txt.split('|')]
                             if len(parts2) >= 5:
                                 result.asn_name = parts2[4]
                                 result.organization = parts2[4]
@@ -617,7 +655,8 @@ class TTLAnalyzer:
         32: ["Embedded", "Legacy Windows"],
     }
 
-    def __init__(self):
+    def __init__(self, max_ips: int = 2000):
+        self.max_ips = max_ips  # Memory-bounded IP tracking
         self.ttl_history: Dict[str, List[Tuple[float, int]]] = {}  # IP -> [(timestamp, ttl), ...]
         self.hop_estimates: Dict[str, int] = {}  # IP -> estimated hops
         self.os_guesses: Dict[str, str] = {}  # IP -> OS guess
@@ -636,14 +675,24 @@ class TTLAnalyzer:
         """
         timestamp = timestamp or time.time()
 
-        # Store history
+        # Store history with global IP limit
         if ip not in self.ttl_history:
+            # Evict oldest IPs if at capacity
+            if len(self.ttl_history) >= self.max_ips:
+                # Remove 20% oldest IPs by last observation time
+                ip_times = [(k, v[-1][0] if v else 0) for k, v in self.ttl_history.items()]
+                ip_times.sort(key=lambda x: x[1])
+                evict_count = self.max_ips // 5
+                for k, _ in ip_times[:evict_count]:
+                    del self.ttl_history[k]
+                    self.hop_estimates.pop(k, None)
+                    self.os_guesses.pop(k, None)
             self.ttl_history[ip] = []
         self.ttl_history[ip].append((timestamp, ttl))
 
-        # Keep last 100 observations per IP
-        if len(self.ttl_history[ip]) > 100:
-            self.ttl_history[ip] = self.ttl_history[ip][-100:]
+        # Keep last 50 observations per IP (reduced from 100)
+        if len(self.ttl_history[ip]) > 50:
+            self.ttl_history[ip] = self.ttl_history[ip][-50:]
 
         # Estimate initial TTL and hops
         initial_ttl, hops = self._estimate_initial_ttl(ttl)

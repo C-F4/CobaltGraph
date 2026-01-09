@@ -22,10 +22,24 @@ Cobalt Graph passively monitors network traffic to detect and score potential th
 
 ## Modes of Operation
 
-| Mode | Description | Requirements |
-|------|-------------|--------------|
-| **Device** | Monitors only this machine's connections | No root required |
-| **Network** | Monitors entire network segment | Root + promiscuous mode |
+| Mode | Focus | What It Shows | Requirements |
+|------|-------|---------------|--------------|
+| **Device** | External destinations | Where THIS machine connects to (remote IPs, orgs, threat levels) | No root required |
+| **Network** | LAN reconnaissance | Devices ON your network + where they connect to (MAC, vendor, hostname, flows) | Root + promiscuous mode |
+
+### Mode Comparison
+
+**Device Mode** (non-root):
+- Monitors outbound connections from the local machine only
+- Shows external destination IPs, organizations, and threat scores
+- Uses `ss`/`netstat` for connection tracking
+- Panel shows: "DESTINATIONS" with external IP:port listings
+
+**Network Mode** (sudo):
+- Discovers ALL devices on the local network via passive ARP/broadcast monitoring
+- Tracks where each LAN device connects externally
+- Shows MAC addresses, vendors, hostnames, and connection flows
+- Panel shows: "LAN DISCOVERY" with device→destination mappings
 
 ---
 
@@ -93,8 +107,15 @@ The terminal UI displays:
 - **Threat Posture**: Current threat level with top threat radar visualization
 - **Threat Globe**: Geographic visualization of connection destinations
 - **Connection Table**: Real-time connection log with enrichment data (IP, port, protocol, organization, threat score)
-- **Network Topology** (network mode): Device-to-destination flow mapping with MAC addresses, IPs, and protocol types
-- **Device Discovery** (device mode): Discovered devices with MAC addresses, vendors, and threat assessments
+- **LAN Discovery** (network mode): Device-to-destination flow mapping showing:
+  - Local devices by MAC address and vendor
+  - Hostname resolution (passive DNS)
+  - Threat scores aggregated from connections
+  - Top external destinations per device
+- **Destinations** (device mode): External connection targets showing:
+  - Remote IP addresses and ports
+  - Organization and threat level
+  - Connection counts
 
 ### Display Information
 

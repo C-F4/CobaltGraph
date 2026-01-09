@@ -162,8 +162,8 @@ class Database:
 
                 # Performance indexes - covering indexes for common queries
                 indexes = [
-                    # Primary time-series access pattern
-                    ("idx_timestamp_desc", "connections(timestamp DESC)"),
+                    # Primary time-series access pattern (idx_timestamp for backwards compat)
+                    ("idx_timestamp", "connections(timestamp DESC)"),
                     # Threat dashboard queries
                     ("idx_threat_time", "connections(threat_score DESC, timestamp DESC)"),
                     # Device tracking
@@ -578,7 +578,8 @@ class Database:
             with self.lock:
                 cursor = self.conn.execute("""
                     SELECT src_mac, src_ip, dst_ip, dst_port, dst_country, dst_lat, dst_lon,
-                           dst_org, dst_hostname, threat_score, timestamp, device_vendor, protocol,
+                           dst_org, dst_hostname, threat_score, timestamp, device_vendor,
+                           COALESCE(protocol, 'TCP') as protocol,
                            dst_asn, dst_asn_name, dst_org_type, dst_cidr,
                            ttl_observed, ttl_initial, hop_count, os_fingerprint, org_trust_score
                     FROM connections
@@ -601,6 +602,9 @@ class Database:
 
     def get_connection_count(self) -> int:
         """Fast connection count (cached in SQLite)"""
+        # Flush pending to ensure accurate count
+        self._flush_batch()
+
         try:
             with self.lock:
                 cursor = self.conn.execute("SELECT COUNT(*) FROM connections")
