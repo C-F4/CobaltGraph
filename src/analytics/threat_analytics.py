@@ -19,7 +19,7 @@ Features:
 import logging
 import time
 import traceback
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Set, Any
@@ -282,12 +282,15 @@ class ConnectionGraph:
     - Temporal patterns
     """
 
-    def __init__(self):
+    def __init__(self, max_nodes: int = 3000, max_asns: int = 500):
         self.graph = nx.DiGraph()
         self.org_graph = nx.Graph()  # Undirected org-level graph
         self.asn_stats: Dict[int, Dict] = defaultdict(lambda: {
             "connections": 0, "threat_sum": 0, "ips": set()
         })
+        self._max_nodes = max_nodes
+        self._max_asns = max_asns
+        self._prune_counter = 0
 
     def add_connection(
         self,
@@ -359,6 +362,12 @@ class ConnectionGraph:
             if not self.org_graph.has_edge("local", dst_org):
                 self.org_graph.add_edge("local", dst_org, weight=0)
             self.org_graph.edges["local", dst_org]["weight"] += 1
+
+        # Periodic pruning to bound memory
+        self._prune_counter += 1
+        if self._prune_counter >= 100:
+            self._prune_counter = 0
+            self._prune_if_needed()
 
     def get_high_centrality_nodes(self, top_n: int = 10) -> List[Tuple[str, float]]:
         """
@@ -494,6 +503,62 @@ class ConnectionGraph:
             "unique_orgs": max(0, self.org_graph.number_of_nodes() - 1),  # Exclude "local"
         }
 
+    def _prune_if_needed(self):
+        """
+        Prune old/low-activity nodes to bound memory usage
+
+        Removes nodes that:
+        - Have oldest last_seen timestamps
+        - Have lowest threat scores
+        """
+        import time
+        now = time.time()
+
+        # Prune main graph if too large
+        if self.graph.number_of_nodes() > self._max_nodes:
+            # Get node scores: weighted by recency and threat
+            node_scores = []
+            for node in self.graph.nodes():
+                data = self.graph.nodes[node]
+                last_seen = data.get("last_seen", 0)
+                threat_scores = data.get("threat_scores", [0])
+                avg_threat = np.mean(threat_scores) if threat_scores else 0
+                # Score: recency (0-1) + threat (0-1)
+                recency = max(0, 1 - (now - last_seen) / 3600)  # 1 hour window
+                node_scores.append((node, recency + avg_threat))
+
+            # Sort by score, remove lowest 20%
+            node_scores.sort(key=lambda x: x[1])
+            remove_count = len(node_scores) // 5
+            for node, _ in node_scores[:remove_count]:
+                if node != "local":  # Keep local node
+                    self.graph.remove_node(node)
+
+        # Prune ASN stats if too large
+        if len(self.asn_stats) > self._max_asns:
+            # Keep ASNs with most connections
+            sorted_asns = sorted(
+                self.asn_stats.items(),
+                key=lambda x: x[1]["connections"],
+                reverse=True
+            )
+            keep = dict(sorted_asns[:self._max_asns * 4 // 5])
+            self.asn_stats = defaultdict(lambda: {
+                "connections": 0, "threat_sum": 0, "ips": set()
+            }, keep)
+
+        # Prune org graph if too large
+        if self.org_graph.number_of_nodes() > self._max_nodes // 2:
+            # Remove low-weight edges and isolated nodes
+            edges_to_remove = [
+                (u, v) for u, v, d in self.org_graph.edges(data=True)
+                if d.get("weight", 0) < 3
+            ]
+            self.org_graph.remove_edges_from(edges_to_remove)
+            # Remove isolated nodes (except "local")
+            isolated = [n for n in nx.isolates(self.org_graph) if n != "local"]
+            self.org_graph.remove_nodes_from(isolated)
+
 
 class ThreatAnalytics:
     """
@@ -506,18 +571,20 @@ class ThreatAnalytics:
     - Scipy for statistical tests
     """
 
-    def __init__(self):
+    def __init__(self, max_threat_vectors: int = 5000, max_hourly_buckets: int = 168):
         self.anomaly_detector = AnomalyDetector()
         self.connection_graph = ConnectionGraph()
         self.threat_vectors: Dict[str, ThreatVector] = {}
+        self._max_threat_vectors = max_threat_vectors  # ~5000 unique IPs
 
-        # Time-windowed statistics
+        # Time-windowed statistics (168 hours = 1 week max)
         self.hourly_stats: Dict[int, Dict] = defaultdict(lambda: {
             "connections": 0, "threat_sum": 0, "high_threat": 0
         })
+        self._max_hourly_buckets = max_hourly_buckets
 
-        # Threat score history for trend analysis
-        self.score_history: List[Tuple[float, float]] = []  # (timestamp, score)
+        # Threat score history for trend analysis (bounded deque for memory efficiency)
+        self.score_history: deque = deque(maxlen=5000)  # (timestamp, score)
 
     def process_connection(
         self,
@@ -598,17 +665,30 @@ class ThreatAnalytics:
                 self.anomaly_detector.update_baseline(list(self.threat_vectors.values()))
             anomaly = self.anomaly_detector.detect(tv)
 
-        # Time-based statistics
+        # Time-based statistics with memory bounds
         hour = int(timestamp // 3600)
         self.hourly_stats[hour]["connections"] += 1
         self.hourly_stats[hour]["threat_sum"] += threat_score
         if threat_score >= 0.7:
             self.hourly_stats[hour]["high_threat"] += 1
 
-        # Score history for trends
+        # Prune old hourly buckets (keep last week)
+        if len(self.hourly_stats) > self._max_hourly_buckets:
+            oldest = min(self.hourly_stats.keys())
+            del self.hourly_stats[oldest]
+
+        # Bound threat_vectors dict
+        if len(self.threat_vectors) > self._max_threat_vectors:
+            # Remove lowest-scored 20%
+            sorted_vectors = sorted(
+                self.threat_vectors.items(),
+                key=lambda x: x[1].score,
+                reverse=True
+            )
+            self.threat_vectors = dict(sorted_vectors[:self._max_threat_vectors * 4 // 5])
+
+        # Score history for trends (deque auto-evicts oldest)
         self.score_history.append((timestamp, threat_score))
-        if len(self.score_history) > 10000:
-            self.score_history = self.score_history[-5000:]
 
         # Build result
         result = {

@@ -195,7 +195,8 @@ class DataPipeline:
         self.consensus_scorer = None
         self.threat_analytics = None
         self.metadata_aggregator = None
-        self.intelligence_aggregator = None  # NEW: Intelligence aggregator for dashboard
+        self.intelligence_aggregator = None  # Intelligence aggregator for dashboard
+        self.device_enrichment = None  # Passive device hostname/org enrichment
         self.database = None
         self.exporter = None
 
@@ -274,6 +275,23 @@ class DataPipeline:
                 logger.info("✅ Intelligence Aggregator initialized (dashboard support)")
         except Exception as e:
             logger.warning(f"⚠️ Intelligence Aggregator unavailable: {e}")
+
+        # Device Enrichment (passive hostname resolution)
+        try:
+            from src.services.device_enrichment import DeviceEnrichment
+            # Share ASN lookup from consensus scorer if available
+            asn_lookup = None
+            if self.consensus_scorer and hasattr(self.consensus_scorer, 'asn_lookup'):
+                asn_lookup = self.consensus_scorer.asn_lookup
+            self.device_enrichment = DeviceEnrichment(
+                cache_size=5000,
+                cache_ttl=3600,
+                dns_timeout=1.0,
+                asn_lookup=asn_lookup
+            )
+            logger.info("✅ DeviceEnrichment initialized (passive hostname resolution)")
+        except Exception as e:
+            logger.warning(f"⚠️ DeviceEnrichment unavailable: {e}")
 
     def start(self):
         """Start the pipeline processing threads"""
@@ -474,13 +492,17 @@ class DataPipeline:
 
             self._seen_connections[key] = now
 
-            # Cleanup old entries periodically
-            if len(self._seen_connections) > 10000:
+            # Cleanup old entries more aggressively (memory optimization)
+            if len(self._seen_connections) > 5000:
                 cutoff = now - self.DEDUP_WINDOW
                 self._seen_connections = {
                     k: v for k, v in self._seen_connections.items()
                     if v > cutoff
                 }
+                # If still too large, keep only most recent 4000
+                if len(self._seen_connections) > 4000:
+                    sorted_items = sorted(self._seen_connections.items(), key=lambda x: x[1], reverse=True)
+                    self._seen_connections = dict(sorted_items[:4000])
 
         return False
 
@@ -507,6 +529,7 @@ class DataPipeline:
         Process a device discovery event (ARP, broadcast, or connection source)
 
         Persists discovered devices to the database for the Device Discovery widget.
+        Now includes passive hostname enrichment.
         """
         if not self.database:
             return
@@ -520,6 +543,15 @@ class DataPipeline:
             vendor = raw_event.get("vendor")
             packet_type = raw_event.get("packet_type", "unknown")
 
+            # Enrich device with hostname (passive, uses OS DNS cache)
+            hostname = None
+            if ip and self.device_enrichment:
+                try:
+                    enrichment = self.device_enrichment.enrich_device(ip, mac)
+                    hostname = enrichment.get("hostname")
+                except Exception as e:
+                    logger.debug(f"Device enrichment failed for {ip}: {e}")
+
             # For connection events, also get threat score from the associated connection
             threat_score = 0.0
             if packet_type == "connection":
@@ -527,17 +559,19 @@ class DataPipeline:
                 # For now just track the device
                 pass
 
-            # Persist to database
+            # Persist to database with enrichment data
             self.database.upsert_device(
                 mac=mac,
                 ip=ip,
                 vendor=vendor,
+                hostname=hostname,
                 packet_type=packet_type,
                 threat_score=threat_score
             )
 
             # Log discovery of new devices (first time only)
-            logger.debug(f"Device event: {packet_type} from {mac} ({vendor or 'Unknown'})")
+            host_info = f" [{hostname}]" if hostname else ""
+            logger.debug(f"Device event: {packet_type} from {mac} ({vendor or 'Unknown'}){host_info}")
 
         except Exception as e:
             logger.debug(
@@ -674,11 +708,32 @@ class DataPipeline:
                         with self.stats_lock:
                             self.stats.anomalies_detected += 1
 
+                        severity = "CRITICAL" if anomaly_score > 0.8 else "HIGH" if anomaly_score > 0.5 else "MEDIUM"
+                        message = f"{anomaly_type.upper()}: {dst_ip} (score: {anomaly_score:.2f})"
+
+                        # Store anomaly event in database for dashboard retrieval
+                        if self.database:
+                            try:
+                                import json
+                                self.database.add_event(
+                                    event_type="anomaly",
+                                    severity=severity,
+                                    message=message,
+                                    src_ip=src_ip,
+                                    dst_ip=dst_ip,
+                                    dst_port=dst_port,
+                                    threat_score=anomaly_score,
+                                    metadata=json.dumps({
+                                        'anomaly_type': anomaly_type,
+                                        'factors': anomaly.get("factors", []),
+                                    })
+                                )
+                            except Exception as e:
+                                logger.debug(f"Failed to store anomaly event: {e}")
+
                         # Post anomaly event to dashboard UIEventHandler
                         try:
                             from src.utils.logging_config import UIEventPoster
-                            severity = "CRITICAL" if anomaly_score > 0.8 else "HIGH" if anomaly_score > 0.5 else "MEDIUM"
-                            message = f"{anomaly_type.upper()}: {dst_ip} (score: {anomaly_score:.2f})"
                             UIEventPoster.anomaly(message, severity, {
                                 'dst_ip': dst_ip,
                                 'anomaly_type': anomaly_type,
@@ -764,6 +819,39 @@ class DataPipeline:
                         ip=src_ip,
                         vendor=raw_conn.get("device_vendor"),
                         packet_type="connection",
+                        threat_score=threat_score
+                    )
+                except Exception:
+                    pass
+
+            # Log high-threat events for dashboard anomaly panel
+            if threat_score >= 0.7:
+                try:
+                    severity = "CRITICAL" if threat_score >= 0.85 else "HIGH"
+                    org_name = asn_data.get("dst_org", "Unknown")
+                    self.database.add_event(
+                        event_type="high_threat",
+                        severity=severity,
+                        message=f"High threat: {dst_ip}:{dst_port} ({org_name})",
+                        src_ip=src_ip,
+                        dst_ip=dst_ip,
+                        dst_port=dst_port,
+                        threat_score=threat_score,
+                        org_name=org_name
+                    )
+                except Exception:
+                    pass
+
+            # Log uncertain consensus for dashboard
+            if high_uncertainty:
+                try:
+                    self.database.add_event(
+                        event_type="consensus_uncertain",
+                        severity="MEDIUM",
+                        message=f"Uncertain consensus: {dst_ip}:{dst_port} (spread too high)",
+                        src_ip=src_ip,
+                        dst_ip=dst_ip,
+                        dst_port=dst_port,
                         threat_score=threat_score
                     )
                 except Exception:
