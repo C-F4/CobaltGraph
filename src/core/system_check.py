@@ -127,16 +127,11 @@ class SystemChecker:
                     critical=True
                 ))
 
-        # Core dependencies (required for full functionality)
+        # Core dependencies (required for full functionality - Pure Python only)
         core_extra_deps = [
-            ("scapy", "Network packet capture for network-wide mode", True),
-            ("rich", "Terminal formatting and tables", False),
+            ("rich", "Terminal formatting and tables", True),
             ("textual", "Reactive Terminal UI framework", True),
-            ("numpy", "Consensus calculations and threat vectors", True),
-            ("pandas", "Data analysis and export processing", True),
-            ("scipy", "Statistical threat scoring", True),
             ("networkx", "Network topology and connection analysis", True),
-            ("matplotlib", "Visualization and plotting", False),
         ]
 
         for module_name, description, is_critical in core_extra_deps:
