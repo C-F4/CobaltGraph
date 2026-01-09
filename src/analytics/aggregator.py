@@ -70,7 +70,7 @@ class ThreatTimeSeries:
         "org_trust_score": "float32",
     }
 
-    def __init__(self, max_records: int = 100000):
+    def __init__(self, max_records: int = 30000):  # Reduced from 100k for memory (-25MB)
         self.max_records = max_records
         self._lock = Lock()
 

@@ -24,7 +24,8 @@ class GeoLookup:
         self.config = config
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "CobaltGraph/1.0"})
-        self.cache = {}  # Simple in-memory cache
+        self.cache = {}  # LRU-bounded cache (max 5000 entries)
+        self._cache_max = 5000
 
     def lookup(self, ip_address: str) -> Dict:
         """
@@ -71,7 +72,13 @@ class GeoLookup:
                         "isp": data.get("isp", "Unknown"),
                     }
 
-                    # Cache result
+                    # Cache result with LRU eviction
+                    if len(self.cache) >= self._cache_max:
+                        # Remove oldest 20% of entries
+                        evict_count = self._cache_max // 5
+                        keys_to_remove = list(self.cache.keys())[:evict_count]
+                        for k in keys_to_remove:
+                            del self.cache[k]
                     self.cache[ip_address] = result
 
         except (RequestException, Timeout, KeyError, ValueError) as e:

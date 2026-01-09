@@ -67,6 +67,7 @@ def setup_logging(
     file_level: Optional[int] = None,
     use_color: bool = True,
     detailed_file_logs: bool = True,
+    disable_console: bool = False,
 ) -> None:
     """
     Configure comprehensive logging for CobaltGraph.
@@ -81,6 +82,7 @@ def setup_logging(
         file_level: File log level (overrides log_level for file)
         use_color: Whether to use colored output in console
         detailed_file_logs: Whether to include file/line numbers in file logs
+        disable_console: If True, only log to file (for TUI mode where console output is hidden)
 
     Example:
         >>> from src.utils.logging_config import setup_logging
@@ -114,12 +116,13 @@ def setup_logging(
     # Remove existing handlers
     root_logger.handlers.clear()
 
-    # Console handler (with color)
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(console_level)
-    console_formatter = ColoredFormatter(fmt=DEFAULT_FORMAT, use_color=use_color)
-    console_handler.setFormatter(console_formatter)
-    root_logger.addHandler(console_handler)
+    # Console handler (with color) - skip if running in TUI mode
+    if not disable_console:
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(console_level)
+        console_formatter = ColoredFormatter(fmt=DEFAULT_FORMAT, use_color=use_color)
+        console_handler.setFormatter(console_formatter)
+        root_logger.addHandler(console_handler)
 
     # File handler (rotating, with detailed format)
     try:

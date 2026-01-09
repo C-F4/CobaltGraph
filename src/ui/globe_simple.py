@@ -123,6 +123,23 @@ class SimpleGlobe:
                 # Apply color
                 canvas[y][x] = Text(symbol, style=color)
 
+        # Render legend in bottom-right corner
+        legend = [
+            ("●Critical", "bold red"),
+            ("◉High", "red"),
+            ("○Medium", "yellow"),
+            ("·Low", "green"),
+        ]
+        legend_x = max(0, self.width - 10)
+        legend_y = max(0, self.height - len(legend) - 1)
+        for i, (text, style) in enumerate(legend):
+            y = legend_y + i
+            if y < self.height:
+                for j, ch in enumerate(text):
+                    x = legend_x + j
+                    if x < self.width:
+                        canvas[y][x] = Text(ch, style=style)
+
         # Convert to string, handling Text objects
         lines = []
         for row in canvas:
