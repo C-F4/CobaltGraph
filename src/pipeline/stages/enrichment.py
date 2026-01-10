@@ -12,7 +12,7 @@ from typing import Dict, Optional, Any
 
 from .base import PipelineStage, StageContext
 from ..config import PipelineConfig
-from ..events import ConnectionEvent, GeoData, ASNData, ThreatIntelData, TracerouteData, StageResult
+from ..events import ConnectionEvent, GeoData, ASNData, ThreatIntelData, HopData, StageResult
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,6 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
         self._threat_lookups = 0
         self._threat_hits = 0
         self._threat_failures = 0
-        self._traceroute_lookups = 0
-        self._traceroute_verified = 0
-        self._traceroute_failures = 0
         self._parallel_speedup_sum = 0.0
         self._enrichment_count = 0
 
@@ -77,8 +74,7 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
 
         self.logger.info(
             f"EnrichmentStage shutting down "
-            f"(geo_lookups={self._geo_lookups}, threat_lookups={self._threat_lookups}, "
-            f"traceroute_lookups={self._traceroute_lookups}, verified={self._traceroute_verified})"
+            f"(geo_lookups={self._geo_lookups}, threat_lookups={self._threat_lookups})"
         )
 
     def process(self, event: ConnectionEvent, context: StageContext) -> StageResult:
@@ -111,7 +107,7 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
 
         # Run enrichment in parallel
         start_time = time.perf_counter()
-        geo_data, threat_data, traceroute_data = self._parallel_enrich(dst_ip, context)
+        geo_data, threat_data = self._parallel_enrich(dst_ip, context)
         parallel_time = time.perf_counter() - start_time
 
         # Apply geo data
@@ -147,20 +143,6 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
             )
             event.enrichment_sources.append("threat_intel")
 
-        # Apply traceroute data for verified hop counts
-        if traceroute_data:
-            event.traceroute = TracerouteData(
-                hop_count=traceroute_data.get("hop_count", 0),
-                verified=traceroute_data.get("verified", False),
-                ttl_observed=traceroute_data.get("ttl_observed"),
-                ttl_initial=traceroute_data.get("ttl_initial"),
-                latency_ms=traceroute_data.get("latency_ms"),
-                hops=traceroute_data.get("hops", []),
-                error=traceroute_data.get("error"),
-            )
-            if traceroute_data.get("verified"):
-                event.enrichment_sources.append("traceroute")
-
         # Track parallel speedup
         self._enrichment_count += 1
         result.add_metric("parallel_time_ms", parallel_time * 1000)
@@ -176,26 +158,24 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
         context: StageContext
     ) -> tuple:
         """
-        Run geo, threat intel, and traceroute lookups in parallel.
+        Run geo and threat intel lookups in parallel.
 
         Args:
             dst_ip: Destination IP to look up
             context: Pipeline context with services
 
         Returns:
-            Tuple of (geo_data, threat_data, traceroute_data)
+            Tuple of (geo_data, threat_data)
         """
         geo_data = {}
         threat_data = {}
-        traceroute_data = {}
         timeout = self.config.enrichment.timeout_seconds
 
         if not self._executor:
             # Fallback to sequential if no executor
             geo_data = self._enrich_geo(dst_ip, context)
             threat_data = self._enrich_threat_intel(dst_ip, context)
-            traceroute_data = self._enrich_traceroute(dst_ip, context)
-            return geo_data, threat_data, traceroute_data
+            return geo_data, threat_data
 
         futures = {}
 
@@ -211,12 +191,6 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
                 self._enrich_threat_intel, dst_ip, context
             )
 
-        # Submit traceroute lookup (for verified hop counts)
-        if context.traceroute_service:
-            futures["traceroute"] = self._executor.submit(
-                self._enrich_traceroute, dst_ip, context
-            )
-
         # Collect results with timeout
         for name, future in futures.items():
             try:
@@ -225,26 +199,20 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
                     geo_data = result
                 elif name == "threat":
                     threat_data = result
-                elif name == "traceroute":
-                    traceroute_data = result
             except TimeoutError:
                 self.logger.debug(f"{name} lookup timeout for {dst_ip}")
                 if name == "geo":
                     self._geo_failures += 1
-                elif name == "threat":
-                    self._threat_failures += 1
                 else:
-                    self._traceroute_failures += 1
+                    self._threat_failures += 1
             except Exception as e:
                 self.logger.debug(f"{name} lookup failed for {dst_ip}: {e}")
                 if name == "geo":
                     self._geo_failures += 1
-                elif name == "threat":
-                    self._threat_failures += 1
                 else:
-                    self._traceroute_failures += 1
+                    self._threat_failures += 1
 
-        return geo_data, threat_data, traceroute_data
+        return geo_data, threat_data
 
     def _enrich_geo(self, dst_ip: str, context: StageContext) -> Dict[str, Any]:
         """
@@ -300,45 +268,6 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
             self.logger.debug(f"Threat intel lookup failed for {dst_ip}: {e}")
             return {}
 
-    def _enrich_traceroute(self, dst_ip: str, context: StageContext) -> Dict[str, Any]:
-        """
-        Traceroute lookup for verified hop counts.
-
-        Performs actual traceroute to the destination IP to get verified
-        hop count information instead of just TTL estimation.
-
-        Args:
-            dst_ip: Destination IP
-            context: Pipeline context
-
-        Returns:
-            Traceroute data dict with hop_count, verified flag, etc.
-        """
-        self._traceroute_lookups += 1
-
-        if not context.traceroute_service:
-            return {}
-
-        try:
-            result = context.traceroute_service.trace(dst_ip, use_cache=True)
-            if result:
-                if result.verified:
-                    self._traceroute_verified += 1
-                return {
-                    "hop_count": result.hop_count,
-                    "verified": result.verified,
-                    "ttl_observed": result.ttl_estimated if not result.verified else None,
-                    "ttl_initial": None,
-                    "latency_ms": result.latency_ms,
-                    "hops": result.hops,
-                    "error": result.error,
-                }
-            return {}
-        except Exception as e:
-            self._traceroute_failures += 1
-            self.logger.debug(f"Traceroute lookup failed for {dst_ip}: {e}")
-            return {}
-
     def get_stats(self) -> Dict:
         """Get enrichment stage statistics"""
         stats = super().get_stats()
@@ -351,10 +280,6 @@ class EnrichmentStage(PipelineStage[ConnectionEvent]):
             "threat_hits": self._threat_hits,
             "threat_failures": self._threat_failures,
             "threat_hit_rate": self._threat_hits / max(self._threat_lookups, 1),
-            "traceroute_lookups": self._traceroute_lookups,
-            "traceroute_verified": self._traceroute_verified,
-            "traceroute_failures": self._traceroute_failures,
-            "traceroute_verify_rate": self._traceroute_verified / max(self._traceroute_lookups, 1),
         })
         return stats
 

@@ -65,15 +65,12 @@ class ThreatIntelData:
 
 
 @dataclass
-class TracerouteData:
-    """Traceroute hop data for network distance verification"""
-    hop_count: int = 0                           # Verified or estimated hop count
-    verified: bool = False                       # True if from actual traceroute
+class HopData:
+    """TTL-based hop estimation data"""
+    hop_count: int = 0                           # Estimated hop count from TTL
     ttl_observed: Optional[int] = None           # Observed TTL from packet
     ttl_initial: Optional[int] = None            # Estimated initial TTL
-    latency_ms: Optional[float] = None           # Round-trip latency
-    hops: List[Dict] = field(default_factory=list)  # Individual hop details
-    error: Optional[str] = None                  # Error if traceroute failed
+    os_fingerprint: Optional[str] = None         # OS guess from TTL
 
 
 @dataclass
@@ -129,7 +126,7 @@ class ConnectionEvent:
     geo: GeoData = field(default_factory=GeoData)
     asn: ASNData = field(default_factory=ASNData)
     threat_intel: ThreatIntelData = field(default_factory=ThreatIntelData)
-    traceroute: TracerouteData = field(default_factory=TracerouteData)
+    hop_data: HopData = field(default_factory=HopData)
 
     # Scoring
     consensus: ConsensusResult = field(default_factory=ConsensusResult)
@@ -185,11 +182,11 @@ class ConnectionEvent:
             "is_tor_exit": self.threat_intel.is_tor_exit,
             "abuse_score": self.threat_intel.abuse_score,
 
-            # Traceroute / Hop data
-            "hop_count": self.traceroute.hop_count,
-            "hop_verified": self.traceroute.verified,
-            "ttl_observed": self.traceroute.ttl_observed,
-            "ttl_initial": self.traceroute.ttl_initial,
+            # Hop data (TTL-based estimation)
+            "hop_count": self.hop_data.hop_count,
+            "ttl_observed": self.hop_data.ttl_observed,
+            "ttl_initial": self.hop_data.ttl_initial,
+            "os_fingerprint": self.hop_data.os_fingerprint,
 
             # Scoring
             "threat_score": self.consensus.final_score,
