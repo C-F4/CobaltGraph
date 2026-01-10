@@ -821,7 +821,13 @@ class SmartConnectionTable(Static):
                 port = str(conn.get('dst_port', '-'))
                 protocol = (conn.get('protocol') or 'TCP')[:5]
                 org = (conn.get('dst_org') or 'Unknown')[:15]
-                hops = str(conn.get('hop_count') or '-')
+                hop_count = conn.get('hop_count')
+                hop_verified = conn.get('hop_verified', False)
+                # Show verified indicator (✓) when hop count is from actual traceroute
+                if hop_count is not None:
+                    hops = f"{hop_count}{'✓' if hop_verified else ''}"
+                else:
+                    hops = '-'
                 country = (conn.get('dst_country') or '--')[:3]
 
                 # Uncertainty warning indicator (! suffix on score)
@@ -848,7 +854,7 @@ class SmartConnectionTable(Static):
                     f"[{threat_color}]{threat_indicator}[/]",
                     f"[{threat_color}]{score_display}[/]",
                     f"[{conf_color}]{confidence:.1f}[/]",
-                    f"[cyan]{hops}[/]",
+                    f"[{'green' if hop_verified else 'cyan'}]{hops}[/]",
                     f"[dim]{country}[/]",
                     key=row_key
                 )
@@ -1541,8 +1547,27 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         """Initialize dashboard on mount"""
         # Import heartbeat singleton for component health tracking
         from src.utils.heartbeat import heartbeat
+        import socket
+        import os
+        import pwd
 
-        self.title = f"CobaltGraph Enhanced - {self.mode.upper()} Mode"
+        # Get hostname and current user for display
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = "unknown"
+
+        try:
+            username = pwd.getpwuid(os.getuid()).pw_name
+        except Exception:
+            try:
+                username = os.getlogin()
+            except Exception:
+                username = os.environ.get("USER", "unknown")
+
+        self._hostname = hostname
+        self._username = username
+        self.title = f"CobaltGraph Enhanced - {self.mode.upper()} Mode │ {username}@{hostname}"
 
         if self.data_manager.connect():
             self.is_connected = True

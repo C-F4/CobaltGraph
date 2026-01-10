@@ -46,7 +46,8 @@ class Connection:
     # TTL and Hop detection fields
     ttl_observed: Optional[int] = None      # Observed TTL value
     ttl_initial: Optional[int] = None       # Estimated initial TTL
-    hop_count: Optional[int] = None         # Estimated network hops
+    hop_count: Optional[int] = None         # Network hops (verified or estimated)
+    hop_verified: bool = False              # True if hop_count is from traceroute
     os_fingerprint: Optional[str] = None    # OS guess from TTL
 
     # Trust scoring
@@ -91,6 +92,7 @@ class Connection:
             "ttl_observed": self.ttl_observed,
             "ttl_initial": self.ttl_initial,
             "hop_count": self.hop_count,
+            "hop_verified": self.hop_verified,
             "os_fingerprint": self.os_fingerprint,
             # Trust
             "org_trust_score": self.org_trust_score,

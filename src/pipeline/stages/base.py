@@ -33,6 +33,7 @@ class StageContext:
     geo_lookup: Any = None  # GeoLookup service
     asn_lookup: Any = None  # ASN lookup service
     threat_intel: Any = None  # Threat intel service
+    traceroute_service: Any = None  # Traceroute service for hop verification
     consensus_scorer: Any = None  # Consensus scoring engine
     device_enrichment: Any = None  # Device hostname resolution
 
