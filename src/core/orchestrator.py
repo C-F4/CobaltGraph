@@ -63,6 +63,7 @@ class ConnectionEvent:
 
     # Network path
     hop_count: Optional[int] = None
+    hop_verified: bool = False  # True if hop count is from actual traceroute
     ttl_observed: Optional[int] = None
     os_fingerprint: str = ""
 
@@ -91,6 +92,7 @@ class ConnectionEvent:
             "dst_org_type": self.dst_org_type,
             "org_trust_score": self.org_trust_score,
             "hop_count": self.hop_count,
+            "hop_verified": self.hop_verified,
             "ttl_observed": self.ttl_observed,
             "os_fingerprint": self.os_fingerprint,
             "anomaly_score": self.anomaly_score,
@@ -193,6 +195,7 @@ class DataPipeline:
         self.geo_lookup = None
         self.ip_reputation = None
         self.consensus_scorer = None
+        self.traceroute_service = None  # Traceroute for verified hop counts
         self.threat_analytics = None
         self.metadata_aggregator = None
         self.intelligence_aggregator = None  # Intelligence aggregator for dashboard
@@ -234,6 +237,20 @@ class DataPipeline:
             logger.info("✅ ConsensusThreatScorer initialized (4 scorers + BFT)")
         except Exception as e:
             logger.warning(f"⚠️ Consensus unavailable: {e}")
+
+        # Traceroute service for verified hop counts
+        try:
+            from src.services.traceroute_service import TracerouteService
+            self.traceroute_service = TracerouteService(
+                cache_size=1000,
+                cache_ttl=3600,
+                timeout_seconds=5,
+                max_hops=30,
+                workers=2  # Limit workers since traceroute is slow
+            )
+            logger.info("✅ TracerouteService initialized (verified hop counts)")
+        except Exception as e:
+            logger.warning(f"⚠️ TracerouteService unavailable: {e}")
 
         # Analytics engine
         try:
@@ -524,6 +541,24 @@ class DataPipeline:
         except Exception:
             return {}
 
+    def _enrich_traceroute(self, dst_ip: str) -> Dict:
+        """Traceroute enrichment for verified hop counts (for parallel execution)"""
+        if not self.traceroute_service:
+            return {}
+        try:
+            result = self.traceroute_service.trace(dst_ip, use_cache=True)
+            if result:
+                return {
+                    "hop_count": result.hop_count,
+                    "hop_verified": result.verified,
+                    "latency_ms": result.latency_ms,
+                    "hops": result.hops,
+                    "error": result.error,
+                }
+            return {}
+        except Exception:
+            return {}
+
     def _process_device_event(self, raw_event: Dict):
         """
         Process a device discovery event (ARP, broadcast, or connection source)
@@ -601,13 +636,15 @@ class DataPipeline:
 
         start_time = time.time()
 
-        # PARALLEL ENRICHMENT: Run geo and threat_intel simultaneously
+        # PARALLEL ENRICHMENT: Run geo, threat_intel, and traceroute simultaneously
         geo_future = self._enrichment_executor.submit(self._enrich_geo, dst_ip)
         threat_future = self._enrichment_executor.submit(self._enrich_threat_intel, dst_ip)
+        traceroute_future = self._enrichment_executor.submit(self._enrich_traceroute, dst_ip)
 
         # Collect results with timeout
         geo_data = {}
         threat_intel = {}
+        traceroute_data = {}
         try:
             geo_data = geo_future.result(timeout=self.ENRICHMENT_TIMEOUT)
         except Exception:
@@ -616,10 +653,15 @@ class DataPipeline:
             threat_intel = threat_future.result(timeout=self.ENRICHMENT_TIMEOUT)
         except Exception:
             pass
+        try:
+            # Longer timeout for traceroute as it's inherently slower
+            traceroute_data = traceroute_future.result(timeout=self.ENRICHMENT_TIMEOUT * 3)
+        except Exception:
+            pass
 
-        # Track parallel speedup (estimate: 2 enrichment ops would take 2x if sequential)
+        # Track parallel speedup (estimate: 3 enrichment ops would take 3x if sequential)
         parallel_time = time.time() - start_time
-        sequential_estimate = parallel_time * 2  # 2 parallel enrichment operations
+        sequential_estimate = parallel_time * 3  # 3 parallel enrichment operations
         speedup = sequential_estimate / max(parallel_time, 0.001) if parallel_time > 0 else 1.0
         self.perf_stats["enrichment_count"] += 1
         self.perf_stats["parallel_speedup_sum"] += speedup
@@ -666,14 +708,24 @@ class DataPipeline:
             threat_score = threat_intel.get("threat_score", 0.2)
             scoring_method = "legacy"
 
-        # Extract ASN/org data
+        # Extract ASN/org data - prefer traceroute-verified hop counts
+        hop_count = consensus_details.get("hop_count")
+        hop_verified = False
+        if traceroute_data and traceroute_data.get("hop_verified"):
+            hop_count = traceroute_data.get("hop_count")
+            hop_verified = True
+        elif traceroute_data and traceroute_data.get("hop_count"):
+            # Use traceroute hop count even if not verified (from cache or TTL estimate)
+            hop_count = traceroute_data.get("hop_count")
+
         asn_data = {
             "dst_asn": consensus_details.get("dst_asn"),
             "dst_asn_name": consensus_details.get("dst_asn_name", ""),
             "dst_org": consensus_details.get("dst_org", ""),
             "dst_org_type": consensus_details.get("dst_org_type", ""),
             "org_trust_score": consensus_details.get("org_trust_score", 0.5),
-            "hop_count": consensus_details.get("hop_count"),
+            "hop_count": hop_count,
+            "hop_verified": hop_verified,
             "ttl_observed": consensus_details.get("ttl_observed"),
             "os_fingerprint": consensus_details.get("os_fingerprint", ""),
         }
@@ -791,6 +843,7 @@ class DataPipeline:
                     "dst_org_type": asn_data.get("dst_org_type"),
                     "dst_cidr": consensus_details.get("dst_cidr"),
                     "hop_count": asn_data.get("hop_count"),
+                    "hop_verified": asn_data.get("hop_verified", False),
                     "ttl_observed": asn_data.get("ttl_observed"),
                     "ttl_initial": consensus_details.get("ttl_initial"),
                     "os_fingerprint": asn_data.get("os_fingerprint"),
@@ -892,6 +945,7 @@ class DataPipeline:
             dst_org_type=asn_data.get("dst_org_type", ""),
             org_trust_score=asn_data.get("org_trust_score", 0.5),
             hop_count=asn_data.get("hop_count"),
+            hop_verified=asn_data.get("hop_verified", False),
             ttl_observed=asn_data.get("ttl_observed"),
             os_fingerprint=asn_data.get("os_fingerprint", ""),
             anomaly_score=anomaly_score,

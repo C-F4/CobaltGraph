@@ -6,6 +6,7 @@ Services:
 - GeoLookup: IP geolocation via ip-api.com
 - IPReputation: Threat intelligence (VirusTotal, AbuseIPDB)
 - ASNLookup: ASN/organization lookup with TTL-based hop detection
+- TracerouteService: Real network hop counting via traceroute
 """
 
 from .geo_lookup import GeoLookup
@@ -22,6 +23,15 @@ except ImportError:
     TTLAnalyzer = None
     ASN_AVAILABLE = False
 
+# Traceroute service with graceful fallback
+try:
+    from .traceroute_service import TracerouteService, TracerouteResult
+    TRACEROUTE_AVAILABLE = True
+except ImportError:
+    TracerouteService = None
+    TracerouteResult = None
+    TRACEROUTE_AVAILABLE = False
+
 __all__ = [
     "GeoLookup",
     "IPReputation",
@@ -30,4 +40,7 @@ __all__ = [
     "OrgType",
     "TTLAnalyzer",
     "ASN_AVAILABLE",
+    "TracerouteService",
+    "TracerouteResult",
+    "TRACEROUTE_AVAILABLE",
 ]
