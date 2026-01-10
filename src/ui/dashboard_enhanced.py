@@ -735,19 +735,20 @@ class SmartConnectionTable(Static):
         self.table = DataTable(id="connection_table")
         self._connection_map = {}  # Track connections by row key for detail modal
 
-        # Enhanced columns (12 total) - shows more enrichment data
+        # Enhanced columns (13 total) - shows more enrichment data + anomaly/spread
         self.table.add_column("Time", key="time", width=8)
-        self.table.add_column("Src", key="src_ip", width=12)       # NEW
+        self.table.add_column("Src", key="src_ip", width=12)
         self.table.add_column("Dst", key="dst_ip", width=15)
         self.table.add_column("Port", key="port", width=5)
-        self.table.add_column("Proto", key="proto", width=5)       # NEW
-        self.table.add_column("Org", key="org", width=15)
-        self.table.add_column("Type", key="org_type", width=8)
+        self.table.add_column("Proto", key="proto", width=5)
+        self.table.add_column("Org", key="org", width=12)
+        self.table.add_column("Type", key="org_type", width=7)
         self.table.add_column("Risk", key="threat", width=4)
-        self.table.add_column("Score", key="score", width=6)
-        self.table.add_column("Conf", key="conf", width=4)         # NEW
+        self.table.add_column("Score", key="score", width=5)
+        self.table.add_column("Anom", key="anomaly", width=4)      # Anomaly score
+        self.table.add_column("Sprd", key="spread", width=4)       # Score spread
         self.table.add_column("Hops", key="hops", width=4)
-        self.table.add_column("Geo", key="country", width=3)       # NEW
+        self.table.add_column("Geo", key="country", width=3)
 
         yield self.table
 
@@ -834,6 +835,36 @@ class SmartConnectionTable(Static):
                 # Confidence color (yellow if low, green if high)
                 conf_color = 'yellow' if confidence < 0.5 else 'green'
 
+                # Anomaly score - highlight if > 0.6
+                anomaly_score = float(conn.get('anomaly_score', 0) or 0)
+                if anomaly_score >= 0.8:
+                    anomaly_color = 'bold red'
+                    anomaly_display = f"{anomaly_score:.1f}!"
+                elif anomaly_score >= 0.6:
+                    anomaly_color = 'bold yellow'
+                    anomaly_display = f"{anomaly_score:.1f}"
+                elif anomaly_score > 0:
+                    anomaly_color = 'dim'
+                    anomaly_display = f"{anomaly_score:.1f}"
+                else:
+                    anomaly_color = 'dim'
+                    anomaly_display = '-'
+
+                # Score spread - shows consensus disagreement
+                score_spread = float(conn.get('score_spread', 0) or 0)
+                if score_spread >= 0.5:
+                    spread_color = 'bold yellow'
+                    spread_display = f"↔{score_spread:.1f}"  # High disagreement
+                elif score_spread >= 0.3:
+                    spread_color = 'yellow'
+                    spread_display = f"~{score_spread:.1f}"
+                elif score_spread > 0:
+                    spread_color = 'green'
+                    spread_display = f"✓{score_spread:.1f}"
+                else:
+                    spread_color = 'dim'
+                    spread_display = '-'
+
                 # Store connection for detail modal
                 row_key = str(conn.get('id', id(conn)))
                 self._connection_map[row_key] = conn
@@ -846,10 +877,11 @@ class SmartConnectionTable(Static):
                     f"[magenta]{port}[/]",
                     f"[dim]{protocol}[/]",
                     f"[white]{org}[/]",
-                    f"[{type_color}]{org_type:>8}[/]",
+                    f"[{type_color}]{org_type:>7}[/]",
                     f"[{threat_color}]{threat_indicator}[/]",
-                    f"[{threat_color}]{score_display}[/]",
-                    f"[{conf_color}]{confidence:.1f}[/]",
+                    f"[{threat_color}]{threat:.2f}[/]",
+                    f"[{anomaly_color}]{anomaly_display}[/]",
+                    f"[{spread_color}]{spread_display}[/]",
                     f"[cyan]{hops}[/]",
                     f"[dim]{country}[/]",
                     key=row_key
@@ -1257,6 +1289,50 @@ class ConnectionDetailModal(Static):
         lines.append(f"  [cyan]Method:[/cyan]         {scoring_method}")
         lines.append("")
 
+        # Individual Scorer Breakdown
+        lines.append("[bold cyan]═══ SCORER BREAKDOWN ═══[/bold cyan]")
+
+        # Get individual scores
+        score_statistical = conn.get('score_statistical')
+        score_rule_based = conn.get('score_rule_based')
+        score_ml_based = conn.get('score_ml_based')
+        score_organization = conn.get('score_organization')
+        anomaly_score = conn.get('anomaly_score')
+        score_spread = conn.get('score_spread')
+
+        def format_score(name: str, score, width: int = 10) -> str:
+            """Format a score with visual bar"""
+            if score is None:
+                return f"  [cyan]{name:16s}[/cyan] [dim]N/A[/dim]"
+            val = float(score)
+            bar_len = int(val * width)
+            if val >= 0.7:
+                color = 'red'
+            elif val >= 0.5:
+                color = 'yellow'
+            else:
+                color = 'green'
+            bar = f"[{color}]{'█' * bar_len}[/{color}][dim]{'░' * (width - bar_len)}[/dim]"
+            return f"  [cyan]{name:16s}[/cyan] {bar} [{color}]{val:.2f}[/{color}]"
+
+        lines.append(format_score("Statistical", score_statistical))
+        lines.append(format_score("Rule-based", score_rule_based))
+        lines.append(format_score("ML-based", score_ml_based))
+        lines.append(format_score("Organization", score_organization))
+        lines.append(format_score("Anomaly", anomaly_score))
+
+        # Score spread with interpretation
+        if score_spread is not None:
+            spread = float(score_spread)
+            if spread >= 0.5:
+                spread_desc = "[bold yellow]↔ High disagreement[/bold yellow]"
+            elif spread >= 0.3:
+                spread_desc = "[yellow]~ Moderate spread[/yellow]"
+            else:
+                spread_desc = "[green]✓ Strong consensus[/green]"
+            lines.append(f"  [cyan]Score Spread:[/cyan]    {spread:.2f} {spread_desc}")
+        lines.append("")
+
         lines.append("[dim]Press ESC or click outside to close[/dim]")
 
         content = "\n".join(lines)
@@ -1264,6 +1340,138 @@ class ConnectionDetailModal(Static):
             content,
             title="[bold cyan]🔍 CONNECTION DETAILS[/bold cyan]",
             border_style="cyan"
+        )
+
+
+class OrganizationIntelPanel(Static):
+    """
+    Organization Intelligence Panel with type distribution and trends.
+    Shows breakdown of org types with trend indicators (↑↓→).
+    """
+
+    DEFAULT_CSS = """
+    OrganizationIntelPanel {
+        height: 100%;
+        width: 100%;
+        padding: 1;
+        overflow: auto;
+    }
+    """
+
+    org_data = reactive(dict)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.org_data = {
+            'type_counts': {},
+            'type_threats': {},
+            'previous_counts': {},
+            'high_risk_orgs': [],
+        }
+
+    def watch_org_data(self, new_data: dict) -> None:
+        """Update when data changes"""
+        self.org_data = new_data
+        self.refresh()
+
+    def render(self):
+        """Render organization intelligence with trend indicators"""
+        type_counts = self.org_data.get('type_counts', {})
+        type_threats = self.org_data.get('type_threats', {})
+        previous_counts = self.org_data.get('previous_counts', {})
+        high_risk_orgs = self.org_data.get('high_risk_orgs', [])
+
+        if not type_counts:
+            return Panel(
+                "[dim]Collecting organization data...[/dim]\n\n"
+                "[cyan]Organization types will appear with:\n"
+                "- Connection counts\n"
+                "- Threat averages\n"
+                "- Trend indicators (↑↓→)[/cyan]",
+                title="[bold magenta]ORG INTEL[/bold magenta]",
+                border_style="magenta"
+            )
+
+        lines = []
+        lines.append("[bold magenta]┌─────────────────────────────────────┐[/bold magenta]")
+        lines.append("[bold magenta]│      ORGANIZATION INTELLIGENCE      │[/bold magenta]")
+        lines.append("[bold magenta]└─────────────────────────────────────┘[/bold magenta]")
+        lines.append("")
+
+        # Type distribution with trends
+        lines.append("[bold]📊 TYPE DISTRIBUTION:[/bold]")
+        lines.append("")
+
+        # Color mapping for org types
+        type_colors = {
+            'cloud': 'bold cyan',
+            'cdn': 'cyan',
+            'hosting': 'blue',
+            'isp': 'magenta',
+            'vpn': 'bold magenta',
+            'tor': 'bold red',
+            'enterprise': 'bold green',
+            'government': 'bold blue',
+            'education': 'green',
+            'unknown': 'dim white',
+        }
+
+        # Sort by count descending
+        total_count = sum(type_counts.values())
+        sorted_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
+
+        for org_type, count in sorted_types[:8]:
+            color = type_colors.get(org_type, 'white')
+            avg_threat = type_threats.get(org_type, 0.0)
+            prev_count = previous_counts.get(org_type, count)
+
+            # Calculate trend
+            if count > prev_count * 1.2:
+                trend = "[bold green]↑[/bold green]"  # Rising
+            elif count < prev_count * 0.8:
+                trend = "[bold red]↓[/bold red]"    # Falling
+            else:
+                trend = "[dim]→[/dim]"              # Stable
+
+            # Threat indicator
+            if avg_threat >= 0.7:
+                threat_icon = "[bold red]●[/bold red]"
+            elif avg_threat >= 0.5:
+                threat_icon = "[yellow]●[/yellow]"
+            else:
+                threat_icon = "[green]●[/green]"
+
+            # Percentage bar
+            pct = (count / total_count * 100) if total_count > 0 else 0
+            bar_len = int(pct / 10)
+            bar = f"[{color}]{'▓' * bar_len}{'░' * (10 - bar_len)}[/{color}]"
+
+            lines.append(f"  {trend} [{color}]{org_type:10s}[/{color}] {bar} {count:3d} {threat_icon}")
+
+        lines.append("")
+        lines.append(f"[dim]Total: {total_count} connections[/dim]")
+        lines.append("")
+
+        # High risk organizations
+        if high_risk_orgs:
+            lines.append("[bold red]⚠ HIGH RISK ORGANIZATIONS:[/bold red]")
+            for org_info in high_risk_orgs[:3]:
+                org_name = (org_info.get('name') or 'Unknown')[:18]
+                org_type = org_info.get('type', 'unknown')
+                threat = float(org_info.get('avg_threat', 0) or 0)
+                count = org_info.get('count', 0)
+
+                color = type_colors.get(org_type, 'white')
+                lines.append(f"  [bold red]![/bold red] [{color}]{org_name:18s}[/{color}] {threat:.2f} (x{count})")
+
+        lines.append("")
+        lines.append("[dim]●=High ●=Med ●=Low threat[/dim]")
+
+        content = "\n".join(lines)
+        return Panel(
+            content,
+            title="[bold magenta]ORG INTEL[/bold magenta]",
+            border_style="magenta"
         )
 
 
@@ -1387,6 +1595,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         ("q", "quit", "Quit Application"),
         ("r", "refresh", "Refresh Data"),
         ("a", "toggle_anomalies", "Toggle Anomaly Panel"),
+        ("o", "toggle_org_intel", "Toggle Org Intel Panel"),
         ("g", "toggle_globe", "Pause/Resume Globe Animation"),
         ("m", "toggle_mode_panel", "Toggle Mode Panel"),
         ("escape", "close_modal", "Close Modal"),
@@ -1454,6 +1663,16 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         display: block;
     }
 
+    #org_intel_panel {
+        width: 50%;
+        padding: 1 0 0 1;
+        display: none;
+    }
+
+    #org_intel_panel.visible {
+        display: block;
+    }
+
     #detail_modal {
         display: none;
         layer: modal;
@@ -1495,8 +1714,12 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.connection_table = None
         self.mode_specific_panel = None
         self.anomaly_panel = None
+        self.org_intel_panel = None
         self.detail_modal = None
         self.modal_backdrop = None
+
+        # Track previous org counts for trend calculation
+        self._previous_org_counts = {}
 
     def compose(self) -> ComposeResult:
         """4-cell grid layout with mode-aware content"""
@@ -1526,6 +1749,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 # Anomaly panel (hidden by default, toggle with 'a')
                 self.anomaly_panel = AnomalyAlertPanel(id="anomaly_panel")
                 yield self.anomaly_panel
+
+                # Organization Intel panel (hidden by default, toggle with 'o')
+                self.org_intel_panel = OrganizationIntelPanel(id="org_intel_panel")
+                yield self.org_intel_panel
 
         # Detail modal (hidden by default, shown on row click)
         self.modal_backdrop = Static(id="modal_backdrop")
@@ -1644,6 +1871,11 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
                 self.anomaly_panel.anomalies = anomalies
 
+            # Update organization intel panel
+            if self.org_intel_panel:
+                org_intel_data = self._calculate_org_intel(connections)
+                self.org_intel_panel.org_data = org_intel_data
+
             # Update stats with activity spinner
             stats = self.data_manager.get_stats()
             self._spinner_frame = (self._spinner_frame + 1) % len(self.DATA_FLOW)
@@ -1732,6 +1964,57 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         online, total = heartbeat.get_online_count()
         db_status = "Connected" if self.data_manager.is_connected else "Offline"
         self.sub_title = f"Last update: {datetime.now().strftime('%H:%M:%S')} | Components: {online}/{total} online | DB: {db_status}"
+
+    def _calculate_org_intel(self, connections: List[Dict]) -> Dict:
+        """Calculate organization intelligence data with trends"""
+        type_counts = defaultdict(int)
+        type_threats = defaultdict(list)
+        org_details = defaultdict(lambda: {'count': 0, 'threats': [], 'type': 'unknown'})
+
+        for conn in connections:
+            org_type = (conn.get('dst_org_type') or 'unknown').lower()
+            org_name = conn.get('dst_org') or 'Unknown'
+            threat = float(conn.get('threat_score', 0) or 0)
+
+            type_counts[org_type] += 1
+            type_threats[org_type].append(threat)
+
+            org_details[org_name]['count'] += 1
+            org_details[org_name]['threats'].append(threat)
+            org_details[org_name]['type'] = org_type
+
+        # Calculate average threats per type
+        type_avg_threats = {}
+        for org_type, threats in type_threats.items():
+            type_avg_threats[org_type] = sum(threats) / len(threats) if threats else 0.0
+
+        # Find high risk organizations
+        high_risk_orgs = []
+        for org_name, data in org_details.items():
+            avg_threat = sum(data['threats']) / len(data['threats']) if data['threats'] else 0.0
+            if avg_threat >= 0.5 or data['count'] >= 5:
+                high_risk_orgs.append({
+                    'name': org_name,
+                    'type': data['type'],
+                    'avg_threat': avg_threat,
+                    'count': data['count'],
+                })
+
+        # Sort by threat then count
+        high_risk_orgs.sort(key=lambda x: (x['avg_threat'], x['count']), reverse=True)
+
+        # Build result with previous counts for trend calculation
+        result = {
+            'type_counts': dict(type_counts),
+            'type_threats': type_avg_threats,
+            'previous_counts': self._previous_org_counts.copy(),
+            'high_risk_orgs': high_risk_orgs[:5],
+        }
+
+        # Update previous counts for next comparison
+        self._previous_org_counts = dict(type_counts)
+
+        return result
 
     def _calculate_heatmap(self, connections: List[Dict]) -> Dict:
         """Calculate geographic heatmap from connections"""
@@ -1845,7 +2128,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def action_help(self) -> None:
         """Show keybindings help in subtitle"""
-        help_text = "Keys: Q=Quit | R=Refresh | A=Anomalies | G=Globe | M=Mode Panel | ?=Help | Ctrl+P=Commands | ESC=Close"
+        help_text = "Keys: Q=Quit | R=Refresh | A=Anomalies | O=OrgIntel | M=Devices | G=Globe | ?=Help | ESC=Close"
         self.sub_title = help_text
 
     def _show_connection_detail(self, connection: dict) -> None:
@@ -1870,23 +2153,17 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 self.sub_title = "Modal closed"
 
     def action_toggle_anomalies(self) -> None:
-        """Toggle anomaly panel visibility (swaps with mode-specific panel)"""
-        if self.anomaly_panel and self.mode_specific_panel:
-            # Toggle visibility
-            anomaly_visible = self.anomaly_panel.has_class("visible")
+        """Toggle Anomaly Alerts panel visibility"""
+        if not self.anomaly_panel:
+            return
 
-            if anomaly_visible:
-                # Hide anomaly panel, show mode-specific panel
-                self.anomaly_panel.remove_class("visible")
-                self.anomaly_panel.styles.display = "none"
-                self.mode_specific_panel.styles.display = "block"
-                self.sub_title = f"Showing {self.mode} panel"
-            else:
-                # Show anomaly panel, hide mode-specific panel
-                self.anomaly_panel.add_class("visible")
-                self.anomaly_panel.styles.display = "block"
-                self.mode_specific_panel.styles.display = "none"
-                self.sub_title = "Showing anomaly alerts (press 'a' to toggle)"
+        # Hide all bottom-right panels first
+        self._hide_all_bottom_right_panels()
+
+        # Show anomaly panel
+        self.anomaly_panel.add_class("visible")
+        self.anomaly_panel.styles.display = "block"
+        self.sub_title = "Showing Anomaly Alerts (press 'm' for devices, 'o' for org intel)"
 
     def action_toggle_globe(self) -> None:
         """Toggle globe animation pause/resume"""
@@ -1899,24 +2176,42 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 self._globe_paused = True
                 self.sub_title = "Globe animation paused"
 
+    def action_toggle_org_intel(self) -> None:
+        """Toggle Organization Intel panel visibility"""
+        if not self.org_intel_panel:
+            return
+
+        # Hide all bottom-right panels first
+        self._hide_all_bottom_right_panels()
+
+        # Show org intel panel
+        self.org_intel_panel.add_class("visible")
+        self.org_intel_panel.styles.display = "block"
+        self.sub_title = "Showing Organization Intel (press 'm' for devices, 'a' for anomalies)"
+
     def action_toggle_mode_panel(self) -> None:
-        """Toggle between mode-specific panel and anomaly panel"""
-        if self.mode_specific_panel and self.anomaly_panel:
-            # Check current visibility state
-            anomaly_visible = self.anomaly_panel.has_class("visible")
-            if anomaly_visible:
-                # Show mode panel, hide anomaly
-                self.anomaly_panel.remove_class("visible")
-                self.anomaly_panel.styles.display = "none"
-                self.mode_specific_panel.styles.display = "block"
-                panel_name = "Network Topology" if self.mode == "network" else "Device Discovery"
-                self.sub_title = f"Showing {panel_name} panel"
-            else:
-                # Show anomaly, hide mode panel
-                self.anomaly_panel.add_class("visible")
-                self.anomaly_panel.styles.display = "block"
-                self.mode_specific_panel.styles.display = "none"
-                self.sub_title = "Showing Anomaly Alerts panel"
+        """Toggle to mode-specific panel (Network Devices)"""
+        if not self.mode_specific_panel:
+            return
+
+        # Hide all bottom-right panels first
+        self._hide_all_bottom_right_panels()
+
+        # Show mode panel
+        self.mode_specific_panel.styles.display = "block"
+        panel_name = "Network Topology" if self.mode == "network" else "Device Discovery"
+        self.sub_title = f"Showing {panel_name} (press 'a' for anomalies, 'o' for org intel)"
+
+    def _hide_all_bottom_right_panels(self) -> None:
+        """Hide all toggleable bottom-right panels"""
+        if self.mode_specific_panel:
+            self.mode_specific_panel.styles.display = "none"
+        if self.anomaly_panel:
+            self.anomaly_panel.remove_class("visible")
+            self.anomaly_panel.styles.display = "none"
+        if self.org_intel_panel:
+            self.org_intel_panel.remove_class("visible")
+            self.org_intel_panel.styles.display = "none"
 
 
 if __name__ == '__main__':
