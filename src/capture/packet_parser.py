@@ -38,7 +38,7 @@ def parse_ethernet_frame(data: bytes) -> Tuple[str, str, int, bytes]:
     return (format_mac(dst_mac), format_mac(src_mac), eth_proto, data[14:])  # Payload
 
 
-def parse_ipv4_header(data: bytes) -> Tuple[str, str, int, bytes]:
+def parse_ipv4_header(data: bytes) -> Tuple[str, str, int, int, bytes]:
     """
     Parse IPv4 header
 
@@ -46,20 +46,23 @@ def parse_ipv4_header(data: bytes) -> Tuple[str, str, int, bytes]:
         data: IP packet data
 
     Returns:
-        Tuple of (src_ip, dst_ip, protocol, payload)
+        Tuple of (src_ip, dst_ip, protocol, ttl, payload)
     """
     # IPv4 header: Version + IHL (1 byte), then skip to addresses
     version_ihl = data[0]
     ihl = (version_ihl & 0xF) * 4  # Internet Header Length in bytes
 
-    # Skip to source/dest IPs (bytes 12-19)
-    src_ip = format_ipv4(data[12:16])
-    dst_ip = format_ipv4(data[16:20])
+    # TTL is at byte 8 of IP header
+    ttl = data[8]
 
     # Protocol is at byte 9
     protocol = data[9]
 
-    return (src_ip, dst_ip, protocol, data[ihl:])
+    # Skip to source/dest IPs (bytes 12-19)
+    src_ip = format_ipv4(data[12:16])
+    dst_ip = format_ipv4(data[16:20])
+
+    return (src_ip, dst_ip, protocol, ttl, data[ihl:])
 
 
 def parse_tcp_header(data: bytes) -> Tuple[int, int]:
@@ -154,8 +157,8 @@ def parse_full_packet(data: bytes) -> Optional[Dict]:
         if eth_proto != 0x0800:
             return None
 
-        # Parse IP
-        src_ip, dst_ip, protocol, transport_data = parse_ipv4_header(ip_data)
+        # Parse IP (now includes TTL)
+        src_ip, dst_ip, protocol, ttl, transport_data = parse_ipv4_header(ip_data)
 
         # Parse transport layer
         if protocol == PROTO_TCP:
@@ -173,6 +176,7 @@ def parse_full_packet(data: bytes) -> Optional[Dict]:
             "src_port": src_port,
             "dst_port": dst_port,
             "protocol": get_protocol_name(protocol),
+            "ttl": ttl,  # TTL for hop estimation
         }
 
     except Exception as e:

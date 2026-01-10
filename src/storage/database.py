@@ -48,7 +48,7 @@ class Database:
         "dst_country", "dst_lat", "dst_lon", "dst_org", "dst_hostname",
         "threat_score", "device_vendor", "protocol",
         "dst_asn", "dst_asn_name", "dst_org_type", "dst_cidr",
-        "ttl_observed", "ttl_initial", "hop_count", "hop_verified", "os_fingerprint", "org_trust_score",
+        "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score",
         "confidence", "high_uncertainty", "scoring_method",
         # Individual scorer results (Phase 1 - Dashboard Evolution)
         "score_statistical", "score_rule_based", "score_ml_based", "score_organization",
@@ -145,7 +145,6 @@ class Database:
                         ttl_observed INTEGER,
                         ttl_initial INTEGER,
                         hop_count INTEGER,
-                        hop_verified INTEGER DEFAULT 0,
                         os_fingerprint TEXT,
                         org_trust_score REAL,
                         confidence REAL DEFAULT 0,
@@ -273,7 +272,6 @@ class Database:
             ("ttl_observed", "INTEGER"),
             ("ttl_initial", "INTEGER"),
             ("hop_count", "INTEGER"),
-            ("hop_verified", "INTEGER DEFAULT 0"),
             ("os_fingerprint", "TEXT"),
             ("org_trust_score", "REAL"),
             # Scoring metadata columns for dashboard
