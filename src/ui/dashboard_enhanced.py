@@ -821,13 +821,9 @@ class SmartConnectionTable(Static):
                 port = str(conn.get('dst_port', '-'))
                 protocol = (conn.get('protocol') or 'TCP')[:5]
                 org = (conn.get('dst_org') or 'Unknown')[:15]
+                # Show '-' only for null/None, not for 0 (0 hops is valid)
                 hop_count = conn.get('hop_count')
-                hop_verified = conn.get('hop_verified', False)
-                # Show verified indicator (✓) when hop count is from actual traceroute
-                if hop_count is not None:
-                    hops = f"{hop_count}{'✓' if hop_verified else ''}"
-                else:
-                    hops = '-'
+                hops = str(hop_count) if hop_count is not None else '-'
                 country = (conn.get('dst_country') or '--')[:3]
 
                 # Uncertainty warning indicator (! suffix on score)
@@ -854,7 +850,7 @@ class SmartConnectionTable(Static):
                     f"[{threat_color}]{threat_indicator}[/]",
                     f"[{threat_color}]{score_display}[/]",
                     f"[{conf_color}]{confidence:.1f}[/]",
-                    f"[{'green' if hop_verified else 'cyan'}]{hops}[/]",
+                    f"[cyan]{hops}[/]",
                     f"[dim]{country}[/]",
                     key=row_key
                 )

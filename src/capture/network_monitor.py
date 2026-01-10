@@ -365,6 +365,10 @@ class NetworkMonitor:
             return None
 
         ihl = (version_ihl & 0xF) * 4  # Header length in bytes
+
+        # TTL is at byte 8 of IP header - needed for hop estimation
+        ttl = data[8]
+
         protocol = data[9]
 
         src_ip = socket.inet_ntoa(data[12:16])
@@ -374,6 +378,7 @@ class NetworkMonitor:
             "protocol": protocol,
             "src_ip": src_ip,
             "dest_ip": dest_ip,
+            "ttl": ttl,  # TTL for passive hop estimation
             "transport_data": data[ihl:],  # TCP/UDP/etc payload
         }
 
@@ -584,6 +589,7 @@ class NetworkMonitor:
                 "dst_ip": dest_ip,
                 "dst_port": ip_packet["dest_port"],
                 "protocol": ip_packet.get("protocol_name", "TCP"),
+                "ttl": ip_packet.get("ttl", 0),  # TTL for passive hop estimation
                 "device_vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
                 "metadata": {"network_mode": self.mode, "interface": self.interface},
             }
