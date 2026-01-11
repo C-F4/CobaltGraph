@@ -61,7 +61,7 @@ class ConnectionEvent:
     dst_org_type: str = ""
     org_trust_score: float = 0.5
 
-    # Network path
+    # Network path (TTL-based estimation)
     hop_count: Optional[int] = None
     ttl_observed: Optional[int] = None
     os_fingerprint: str = ""
@@ -666,7 +666,7 @@ class DataPipeline:
             threat_score = threat_intel.get("threat_score", 0.2)
             scoring_method = "legacy"
 
-        # Extract ASN/org data
+        # Extract ASN/org data with TTL-based hop estimation
         asn_data = {
             "dst_asn": consensus_details.get("dst_asn"),
             "dst_asn_name": consensus_details.get("dst_asn_name", ""),

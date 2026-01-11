@@ -65,6 +65,15 @@ class ThreatIntelData:
 
 
 @dataclass
+class HopData:
+    """TTL-based hop estimation data"""
+    hop_count: int = 0                           # Estimated hop count from TTL
+    ttl_observed: Optional[int] = None           # Observed TTL from packet
+    ttl_initial: Optional[int] = None            # Estimated initial TTL
+    os_fingerprint: Optional[str] = None         # OS guess from TTL
+
+
+@dataclass
 class ConsensusResult:
     """Result from consensus scoring"""
     final_score: float = 0.0
@@ -117,6 +126,7 @@ class ConnectionEvent:
     geo: GeoData = field(default_factory=GeoData)
     asn: ASNData = field(default_factory=ASNData)
     threat_intel: ThreatIntelData = field(default_factory=ThreatIntelData)
+    hop_data: HopData = field(default_factory=HopData)
 
     # Scoring
     consensus: ConsensusResult = field(default_factory=ConsensusResult)
@@ -171,6 +181,12 @@ class ConnectionEvent:
             "is_malicious": self.threat_intel.is_malicious,
             "is_tor_exit": self.threat_intel.is_tor_exit,
             "abuse_score": self.threat_intel.abuse_score,
+
+            # Hop data (TTL-based estimation)
+            "hop_count": self.hop_data.hop_count,
+            "ttl_observed": self.hop_data.ttl_observed,
+            "ttl_initial": self.hop_data.ttl_initial,
+            "os_fingerprint": self.hop_data.os_fingerprint,
 
             # Scoring
             "threat_score": self.consensus.final_score,

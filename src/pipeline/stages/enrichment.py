@@ -12,7 +12,7 @@ from typing import Dict, Optional, Any
 
 from .base import PipelineStage, StageContext
 from ..config import PipelineConfig
-from ..events import ConnectionEvent, GeoData, ASNData, ThreatIntelData, StageResult
+from ..events import ConnectionEvent, GeoData, ASNData, ThreatIntelData, HopData, StageResult
 
 logger = logging.getLogger(__name__)
 
