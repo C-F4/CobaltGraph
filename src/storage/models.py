@@ -43,10 +43,10 @@ class Connection:
     dst_org_type: Optional[str] = None      # Organization type (cloud, cdn, isp, etc.)
     dst_cidr: Optional[str] = None          # IP CIDR block
 
-    # TTL and Hop detection fields
-    ttl_observed: Optional[int] = None      # Observed TTL value
+    # TTL and Hop detection fields (passive estimation)
+    ttl_observed: Optional[int] = None      # Observed TTL value from packet
     ttl_initial: Optional[int] = None       # Estimated initial TTL
-    hop_count: Optional[int] = None         # Estimated network hops
+    hop_count: Optional[int] = None         # Estimated network hops from TTL
     os_fingerprint: Optional[str] = None    # OS guess from TTL
 
     # Trust scoring
@@ -87,7 +87,7 @@ class Connection:
             "dst_asn_name": self.dst_asn_name,
             "dst_org_type": self.dst_org_type,
             "dst_cidr": self.dst_cidr,
-            # Hop detection fields
+            # Hop detection fields (TTL-based)
             "ttl_observed": self.ttl_observed,
             "ttl_initial": self.ttl_initial,
             "hop_count": self.hop_count,
