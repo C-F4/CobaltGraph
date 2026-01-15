@@ -1,23 +1,49 @@
 # CobaltGraph .gitignore
-security/
-scripts/
-static/
-data/
-venv/
+# Security-focused network monitoring tool
+
+# ======================
+# SENSITIVE DATA - CRITICAL
+# ======================
+
+# Database files (may contain captured network data)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.db.backup
 database/
-data/
 
+# Sensitive configuration files
+config/auth.conf
+config/threat_intel.conf
 
-# Runtime Data
+# Runtime data (database files, logs in data directory)
 data/*.db
 data/**/*.db
 data/*.db-shm
 data/*.db-wal
-data/logs/*.log
+data/logs/
 data/exports/*
-*.md 
-docs/
+!data/exports/.gitkeep
 
+# Logs directory
+logs/
+*.log
+
+# Exports (may contain IP addresses, network data)
+exports/
+*.csv
+
+# JSON exports (but allow test fixtures)
+*.json
+!tests/fixtures/*.json
+
+# Allow template configs
+!config/*.conf.template
+
+# ======================
+# STANDARD IGNORES
+# ======================
 
 # Python
 __pycache__/
@@ -41,7 +67,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environments
+# Virtual environments
 venv/
 ENV/
 env/
@@ -53,40 +79,19 @@ env/
 *.swo
 *~
 
-# Sensitive Config
-config/auth.conf
-config/threat_intel.conf
-
-# Allow template configs
-!config/*.conf.template
-
-# Logs
-logs/
-*.log
-
-# Temporary Files
+# Temporary files
 /tmp/
 *.tmp
 
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Database backups and temporary files
-*.db.backup
-*.db-journal
-*.db-wal
-*.db-shm
+# Documentation (auto-generated markdown)
+docs/
+*.md
 
-# Exports
-exports/
-*.csv
-*.json
-!tests/fixtures/*.json
-!docs/**/*.json
-!TEST_EVIDENCE.json
-
-# Keep directory structure
-!data/db/.gitkeep
-!data/logs/.gitkeep
-!data/exports/.gitkeep
+# Other directories that should not be tracked
+security/
+scripts/
+static/
