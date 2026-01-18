@@ -63,31 +63,218 @@ def _is_running_in_venv():
     )
 
 
+def _auto_create_venv():
+    """
+    Automatically create a virtual environment if none exists.
+
+    Returns:
+        str: Path to venv Python executable, or None if creation failed
+    """
+    import subprocess
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    venv_dir = os.path.join(script_dir, "venv")
+
+    # Colors for output
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    CYAN = '\033[0;36m'
+    RED = '\033[0;31m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    NC = '\033[0m'
+
+    print(f"\n{CYAN}╔══════════════════════════════════════════════════════════════════╗{NC}")
+    print(f"{CYAN}║  COBALTGRAPH AUTO-SETUP                                          ║{NC}")
+    print(f"{CYAN}╚══════════════════════════════════════════════════════════════════╝{NC}\n")
+
+    print(f"{YELLOW}No virtual environment found. Creating one automatically...{NC}\n")
+
+    try:
+        # Step 1: Create venv
+        print(f"{CYAN}[1/3] Creating virtual environment...{NC}")
+        result = subprocess.run(
+            [sys.executable, "-m", "venv", venv_dir],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode != 0:
+            print(f"{RED}Failed to create venv: {result.stderr}{NC}")
+            return None
+
+        print(f"{GREEN}  ✓ Virtual environment created at: {venv_dir}{NC}\n")
+
+        # Determine venv Python path
+        if sys.platform == 'win32':
+            venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+        else:
+            venv_python = os.path.join(venv_dir, "bin", "python3")
+
+        if not os.path.isfile(venv_python):
+            # Fallback to python without 3
+            venv_python = os.path.join(venv_dir, "bin", "python")
+
+        if not os.path.isfile(venv_python):
+            print(f"{RED}Failed to locate venv Python executable{NC}")
+            return None
+
+        # Step 2: Upgrade pip
+        print(f"{CYAN}[2/3] Upgrading pip...{NC}")
+        result = subprocess.run(
+            [venv_python, "-m", "pip", "install", "--upgrade", "pip"],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode == 0:
+            print(f"{GREEN}  ✓ pip upgraded successfully{NC}\n")
+        else:
+            print(f"{YELLOW}  ! pip upgrade warning (non-critical): {result.stderr[:100]}{NC}\n")
+
+        # Step 3: Install requirements
+        requirements_path = os.path.join(script_dir, "requirements.txt")
+        if os.path.isfile(requirements_path):
+            print(f"{CYAN}[3/3] Installing dependencies from requirements.txt...{NC}")
+            print(f"{DIM}  This may take a moment...{NC}\n")
+
+            result = subprocess.run(
+                [venv_python, "-m", "pip", "install", "-r", requirements_path],
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes for slow connections
+            )
+
+            if result.returncode == 0:
+                print(f"{GREEN}  ✓ All dependencies installed successfully{NC}\n")
+            else:
+                print(f"{YELLOW}  ! Some packages may have failed to install{NC}")
+                print(f"{DIM}  Error: {result.stderr[:200]}{NC}\n")
+                # Continue anyway, dependency validator will catch issues
+        else:
+            print(f"{YELLOW}[3/3] requirements.txt not found - skipping dependency install{NC}\n")
+
+        print(f"{GREEN}╔══════════════════════════════════════════════════════════════════╗{NC}")
+        print(f"{GREEN}║  AUTO-SETUP COMPLETE                                             ║{NC}")
+        print(f"{GREEN}╚══════════════════════════════════════════════════════════════════╝{NC}\n")
+
+        return venv_python
+
+    except subprocess.TimeoutExpired:
+        print(f"{RED}Setup timed out. Please run manually:{NC}")
+        print(f"{BOLD}  python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt{NC}")
+        return None
+    except Exception as e:
+        print(f"{RED}Auto-setup failed: {e}{NC}")
+        return None
+
+
+def _install_missing_packages():
+    """
+    Check and install any missing packages from requirements.txt.
+
+    This runs AFTER venv activation to ensure packages are installed.
+
+    Returns:
+        bool: True if all packages are installed, False otherwise
+    """
+    import subprocess
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    requirements_path = os.path.join(script_dir, "requirements.txt")
+
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    CYAN = '\033[0;36m'
+    DIM = '\033[2m'
+    NC = '\033[0m'
+
+    if not os.path.isfile(requirements_path):
+        return True
+
+    # Quick check if pip freeze matches requirements (fast path)
+    try:
+        import importlib.metadata
+
+        # Parse requirements to get package names
+        missing_packages = []
+        with open(requirements_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Extract package name (before any version specifier)
+                import re
+                match = re.match(r'^([a-zA-Z0-9\-_]+)', line)
+                if match:
+                    pkg_name = match.group(1).lower()
+                    try:
+                        importlib.metadata.version(pkg_name)
+                    except importlib.metadata.PackageNotFoundError:
+                        missing_packages.append(line)
+
+        if not missing_packages:
+            return True
+
+        # Install missing packages
+        print(f"\n{CYAN}Installing {len(missing_packages)} missing package(s)...{NC}")
+        for pkg in missing_packages[:5]:
+            print(f"{DIM}  - {pkg}{NC}")
+        if len(missing_packages) > 5:
+            print(f"{DIM}  ... and {len(missing_packages) - 5} more{NC}")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", requirements_path, "-q"],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+
+        if result.returncode == 0:
+            print(f"{GREEN}✓ All packages installed{NC}\n")
+            return True
+        else:
+            print(f"{YELLOW}Some packages may have failed: {result.stderr[:100]}{NC}\n")
+            return True  # Continue anyway, validator will catch
+
+    except Exception as e:
+        print(f"{YELLOW}Package check skipped: {e}{NC}")
+        return True
+
+
 def _bootstrap_venv():
     """
-    ENFORCE venv execution with detailed user guidance.
+    Auto-activate venv with automatic setup if needed.
 
-    This function implements strict venv enforcement with step-by-step instructions.
+    This function implements smart venv handling:
+    1. If already in venv, continue
+    2. If venv exists, re-exec with venv Python
+    3. If no venv, auto-create and setup
+    4. After venv activation, verify/install packages
 
     Security rationale:
     - System Python may have conflicting package versions
     - Prevents dependency pollution and version conflicts
     - Ensures reproducible execution environment
     - Protects against supply chain attacks via isolated packages
-
-    Exit codes:
-        1: Venv not found or not activated
     """
     if _is_running_in_venv():
-        return  # Already in venv, continue
+        # Already in venv - ensure packages are installed
+        _install_missing_packages()
+        return
 
     venv_python = _find_venv_python()
     if venv_python:
         # Re-exec this script with venv Python
         os.execv(venv_python, [venv_python] + sys.argv)
 
-    # CRITICAL: No venv found - BLOCK with comprehensive guidance
-    # Define Colors inline since main Colors class not loaded yet
+    # No venv found - attempt auto-creation
+    venv_python = _auto_create_venv()
+    if venv_python and os.path.isfile(venv_python):
+        # Re-exec with newly created venv
+        os.execv(venv_python, [venv_python] + sys.argv)
+
+    # Auto-creation failed - show manual instructions
     RED = '\033[0;31m'
     GREEN = '\033[0;32m'
     YELLOW = '\033[1;33m'
@@ -97,37 +284,26 @@ def _bootstrap_venv():
     NC = '\033[0m'
 
     print(f"\n{RED}╔══════════════════════════════════════════════════════════════════╗{NC}")
-    print(f"{RED}║  ERROR: VIRTUAL ENVIRONMENT REQUIRED                             ║{NC}")
+    print(f"{RED}║  ERROR: VIRTUAL ENVIRONMENT SETUP FAILED                         ║{NC}")
     print(f"{RED}╚══════════════════════════════════════════════════════════════════╝{NC}\n")
 
-    print(f"{YELLOW}Why is a virtual environment required?{NC}")
-    print(f"{DIM}  • Isolates CobaltGraph dependencies from system Python{NC}")
-    print(f"{DIM}  • Prevents version conflicts with other Python applications{NC}")
-    print(f"{DIM}  • Ensures package integrity through hash validation{NC}")
-    print(f"{DIM}  • Provides consistent execution environment across systems{NC}\n")
+    print(f"{YELLOW}Automatic setup was unsuccessful. Please create manually:{NC}\n")
 
     print(f"{CYAN}Step 1: Create Virtual Environment{NC}")
-    print(f"{BOLD}  python3 -m venv venv{NC}")
-    print(f"{DIM}  This creates a new virtual environment in the 'venv' directory.{NC}\n")
+    print(f"{BOLD}  python3 -m venv venv{NC}\n")
 
     print(f"{CYAN}Step 2: Activate Virtual Environment{NC}")
-
-    # Platform-specific activation instructions
     if sys.platform == 'win32':
         print(f"{BOLD}  venv\\Scripts\\activate{NC}")
-        print(f"{DIM}  (PowerShell: venv\\Scripts\\Activate.ps1){NC}")
     else:
         print(f"{BOLD}  source venv/bin/activate{NC}")
-
-    print(f"{DIM}  Your prompt will change to show '(venv)' when activated.{NC}\n")
+    print()
 
     print(f"{CYAN}Step 3: Install Dependencies{NC}")
-    print(f"{BOLD}  pip3 install -r requirements.txt{NC}")
-    print(f"{DIM}  This installs all required packages with integrity verification.{NC}\n")
+    print(f"{BOLD}  pip3 install -r requirements.txt{NC}\n")
 
     print(f"{CYAN}Step 4: Launch CobaltGraph{NC}")
-    print(f"{BOLD}  ./cobaltgraph{NC}")
-    print(f"{DIM}  The launcher will auto-detect the venv and proceed.{NC}\n")
+    print(f"{BOLD}  ./cobaltgraph{NC}\n")
 
     print(f"{YELLOW}Need help? Visit: https://github.com/C-F4/CobaltGraph/wiki/Setup{NC}\n")
 
