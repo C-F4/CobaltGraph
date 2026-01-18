@@ -11,7 +11,8 @@ C++ TUI binary is not available.
 
 Components:
 - CobaltGraphDashboardEnhanced: Main dashboard (Textual-based)
-- FlatWorldMap: ASCII world map for threat visualization
+- intel_map: Geographic threat visualization module
+- FlatWorldMap: ASCII world map for threat visualization (legacy, use intel_map)
 - BootSequence: Tactical boot animation
 
 Usage:
@@ -38,9 +39,27 @@ except ImportError:
     boot_sequence = None
     BOOT_AVAILABLE = False
 
+# Import intel_map module (geographic visualization)
+try:
+    from .intel_map import IntelMapPanel, IntelMapKey, FlatWorldMap, RotatingGlobe, SimpleGlobe
+    INTEL_MAP_AVAILABLE = True
+except ImportError:
+    IntelMapPanel = None
+    IntelMapKey = None
+    FlatWorldMap = None
+    RotatingGlobe = None
+    SimpleGlobe = None
+    INTEL_MAP_AVAILABLE = False
+
 __all__ = [
     'CobaltGraphDashboardEnhanced',
     'DASHBOARD_AVAILABLE',
     'boot_sequence',
     'BOOT_AVAILABLE',
+    'IntelMapPanel',
+    'IntelMapKey',
+    'FlatWorldMap',
+    'RotatingGlobe',
+    'SimpleGlobe',
+    'INTEL_MAP_AVAILABLE',
 ]
