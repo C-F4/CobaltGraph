@@ -411,6 +411,9 @@ class EnhancedThreatGlobePanel(Static):
     globe_data = reactive(dict)
     animation_frame = reactive(int)
 
+    # Map types for cycling
+    MAP_TYPES = ["flat", "rotating", "simple"]
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.world_map = None
@@ -425,84 +428,132 @@ class EnhancedThreatGlobePanel(Static):
         self.threat_regions = {}
         self.region_pings = []
         self.last_update_time = time.time()
+        self._current_map_type = "flat"  # Track current map type
 
-        # Initialize flat world map (primary implementation)
-        # Start with larger default size - will be resized on mount
+        # Initialize all map types for cycling
+        self._init_all_maps()
+
+    def _init_all_maps(self) -> None:
+        """Initialize all available map implementations for cycling"""
+        # Initialize flat world map
         if FlatWorldMap:
             try:
-                # Use larger default size to fill panel (will resize dynamically)
                 self.world_map = FlatWorldMap(width=120, height=30)
-                logger.debug("Initialized FlatWorldMap - flat 2D world map with countries and threat visualization")
+                logger.debug("Initialized FlatWorldMap")
             except Exception as e:
                 logger.warning(f"Failed to initialize FlatWorldMap: {e}")
                 self.world_map = None
 
-        # Fallback to enhanced globe if flat map fails
-        if not self.world_map and EnhancedGlobe:
+        # Initialize enhanced globe
+        if EnhancedGlobe:
             try:
                 self.enhanced_globe = EnhancedGlobe(width=70, height=15)
-                logger.debug("Initialized EnhancedGlobe - rotating globe with countries and connection lines")
+                logger.debug("Initialized EnhancedGlobe")
             except Exception as e:
                 logger.warning(f"Failed to initialize EnhancedGlobe: {e}")
                 self.enhanced_globe = None
 
-        # Fallback to simple globe if enhanced fails
-        if not self.world_map and not self.enhanced_globe and SimpleGlobe:
+        # Initialize simple globe
+        if SimpleGlobe:
             try:
                 self.simple_globe = SimpleGlobe(width=70, height=15)
-                logger.debug("Initialized SimpleGlobe - fallback visual rotating globe")
+                logger.debug("Initialized SimpleGlobe")
             except Exception as e:
                 logger.warning(f"Failed to initialize SimpleGlobe: {e}")
                 self.simple_globe = None
 
+        # Set initial map type based on what's available
+        if self.world_map:
+            self._current_map_type = "flat"
+        elif self.enhanced_globe:
+            self._current_map_type = "rotating"
+        elif self.simple_globe:
+            self._current_map_type = "simple"
+
+    def cycle_map_type(self) -> str:
+        """
+        Cycle to the next available intel map type.
+
+        Returns:
+            Name of the new active map type
+        """
+        available_maps = []
+        if self.world_map:
+            available_maps.append("flat")
+        if self.enhanced_globe:
+            available_maps.append("rotating")
+        if self.simple_globe:
+            available_maps.append("simple")
+
+        if not available_maps:
+            return "none"
+
+        # Find current index and move to next
+        try:
+            current_idx = available_maps.index(self._current_map_type)
+            next_idx = (current_idx + 1) % len(available_maps)
+        except ValueError:
+            next_idx = 0
+
+        self._current_map_type = available_maps[next_idx]
+        self.refresh()
+
+        return self._current_map_type
+
+    @property
+    def current_map_type(self) -> str:
+        """Get the currently active map type"""
+        return self._current_map_type
+
+    @property
+    def current_map_name(self) -> str:
+        """Get a display name for the current map type"""
+        names = {
+            "flat": "Flat World Map",
+            "rotating": "Rotating Globe",
+            "simple": "Simple Globe",
+        }
+        return names.get(self._current_map_type, "Unknown")
+
     def watch_globe_data(self, new_data: dict) -> None:
-        """Update globe when data changes"""
+        """Update all globe types when data changes (for seamless cycling)"""
         if self.world_map is None and self.enhanced_globe is None and self.simple_globe is None:
             return
 
         try:
-            # Extract threat regions from connections
             connections = new_data.get('connections', [])
-
-            # Build threat region map
             self.threat_regions = {}
 
-            # Add connections to flat world map (primary)
+            # Populate ALL map types for seamless cycling
+            # 1. Flat World Map
             if self.world_map:
                 self.world_map.clear_threats()
-                for conn in connections[-50:]:  # Top 50 threats for flat map
+                for conn in connections[-50:]:
                     try:
-                        country = (conn.get('dst_country') or 'Unknown')[:2].upper()
+                        country = (conn.get('dst_country') or 'XX')[:2].upper()
                         threat = float(conn.get('threat_score', 0) or 0)
                         org_type = (conn.get('dst_org_type') or 'unknown').lower()
                         ip = conn.get('dst_ip', 'Unknown')
+                        dst_lat = float(conn.get('dst_lat', 0) or 0)
+                        dst_lon = float(conn.get('dst_lon', 0) or 0)
 
                         if country not in self.threat_regions:
                             self.threat_regions[country] = {'count': 0, 'avg_threat': 0.0, 'ips': []}
-
                         self.threat_regions[country]['count'] += 1
                         self.threat_regions[country]['avg_threat'] = threat
                         self.threat_regions[country]['ips'].append(ip)
 
-                        # Add to world map
-                        dst_lat = float(conn.get('dst_lat', 0) or 0)
-                        dst_lon = float(conn.get('dst_lon', 0) or 0)
-
                         self.world_map.add_threat(
-                            lat=dst_lat,
-                            lon=dst_lon,
-                            ip=ip,
-                            threat_score=threat,
-                            org_type=org_type
+                            lat=dst_lat, lon=dst_lon,
+                            ip=ip, threat_score=threat, org_type=org_type
                         )
                     except Exception as e:
-                        logger.debug(f"Failed to process connection: {e}")
+                        logger.debug(f"Failed to add to world map: {e}")
 
-            # Fallback: Add to enhanced globe if flat map not available
-            elif self.enhanced_globe:
-                src_lat, src_lon = 0.0, 0.0
+            # 2. Enhanced Globe (rotating)
+            if self.enhanced_globe:
                 self.enhanced_globe.clear_connections()
-                for conn in connections[-15:]:  # Top 15 threats
+                for conn in connections[-15:]:
                     try:
                         threat = float(conn.get('threat_score', 0) or 0)
                         org_type = (conn.get('dst_org_type') or 'unknown').lower()
@@ -511,15 +562,16 @@ class EnhancedThreatGlobePanel(Static):
                         dst_lon = float(conn.get('dst_lon', 0) or 0)
 
                         self.enhanced_globe.add_connection(
-                            src_lat, src_lon, dst_lat, dst_lon,
+                            0.0, 0.0, dst_lat, dst_lon,
                             threat, org_type, ip
                         )
                     except Exception as e:
-                        logger.debug(f"Failed to process connection: {e}")
+                        logger.debug(f"Failed to add to enhanced globe: {e}")
 
-            # Fallback: Add to simple globe if enhanced not available
-            elif self.simple_globe:
-                for conn in connections[-20:]:  # Last 20 connections
+            # 3. Simple Globe (fallback)
+            if self.simple_globe:
+                self.simple_globe.clear_threats()
+                for conn in connections[-20:]:
                     try:
                         threat = float(conn.get('threat_score', 0) or 0)
                         dst_lat = float(conn.get('dst_lat', 0) or 0)
@@ -527,7 +579,7 @@ class EnhancedThreatGlobePanel(Static):
 
                         self.simple_globe.add_threat(dst_lat, dst_lon, threat)
                     except Exception as e:
-                        logger.debug(f"Failed to process connection: {e}")
+                        logger.debug(f"Failed to add to simple globe: {e}")
 
             # Trigger animation update
             self.animation_frame += 1
@@ -549,42 +601,52 @@ class EnhancedThreatGlobePanel(Static):
             logger.debug(f"Resized world map to {new_width}x{new_height}")
 
     def render(self):
-        """Render visual threat globe with animated threat markers and connections"""
-        # Render flat world map (primary)
-        if self.world_map:
-            try:
-                # Update animation
-                dt = 0.05  # 50ms per frame
-                self.world_map.update(dt)
+        """Render the currently selected intel map type"""
+        dt = 0.05  # Animation delta time
 
-                # Render world map
+        # Render based on current map type selection
+        if self._current_map_type == "flat" and self.world_map:
+            try:
+                self.world_map.update(dt)
                 return self.world_map.render()
             except Exception as e:
                 logger.debug(f"World map render failed: {e}")
 
-        # Fallback to enhanced globe
-        if self.enhanced_globe:
+        elif self._current_map_type == "rotating" and self.enhanced_globe:
             try:
-                # Update animation
-                dt = 0.05  # 50ms per frame
                 self.enhanced_globe.update(dt)
-
-                # Render globe
                 return self.enhanced_globe.render()
             except Exception as e:
                 logger.debug(f"Enhanced globe render failed: {e}")
 
-        # Fallback to simple visual globe
-        if self.simple_globe:
+        elif self._current_map_type == "simple" and self.simple_globe:
             try:
-                # Update animation
-                dt = 0.1  # 100ms per frame
-                self.simple_globe.update(dt)
-
-                # Render globe
+                self.simple_globe.update(0.1)
                 return self.simple_globe.render()
             except Exception as e:
-                logger.debug(f"Globe render failed: {e}")
+                logger.debug(f"Simple globe render failed: {e}")
+
+        # Fallback chain if selected type not available
+        if self.world_map:
+            try:
+                self.world_map.update(dt)
+                return self.world_map.render()
+            except Exception:
+                pass
+
+        if self.enhanced_globe:
+            try:
+                self.enhanced_globe.update(dt)
+                return self.enhanced_globe.render()
+            except Exception:
+                pass
+
+        if self.simple_globe:
+            try:
+                self.simple_globe.update(0.1)
+                return self.simple_globe.render()
+            except Exception:
+                pass
 
         # Sophisticated fallback: Enhanced threat heatmap with multiple metrics
         lines = []
@@ -715,6 +777,13 @@ class SmartConnectionTable(Static):
     SmartConnectionTable DataTable {
         background: $surface;
     }
+
+    SmartConnectionTable .connection-key {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: $surface;
+    }
     """
 
     connections = reactive(list)
@@ -751,6 +820,31 @@ class SmartConnectionTable(Static):
         self.table.add_column("Geo", key="country", width=3)
 
         yield self.table
+        yield Static(self._render_connection_key(), classes="connection-key")
+
+    def _render_connection_key(self) -> Text:
+        """Render key explaining connection security metrics"""
+        key = Text()
+        key.append("Risk:", style="dim bold")
+        key.append(" ●", style="bold red")
+        key.append("H", style="dim")
+        key.append(" ●", style="bold yellow")
+        key.append("M", style="dim")
+        key.append(" ●", style="green")
+        key.append("L", style="dim")
+        key.append(" │ ", style="dim")
+        key.append("Anom", style="dim bold")
+        key.append("=Anomaly ", style="dim")
+        key.append("Sprd", style="dim bold")
+        key.append("=Disagreement ", style="dim")
+        key.append("Hops", style="dim bold")
+        key.append("=NetDist ", style="dim")
+        key.append("│ ", style="dim")
+        key.append("TOR", style="bold red")
+        key.append("/", style="dim")
+        key.append("VPN", style="bold magenta")
+        key.append("=Anon", style="dim")
+        return key
 
     def watch_connections(self, new_connections: list) -> None:
         """Update table when connections change - text color coded by threat and type"""
@@ -822,9 +916,9 @@ class SmartConnectionTable(Static):
                 port = str(conn.get('dst_port', '-'))
                 protocol = (conn.get('protocol') or 'TCP')[:5]
                 org = (conn.get('dst_org') or 'Unknown')[:15]
-                # Show '-' only for null/None, not for 0 (0 hops is valid)
+                # Show '--' for outbound traffic (no response TTL), value for measured hops
                 hop_count = conn.get('hop_count')
-                hops = str(hop_count) if hop_count is not None else '-'
+                hops = str(hop_count) if hop_count is not None else '--'
                 country = (conn.get('dst_country') or '--')[:3]
 
                 # Uncertainty warning indicator (! suffix on score)
@@ -1597,6 +1691,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         ("a", "toggle_anomalies", "Toggle Anomaly Panel"),
         ("o", "toggle_org_intel", "Toggle Org Intel Panel"),
         ("g", "toggle_globe", "Pause/Resume Globe Animation"),
+        ("i", "cycle_intel_map", "Cycle Intel Map Type"),
         ("m", "toggle_mode_panel", "Toggle Mode Panel"),
         ("escape", "close_modal", "Close Modal"),
         ("?", "help", "Show Keybindings"),
@@ -2175,6 +2270,13 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             else:
                 self._globe_paused = True
                 self.sub_title = "Globe animation paused"
+
+    def action_cycle_intel_map(self) -> None:
+        """Cycle through intel map visualization types (flat/rotating/simple)"""
+        if self.globe_panel and hasattr(self.globe_panel, 'cycle_map_type'):
+            new_type = self.globe_panel.cycle_map_type()
+            map_name = self.globe_panel.current_map_name
+            self.sub_title = f"Intel Map: {map_name} (press 'i' to cycle)"
 
     def action_toggle_org_intel(self) -> None:
         """Toggle Organization Intel panel visibility"""

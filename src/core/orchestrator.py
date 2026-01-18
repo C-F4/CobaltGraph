@@ -197,6 +197,7 @@ class DataPipeline:
         self.metadata_aggregator = None
         self.intelligence_aggregator = None  # Intelligence aggregator for dashboard
         self.device_enrichment = None  # Passive device hostname/org enrichment
+        self.connection_correlator = None  # Bidirectional packet correlation
         self.database = None
         self.exporter = None
 
@@ -292,6 +293,21 @@ class DataPipeline:
             logger.info("✅ DeviceEnrichment initialized (passive hostname resolution)")
         except Exception as e:
             logger.warning(f"⚠️ DeviceEnrichment unavailable: {e}")
+
+        # Connection Correlator (bidirectional packet correlation for hop estimation)
+        try:
+            from src.pipeline.stages.correlator import ConnectionCorrelator
+            from src.pipeline.stages.base import StageContext
+            from src.pipeline.config import PipelineConfig
+
+            self.connection_correlator = ConnectionCorrelator()
+            # Initialize with minimal context
+            context = StageContext(config=PipelineConfig())
+            self.connection_correlator.initialize(context)
+            logger.info("✅ ConnectionCorrelator initialized (bidirectional capture enabled)")
+        except Exception as e:
+            self.connection_correlator = None
+            logger.warning(f"⚠️ ConnectionCorrelator unavailable: {e}")
 
     def start(self):
         """Start the pipeline processing threads"""
@@ -433,13 +449,52 @@ class DataPipeline:
                 except queue.Empty:
                     continue
 
-                # Check event type - handle device events separately
+                # Check event type - handle different event types
                 event_type = raw_conn.get("type", "connection")
 
                 if event_type == "device":
                     # Process device discovery event (persist to DB)
                     self._process_device_event(raw_conn)
                     continue
+
+                if event_type == "packet":
+                    # Bidirectional packet - process through correlator
+                    if self.connection_correlator:
+                        from src.pipeline.stages.base import StageContext
+                        from src.pipeline.config import PipelineConfig
+                        context = StageContext(config=PipelineConfig())
+                        result = self.connection_correlator.process(raw_conn, context)
+
+                        if result.success and result.data:
+                            # Correlator returned a ConnectionEvent - process it
+                            correlated_event = result.data
+
+                            # If it's a ConnectionEvent, convert to dict for _process_connection
+                            if hasattr(correlated_event, 'to_dict'):
+                                # Extract hop data before converting
+                                hop_data = getattr(correlated_event, 'hop_data', None)
+                                raw_conn = {
+                                    "type": "connection",
+                                    "timestamp": correlated_event.timestamp,
+                                    "src_ip": correlated_event.src_ip,
+                                    "src_mac": correlated_event.src_mac,
+                                    "dst_ip": correlated_event.dst_ip,
+                                    "dst_port": correlated_event.dst_port,
+                                    "protocol": correlated_event.protocol,
+                                    "device_vendor": correlated_event.device_vendor,
+                                    # Include hop data from correlator
+                                    "ttl": hop_data.ttl_observed if hop_data else 0,
+                                    "response_ttl": hop_data.ttl_observed if hop_data else None,
+                                    "estimated_hops": hop_data.hop_count if hop_data else None,
+                                    "estimated_initial_ttl": hop_data.ttl_initial if hop_data else None,
+                                    "os_fingerprint": hop_data.os_fingerprint if hop_data else None,
+                                }
+                            else:
+                                # It's a dict (device event passed through)
+                                continue
+                    else:
+                        # No correlator - skip packet events
+                        continue
 
                 # Process connection through pipeline
                 event = self._process_connection(raw_conn)
@@ -667,15 +722,21 @@ class DataPipeline:
             scoring_method = "legacy"
 
         # Extract ASN/org data with TTL-based hop estimation
+        # Prefer hop data from correlator (bidirectional capture) over consensus scorer
+        correlator_hops = raw_conn.get("estimated_hops")
+        correlator_ttl = raw_conn.get("response_ttl")
+        correlator_os = raw_conn.get("os_fingerprint")
+
         asn_data = {
             "dst_asn": consensus_details.get("dst_asn"),
             "dst_asn_name": consensus_details.get("dst_asn_name", ""),
             "dst_org": consensus_details.get("dst_org", ""),
             "dst_org_type": consensus_details.get("dst_org_type", ""),
             "org_trust_score": consensus_details.get("org_trust_score", 0.5),
-            "hop_count": consensus_details.get("hop_count"),
-            "ttl_observed": consensus_details.get("ttl_observed"),
-            "os_fingerprint": consensus_details.get("os_fingerprint", ""),
+            # Use correlator hop data if available (from response packet TTL)
+            "hop_count": correlator_hops if correlator_hops is not None else consensus_details.get("hop_count"),
+            "ttl_observed": correlator_ttl if correlator_ttl is not None else consensus_details.get("ttl_observed"),
+            "os_fingerprint": correlator_os if correlator_os else consensus_details.get("os_fingerprint", ""),
         }
 
         # Stage 4: Analytics processing
