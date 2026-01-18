@@ -838,7 +838,7 @@ class SmartConnectionTable(Static):
         key.append("Sprd", style="dim bold")
         key.append("=Disagreement ", style="dim")
         key.append("Hops", style="dim bold")
-        key.append("=NetDist ", style="dim")
+        key.append("=NetDist(resp) ", style="dim")
         key.append("│ ", style="dim")
         key.append("TOR", style="bold red")
         key.append("/", style="dim")
@@ -916,9 +916,9 @@ class SmartConnectionTable(Static):
                 port = str(conn.get('dst_port', '-'))
                 protocol = (conn.get('protocol') or 'TCP')[:5]
                 org = (conn.get('dst_org') or 'Unknown')[:15]
-                # Show '-' only for null/None, not for 0 (0 hops is valid)
+                # Show '--' for outbound traffic (no response TTL), value for measured hops
                 hop_count = conn.get('hop_count')
-                hops = str(hop_count) if hop_count is not None else '-'
+                hops = str(hop_count) if hop_count is not None else '--'
                 country = (conn.get('dst_country') or '--')[:3]
 
                 # Uncertainty warning indicator (! suffix on score)
