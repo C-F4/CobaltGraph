@@ -5,8 +5,13 @@ Clean, stage-based data processing pipeline for network intelligence.
 Replaces the monolithic DataPipeline with modular, testable stages.
 
 Architecture:
-    Connection → ValidationStage → EnrichmentStage → ScoringStage
-                                                   → AnalyticsStage → StorageStage
+    Packet (bidirectional) → ConnectionCorrelator → ValidationStage → EnrichmentStage
+                                                  → ScoringStage → AnalyticsStage → StorageStage
+
+Bidirectional Capture:
+    - NetworkMonitor emits both outbound AND inbound packets
+    - ConnectionCorrelator correlates them into unified connections
+    - Response packet TTL enables accurate hop estimation
 
 Each stage:
 - Has single responsibility
@@ -23,6 +28,7 @@ from .events import (
     GeoData,
     ASNData,
     ThreatIntelData,
+    HopData,
     ConsensusResult,
     AnomalyData,
     ThreatLevel,
@@ -33,6 +39,7 @@ from .stages import (
     PipelineStage,
     StageContext,
     CompositeStage,
+    ConnectionCorrelator,
     ValidationStage,
     EnrichmentStage,
     ScoringStage,
@@ -50,6 +57,7 @@ __all__ = [
     "GeoData",
     "ASNData",
     "ThreatIntelData",
+    "HopData",
     "ConsensusResult",
     "AnomalyData",
     "ThreatLevel",
@@ -59,6 +67,7 @@ __all__ = [
     "PipelineStage",
     "StageContext",
     "CompositeStage",
+    "ConnectionCorrelator",
     "ValidationStage",
     "EnrichmentStage",
     "ScoringStage",

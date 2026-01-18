@@ -564,40 +564,96 @@ class NetworkMonitor:
         if dest_ip.startswith("169.254.") or src_ip.startswith("169.254."):
             return
 
-        # Only track outbound connections (to internet)
+        # Determine if IPs are local (private) or external (internet)
         # Local network: 10.x, 172.16-31.x, 192.168.x
-        is_dest_local = (
-            dest_ip.startswith("10.")
-            or dest_ip.startswith("192.168.")
-            or (dest_ip.startswith("172.") and 16 <= int(dest_ip.split(".")[1]) <= 31)
-        )
+        def is_local_ip(ip: str) -> bool:
+            if ip.startswith("10."):
+                return True
+            if ip.startswith("192.168."):
+                return True
+            if ip.startswith("172."):
+                try:
+                    second_octet = int(ip.split(".")[1])
+                    return 16 <= second_octet <= 31
+                except (IndexError, ValueError):
+                    return False
+            return False
 
-        # Only emit if destination is external (internet)
-        if not is_dest_local and "dest_port" in ip_packet:
-            self.total_connections += 1
+        is_src_local = is_local_ip(src_ip)
+        is_dest_local = is_local_ip(dest_ip)
 
-            # Update device connection count
-            if src_mac in self.devices:
-                self.devices[src_mac].connection_count += 1
+        # Bidirectional capture: track packets with at least one external endpoint
+        # Direction: outbound (local->external), inbound (external->local)
+        if is_src_local and not is_dest_local:
+            direction = "outbound"
+            local_ip = src_ip
+            remote_ip = dest_ip
+            local_port = ip_packet.get("src_port", 0)
+            remote_port = ip_packet.get("dest_port", 0)
+        elif not is_src_local and is_dest_local:
+            direction = "inbound"
+            local_ip = dest_ip
+            remote_ip = src_ip
+            local_port = ip_packet.get("dest_port", 0)
+            remote_port = ip_packet.get("src_port", 0)
+        else:
+            # Both local or both external - skip
+            return
 
-            # Emit connection event (includes source device info for tracking)
+        # Need port info for connection correlation
+        if remote_port == 0 and local_port == 0:
+            return
+
+        self.total_connections += 1
+
+        # Update device connection count for outbound
+        if direction == "outbound" and src_mac in self.devices:
+            self.devices[src_mac].connection_count += 1
+
+        # Emit packet event for pipeline correlation
+        # Uses normalized fields for consistent processing
+        packet_event = {
+            "type": "packet",
+            "direction": direction,
+            "timestamp": time.time(),
+            "src_mac": src_mac,
+            # Original packet fields
+            "src_ip": src_ip,
+            "dst_ip": dest_ip,
+            "src_port": ip_packet.get("src_port", 0),
+            "dst_port": ip_packet.get("dest_port", 0),
+            # Normalized fields for correlation
+            "local_ip": local_ip,
+            "remote_ip": remote_ip,
+            "local_port": local_port,
+            "remote_port": remote_port,
+            # Metadata
+            "protocol": ip_packet.get("protocol_name", "TCP"),
+            "ttl": ip_packet.get("ttl", 0),
+            "device_vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
+            "metadata": {"network_mode": self.mode, "interface": self.interface},
+        }
+
+        if self.callback:
+            self.callback(packet_event)
+        else:
+            print(json.dumps(packet_event), flush=True)
+
+        # Store outbound connections for legacy compatibility
+        if direction == "outbound":
+            # Legacy format for backwards compatibility
             connection = {
                 "type": "connection",
-                "timestamp": time.time(),
+                "timestamp": packet_event["timestamp"],
                 "src_mac": src_mac,
                 "src_ip": src_ip,
                 "dst_ip": dest_ip,
-                "dst_port": ip_packet["dest_port"],
-                "protocol": ip_packet.get("protocol_name", "TCP"),
-                "ttl": ip_packet.get("ttl", 0),  # TTL for passive hop estimation
-                "device_vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
-                "metadata": {"network_mode": self.mode, "interface": self.interface},
+                "dst_port": ip_packet.get("dest_port", 0),
+                "protocol": packet_event["protocol"],
+                "ttl": packet_event["ttl"],
+                "device_vendor": packet_event["device_vendor"],
+                "metadata": packet_event["metadata"],
             }
-
-            if self.callback:
-                self.callback(connection)
-            else:
-                print(json.dumps(connection), flush=True)
             self.connections.append(connection)
 
             # Also emit device event for the source device making connection
@@ -610,7 +666,7 @@ class NetworkMonitor:
                 "vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
                 "packet_type": "connection",
                 "dst_ip": dest_ip,
-                "dst_port": ip_packet["dest_port"],
+                "dst_port": ip_packet.get("dest_port", 0),
                 "metadata": {"network_mode": self.mode, "interface": self.interface},
             }
             if self.callback:
