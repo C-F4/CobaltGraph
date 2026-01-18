@@ -278,7 +278,7 @@ class EnrichmentDetailsPanel(Static):
             else:
                 lines.append("  [red]⚠ Very far (suspicious)[/red]")
         else:
-            lines.append("  Hops: [dim]Not measured[/dim]")
+            lines.append("  Hops: [dim]Awaiting response[/dim]")
 
         if ttl_observed:
             lines.append(f"  TTL Observed: {ttl_observed}")

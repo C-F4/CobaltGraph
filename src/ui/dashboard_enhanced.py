@@ -838,7 +838,7 @@ class SmartConnectionTable(Static):
         key.append("Sprd", style="dim bold")
         key.append("=Disagreement ", style="dim")
         key.append("Hops", style="dim bold")
-        key.append("=NetDist(resp) ", style="dim")
+        key.append("=NetDist ", style="dim")
         key.append("│ ", style="dim")
         key.append("TOR", style="bold red")
         key.append("/", style="dim")
