@@ -858,19 +858,30 @@ class ConnectionTablePanel(Static):
         yield Static(self._render_connection_key(), classes="connection-key")
 
     def _render_connection_key(self) -> Text:
-        """Render a concise key for connection metrics"""
+        """Render a concise key explaining security metrics per connection"""
         key = Text()
-        key.append("Key: ", style="dim")
-        key.append("●", style="red")
-        key.append("Crit ", style="dim")
-        key.append("●", style="yellow")
-        key.append("Warn ", style="dim")
-        key.append("●", style="green")
-        key.append("Clean ", style="dim")
+        # Threat level indicators
+        key.append("Threat:", style="dim bold")
+        key.append(" ●", style="bold red")
+        key.append("Crit", style="dim")
+        key.append(" ●", style="bold yellow")
+        key.append("High", style="dim")
+        key.append(" ●", style="green")
+        key.append("Low", style="dim")
+        key.append(" │ ", style="dim")
+        # Confidence and anomaly indicators
         key.append("⚠", style="yellow")
-        key.append("Uncertain ", style="dim")
-        key.append("○", style="dim")
-        key.append("Normal", style="dim")
+        key.append("=LowConf", style="dim")
+        key.append(" !", style="bold magenta")
+        key.append("=Anom", style="dim")
+        key.append(" │ ", style="dim")
+        # Organization trust indicators
+        key.append("Type:", style="dim bold")
+        key.append(" TOR", style="bold red")
+        key.append("/VPN", style="bold magenta")
+        key.append("=Risk ", style="dim")
+        key.append("ENT", style="bold green")
+        key.append("=Trust", style="dim")
         return key
 
     def watch_connections(self, new_connections: list) -> None:
