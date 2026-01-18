@@ -823,6 +823,13 @@ class ConnectionTablePanel(Static):
     ConnectionTablePanel DataTable > .datatable--hover {
         background: $primary 20%;
     }
+
+    ConnectionTablePanel .connection-key {
+        dock: bottom;
+        height: auto;
+        padding: 0 1;
+        background: $surface;
+    }
     """
 
     connections = reactive(list)
@@ -847,6 +854,24 @@ class ConnectionTablePanel(Static):
         self.table.add_column("", key="indicator", width=3)  # Status indicator
 
         yield self.table
+        # Yield connection key/legend
+        yield Static(self._render_connection_key(), classes="connection-key")
+
+    def _render_connection_key(self) -> Text:
+        """Render a concise key for connection metrics"""
+        key = Text()
+        key.append("Key: ", style="dim")
+        key.append("●", style="red")
+        key.append("Crit ", style="dim")
+        key.append("●", style="yellow")
+        key.append("Warn ", style="dim")
+        key.append("●", style="green")
+        key.append("Clean ", style="dim")
+        key.append("⚠", style="yellow")
+        key.append("Uncertain ", style="dim")
+        key.append("○", style="dim")
+        key.append("Normal", style="dim")
+        return key
 
     def watch_connections(self, new_connections: list) -> None:
         """Update table when connections change"""
@@ -956,7 +981,10 @@ class ThreatAlert(Message):
 class ThreatGlobePanel(Static):
     """
     Bottom-right panel: ASCII threat globe
-    Shows geographic threat distribution on a globe visualization
+    Shows geographic threat distribution on a globe visualization.
+
+    Uses the refactored intel_map module for visualization with
+    automatic fallback between implementations.
     """
 
     DEFAULT_CSS = """
@@ -969,35 +997,63 @@ class ThreatGlobePanel(Static):
 
     globe_data = reactive(dict)
 
-    def __init__(self, **kwargs):
+    def __init__(self, map_type: str = "flat", **kwargs):
         super().__init__(**kwargs)
         self.globe_data = {
             'connections': [],
             'heatmap': {},
         }
-        self.world_map = None
+        self.intel_map = None
+        self.map_type = map_type
 
-        # Try to initialize flat world map
+        # Try to initialize intel map from refactored module
+        self._init_intel_map()
+
+    def _init_intel_map(self) -> None:
+        """Initialize intel map with fallback chain"""
+        # Try new intel_map module first
+        try:
+            from src.ui.intel_map import IntelMapPanel
+            # Create a map instance directly (not as widget)
+            from src.ui.intel_map import FlatWorldMap, RotatingGlobe, SimpleGlobe
+
+            if self.map_type == "rotating":
+                self.intel_map = RotatingGlobe(width=60, height=15)
+            elif self.map_type == "simple":
+                self.intel_map = SimpleGlobe(width=60, height=15)
+            else:
+                self.intel_map = FlatWorldMap(width=60, height=15)
+            return
+        except ImportError:
+            pass
+
+        # Fallback to legacy globe_flat
         try:
             from src.ui.globe_flat import FlatWorldMap
-            self.world_map = FlatWorldMap(width=60, height=15)
+            self.intel_map = FlatWorldMap(width=60, height=15)
+            return
         except ImportError:
-            try:
-                from globe_flat import FlatWorldMap
-                self.world_map = FlatWorldMap(width=60, height=15)
-            except ImportError:
-                self.world_map = None
+            pass
+
+        try:
+            from globe_flat import FlatWorldMap
+            self.intel_map = FlatWorldMap(width=60, height=15)
+            return
+        except ImportError:
+            pass
+
+        self.intel_map = None
 
     def watch_globe_data(self, new_data: dict) -> None:
         """Update globe when data changes"""
-        if self.world_map is None:
+        if self.intel_map is None:
             self.refresh()
             return
 
         connections = new_data.get('connections', [])
 
         # Clear and add threats
-        self.world_map.clear_threats()
+        self.intel_map.clear_threats()
         for conn in connections[-30:]:
             try:
                 lat = float(conn.get('dst_lat', 0) or 0)
@@ -1006,7 +1062,7 @@ class ThreatGlobePanel(Static):
                 org_type = (conn.get('dst_org_type') or 'unknown').lower()
                 ip = conn.get('dst_ip', 'Unknown')
 
-                self.world_map.add_threat(lat, lon, ip, threat, org_type)
+                self.intel_map.add_threat(lat, lon, ip, threat, org_type)
             except Exception as e:
                 logger.debug(f"Failed to add threat to globe: {e}")
 
@@ -1014,14 +1070,14 @@ class ThreatGlobePanel(Static):
 
     def render(self):
         """Render threat globe"""
-        if self.world_map:
+        if self.intel_map:
             try:
-                self.world_map.update(0.05)
-                return self.world_map.render()
+                self.intel_map.update(0.05)
+                return self.intel_map.render()
             except Exception as e:
                 logger.debug(f"Globe render failed: {e}")
 
-        # Fallback: Simple text display
+        # Fallback: Simple text display with key
         connections = self.globe_data.get('connections', [])
         content_lines = []
         content_lines.append("[bold cyan]Globe View[/bold cyan]")
@@ -1053,8 +1109,12 @@ class ThreatGlobePanel(Static):
                 else:
                     color = "green"
 
-                bar = '█' * int(avg_threat * 10)
+                bar = chr(0x2588) * int(avg_threat * 10)
                 content_lines.append(f"{country} [{color}]{bar:10s}[/{color}] {avg_threat:.2f}")
+
+        # Add compact key
+        content_lines.append("")
+        content_lines.append("[dim]Key: [bold red]●[/bold red]Crit [bold yellow]◉[/bold yellow]High [yellow]○[/yellow]Med [green]·[/green]Low[/dim]")
 
         content = "\n".join(content_lines)
         return Panel(content, title="[bold cyan]Threat Globe[/bold cyan]", border_style="cyan")
