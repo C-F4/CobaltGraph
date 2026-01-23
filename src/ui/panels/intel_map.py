@@ -12,7 +12,7 @@ Supports multiple map types with automatic fallback:
 """
 
 import logging
-from typing import Optional, List, Dict
+from typing import Optional
 
 from rich.panel import Panel
 from textual.widgets import Static
@@ -52,7 +52,6 @@ class IntelMapPanel(Static):
     }
     """
 
-    # Available map types
     MAP_TYPES = ['flat', 'rotating', 'simple']
 
     globe_data = reactive(dict)
@@ -63,27 +62,28 @@ class IntelMapPanel(Static):
         self._current_type = map_type
         self._map = None
         self._unknown_ips: set = set()
+        self._map_width = 120
+        self._map_height = 30
 
         self.globe_data = {
             'connections': [],
             'heatmap': {},
         }
 
-        # Initialize map
         self._init_map()
 
     def _init_map(self) -> None:
         """Initialize the map implementation."""
         self._map = create_map(
             map_type=self._preferred_type,
-            width=80,
-            height=20,
+            width=self._map_width,
+            height=self._map_height,
             fallback=True
         )
 
         if self._map:
             self._current_type = self._map.MAP_TYPE.lower()
-            logger.debug(f"IntelMapPanel using {self._current_type} map")
+            logger.debug(f"IntelMapPanel using {self._current_type} map ({self._map_width}x{self._map_height})")
         else:
             logger.warning("IntelMapPanel: No map implementation available")
 
@@ -97,13 +97,11 @@ class IntelMapPanel(Static):
         if not self._map:
             return "none"
 
-        # Find current position in list
         try:
             idx = self.MAP_TYPES.index(self._current_type)
         except ValueError:
             idx = 0
 
-        # Try each type until one works
         for i in range(1, len(self.MAP_TYPES) + 1):
             next_type = self.MAP_TYPES[(idx + i) % len(self.MAP_TYPES)]
             new_map = create_map(next_type, width=self.width, height=self.height, fallback=False)
@@ -125,12 +123,12 @@ class IntelMapPanel(Static):
     @property
     def width(self) -> int:
         """Get current map width."""
-        return self._map.width if self._map else 80
+        return self._map.width if self._map else self._map_width
 
     @property
     def height(self) -> int:
         """Get current map height."""
-        return self._map.height if self._map else 20
+        return self._map.height if self._map else self._map_height
 
     def watch_globe_data(self, new_data: dict) -> None:
         """Update map when data changes."""
@@ -140,12 +138,10 @@ class IntelMapPanel(Static):
 
         connections = new_data.get('connections', [])
 
-        # Clear existing data
         self._map.clear_threats()
         self._unknown_ips.clear()
 
-        # Add each connection
-        for conn in connections[-50:]:  # Limit to recent 50
+        for conn in connections[-50:]:
             try:
                 lat = float(conn.get('dst_lat', 0) or 0)
                 lon = float(conn.get('dst_lon', 0) or 0)
@@ -153,25 +149,19 @@ class IntelMapPanel(Static):
                 org_type = (conn.get('dst_org_type') or 'unknown').lower()
                 ip = conn.get('dst_ip', 'Unknown')
 
-                # Track unknown locations separately
                 if is_unknown_location(lat, lon):
                     self._unknown_ips.add(ip)
                     continue
 
-                # Add to map (map handles its own unknown filtering too)
                 if hasattr(self._map, 'add_connection'):
-                    # Rotating globe uses connections
                     self._map.add_connection(0, 0, lat, lon, threat, org_type, ip)
                 else:
-                    # Flat/simple use threats
                     self._map.add_threat(lat, lon, ip, threat, org_type)
 
             except Exception as e:
                 logger.debug(f"Failed to add threat: {e}")
 
-        # Update unknown count
         self._map.set_unknown_count(len(self._unknown_ips))
-
         self.refresh()
 
     def _reapply_data(self) -> None:
@@ -211,15 +201,17 @@ class IntelMapPanel(Static):
 
     def resize(self, width: int, height: int) -> None:
         """Resize the map."""
+        self._map_width = width
+        self._map_height = height
         if self._map:
             self._map.resize(width, height)
 
     def on_resize(self, event) -> None:
-        """Handle resize events."""
-        # Account for panel borders
-        new_width = max(40, event.size.width - 2)
-        new_height = max(10, event.size.height - 2)
+        """Handle resize events to maximize map space usage."""
+        new_width = max(60, event.size.width - 2)
+        new_height = max(15, event.size.height - 3)
         self.resize(new_width, new_height)
+        self.refresh()
 
     def render(self) -> Panel:
         """Render the intel map."""
@@ -230,7 +222,6 @@ class IntelMapPanel(Static):
             except Exception as e:
                 logger.debug(f"Map render failed: {e}")
 
-        # Fallback rendering
         return Panel(
             "[dim]Map visualization unavailable[/dim]\n\n"
             "[cyan]Waiting for geographic data...[/cyan]",

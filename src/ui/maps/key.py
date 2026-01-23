@@ -151,25 +151,28 @@ def render_key_box(width: int = 18, include_verification: bool = False) -> List[
         List of (text, style) tuples for each line
     """
     lines = [
-        ("THREAT LEVEL", "dim bold"),
-        ("●=Crit  ◉=High", "bold red"),
-        ("◯=Med  ○=Low", "yellow"),
-        ("·=Info", "green"),
+        ("─── KEY ───", "dim bold"),
+        ("TERRAIN", "dim bold cyan"),
+        ("░ Land  ∙ Ocean", "green"),
+        ("▪ Coast • Water", "bold green"),
         ("", None),
+        ("CONNECTION PING", "dim bold"),
+        ("● Crit ◉ High", "bold red"),
+        ("◯ Med  ○ Low", "yellow"),
+        ("· Info", "green"),
     ]
 
     if include_verification:
         lines.extend([
-            ("VERIFICATION", "dim bold"),
-            ("✓=Verified !=Flag", "bold green"),
-            ("?=Pending ✗=Unk", "dim"),
             ("", None),
+            ("VERIFY", "dim bold"),
+            ("✓ OK  ! Flag", "bold green"),
         ])
 
     lines.extend([
-        ("HEATMAP", "dim bold"),
-        ("█▓▒░", "bold yellow"),
-        ("High → Low", "dim"),
+        ("", None),
+        ("HEATMAP DENSITY", "dim bold"),
+        ("█▓▒░ Hi→Lo", "bold yellow"),
     ])
 
     return lines
