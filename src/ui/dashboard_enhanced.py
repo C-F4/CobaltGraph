@@ -37,34 +37,82 @@ from textual.reactive import reactive
 
 logger = logging.getLogger(__name__)
 
+
+def _is_private_ip(ip: str) -> bool:
+    """Check if IP is private/local (RFC 1918 + loopback)"""
+    if not ip or ip == 'local':
+        return True
+    if ip.startswith("10."):
+        return True
+    if ip.startswith("192.168."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second_octet = int(ip.split(".")[1])
+            if 16 <= second_octet <= 31:
+                return True
+        except (IndexError, ValueError):
+            pass
+    if ip.startswith("127."):
+        return True
+    return False
+
+
+def get_direction(src_ip: str, dst_ip: str) -> tuple:
+    """
+    Determine packet/connection direction based on source and destination IPs.
+
+    Returns:
+        tuple: (direction_label, direction_color, direction_symbol)
+        - "OUT" for outgoing (local -> external)
+        - "IN" for incoming (external -> local)
+        - "INT" for internal (local -> local)
+        - "EXT" for external (external -> external, passthrough)
+    """
+    src_is_private = _is_private_ip(src_ip)
+    dst_is_private = _is_private_ip(dst_ip)
+
+    if src_is_private and not dst_is_private:
+        return ("OUT", "cyan", "→")  # Outgoing
+    elif not src_is_private and dst_is_private:
+        return ("IN", "magenta", "←")  # Incoming
+    elif src_is_private and dst_is_private:
+        return ("INT", "dim", "↔")  # Internal
+    else:
+        return ("EXT", "yellow", "⇄")  # External/passthrough
+
+
 try:
     from src.ui.unified_dashboard import UnifiedDashboard, DataManager, VisualizationManager
 except ImportError:
     from unified_dashboard import UnifiedDashboard, DataManager, VisualizationManager
 
+# Import consolidated maps module
 try:
-    from src.ui.globe_simple import SimpleGlobe
+    from src.ui.maps import FlatWorldMap, RotatingGlobe, SimpleGlobe, is_unknown_location, int_to_roman
+    EnhancedGlobe = RotatingGlobe  # Alias for compatibility
 except ImportError:
     try:
-        from globe_simple import SimpleGlobe
+        from .maps import FlatWorldMap, RotatingGlobe, SimpleGlobe, is_unknown_location, int_to_roman
+        EnhancedGlobe = RotatingGlobe
     except ImportError:
-        SimpleGlobe = None
-
-try:
-    from src.ui.globe_enhanced import EnhancedGlobe
-except ImportError:
-    try:
-        from globe_enhanced import EnhancedGlobe
-    except ImportError:
-        EnhancedGlobe = None
-
-try:
-    from src.ui.globe_flat import FlatWorldMap
-except ImportError:
-    try:
-        from globe_flat import FlatWorldMap
-    except ImportError:
+        # Fallback to legacy imports if new module not available
         FlatWorldMap = None
+        RotatingGlobe = None
+        EnhancedGlobe = None
+        SimpleGlobe = None
+        is_unknown_location = lambda lat, lon: lat == 0.0 and lon == 0.0
+        def int_to_roman(num):
+            if num <= 0 or num >= 4000:
+                return str(num)
+            val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+            syms = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I']
+            result = ''
+            for i, v in enumerate(val):
+                while num >= v:
+                    result += syms[i]
+                    num -= v
+            return result
 
 
 class ThreatRadarGraph:
@@ -429,6 +477,7 @@ class EnhancedThreatGlobePanel(Static):
         self.region_pings = []
         self.last_update_time = time.time()
         self._current_map_type = "flat"  # Track current map type
+        self._unknown_ips: set = set()  # Track IPs with unknown (0,0) locations
 
         # Initialize all map types for cycling
         self._init_all_maps()
@@ -523,6 +572,7 @@ class EnhancedThreatGlobePanel(Static):
         try:
             connections = new_data.get('connections', [])
             self.threat_regions = {}
+            self._unknown_ips.clear()
 
             # Populate ALL map types for seamless cycling
             # 1. Flat World Map
@@ -537,6 +587,11 @@ class EnhancedThreatGlobePanel(Static):
                         dst_lat = float(conn.get('dst_lat', 0) or 0)
                         dst_lon = float(conn.get('dst_lon', 0) or 0)
 
+                        # Filter out (0,0) unknown locations - track separately
+                        if dst_lat == 0.0 and dst_lon == 0.0:
+                            self._unknown_ips.add(ip)
+                            continue
+
                         if country not in self.threat_regions:
                             self.threat_regions[country] = {'count': 0, 'avg_threat': 0.0, 'ips': []}
                         self.threat_regions[country]['count'] += 1
@@ -550,6 +605,10 @@ class EnhancedThreatGlobePanel(Static):
                     except Exception as e:
                         logger.debug(f"Failed to add to world map: {e}")
 
+                # Update unknown count on flat world map
+                if hasattr(self.world_map, 'set_unknown_count'):
+                    self.world_map.set_unknown_count(len(self._unknown_ips))
+
             # 2. Enhanced Globe (rotating)
             if self.enhanced_globe:
                 self.enhanced_globe.clear_connections()
@@ -561,6 +620,11 @@ class EnhancedThreatGlobePanel(Static):
                         dst_lat = float(conn.get('dst_lat', 0) or 0)
                         dst_lon = float(conn.get('dst_lon', 0) or 0)
 
+                        # Filter out (0,0) unknown locations
+                        if dst_lat == 0.0 and dst_lon == 0.0:
+                            self._unknown_ips.add(ip)
+                            continue
+
                         self.enhanced_globe.add_connection(
                             0.0, 0.0, dst_lat, dst_lon,
                             threat, org_type, ip
@@ -568,18 +632,33 @@ class EnhancedThreatGlobePanel(Static):
                     except Exception as e:
                         logger.debug(f"Failed to add to enhanced globe: {e}")
 
+                # Update unknown count on enhanced globe
+                if hasattr(self.enhanced_globe, 'set_unknown_count'):
+                    self.enhanced_globe.set_unknown_count(len(self._unknown_ips))
+
             # 3. Simple Globe (fallback)
             if self.simple_globe:
                 self.simple_globe.clear_threats()
                 for conn in connections[-20:]:
                     try:
                         threat = float(conn.get('threat_score', 0) or 0)
+                        org_type = (conn.get('dst_org_type') or 'unknown').lower()
+                        ip = conn.get('dst_ip', 'Unknown')
                         dst_lat = float(conn.get('dst_lat', 0) or 0)
                         dst_lon = float(conn.get('dst_lon', 0) or 0)
 
-                        self.simple_globe.add_threat(dst_lat, dst_lon, threat)
+                        # Filter out (0,0) unknown locations
+                        if dst_lat == 0.0 and dst_lon == 0.0:
+                            self._unknown_ips.add(ip)
+                            continue
+
+                        self.simple_globe.add_threat(dst_lat, dst_lon, ip, threat, org_type)
                     except Exception as e:
                         logger.debug(f"Failed to add to simple globe: {e}")
+
+                # Update unknown count on simple globe
+                if hasattr(self.simple_globe, 'set_unknown_count'):
+                    self.simple_globe.set_unknown_count(len(self._unknown_ips))
 
             # Trigger animation update
             self.animation_frame += 1
@@ -804,8 +883,9 @@ class SmartConnectionTable(Static):
         self.table = DataTable(id="connection_table")
         self._connection_map = {}  # Track connections by row key for detail modal
 
-        # Enhanced columns (13 total) - shows more enrichment data + anomaly/spread
+        # Enhanced columns (14 total) - shows more enrichment data + anomaly/spread
         self.table.add_column("Time", key="time", width=8)
+        self.table.add_column("Dir", key="direction", width=3)  # Direction indicator
         self.table.add_column("Src", key="src_ip", width=12)
         self.table.add_column("Dst", key="dst_ip", width=15)
         self.table.add_column("Port", key="port", width=5)
@@ -825,6 +905,12 @@ class SmartConnectionTable(Static):
     def _render_connection_key(self) -> Text:
         """Render key explaining connection security metrics"""
         key = Text()
+        key.append("Dir:", style="dim bold")
+        key.append(" →", style="cyan")
+        key.append("Out", style="dim")
+        key.append(" ←", style="magenta")
+        key.append("In", style="dim")
+        key.append(" │ ", style="dim")
         key.append("Risk:", style="dim bold")
         key.append(" ●", style="bold red")
         key.append("H", style="dim")
@@ -836,14 +922,9 @@ class SmartConnectionTable(Static):
         key.append("Anom", style="dim bold")
         key.append("=Anomaly ", style="dim")
         key.append("Sprd", style="dim bold")
-        key.append("=Disagreement ", style="dim")
+        key.append("=Disagr ", style="dim")
         key.append("Hops", style="dim bold")
-        key.append("=NetDist ", style="dim")
-        key.append("│ ", style="dim")
-        key.append("TOR", style="bold red")
-        key.append("/", style="dim")
-        key.append("VPN", style="bold magenta")
-        key.append("=Anon", style="dim")
+        key.append("=NetDist", style="dim")
         return key
 
     def watch_connections(self, new_connections: list) -> None:
@@ -911,11 +992,17 @@ class SmartConnectionTable(Static):
                 type_color = type_colors.get(org_type, 'dim white')
 
                 # Extract fields
-                src_ip = (conn.get('src_ip') or 'local')[:12]
-                dst_ip = (conn.get('dst_ip') or 'Unknown')[:15]
+                src_ip_raw = conn.get('src_ip') or 'local'
+                dst_ip_raw = conn.get('dst_ip') or 'Unknown'
+                src_ip = src_ip_raw[:12]
+                dst_ip = dst_ip_raw[:15]
                 port = str(conn.get('dst_port', '-'))
                 protocol = (conn.get('protocol') or 'TCP')[:5]
                 org = (conn.get('dst_org') or 'Unknown')[:15]
+
+                # Determine direction (incoming/outgoing)
+                dir_label, dir_color, dir_symbol = get_direction(src_ip_raw, dst_ip_raw)
+
                 # Show '--' for outbound traffic (no response TTL), value for measured hops
                 hop_count = conn.get('hop_count')
                 hops = str(hop_count) if hop_count is not None else '--'
@@ -966,6 +1053,7 @@ class SmartConnectionTable(Static):
                 # Format row with text color coding only (no backgrounds)
                 self.table.add_row(
                     f"[dim]{time_str}[/]",
+                    f"[{dir_color}]{dir_symbol}[/]",  # Direction indicator
                     f"[cyan]{src_ip}[/]",
                     f"[cyan]{dst_ip}[/]",
                     f"[magenta]{port}[/]",
@@ -1061,8 +1149,16 @@ class NetworkDevicePanel(Static):
         src_ips = set()
         for device in self.devices:
             ip_addresses = device.get('ip_addresses', [])
+            # Handle JSON string that wasn't parsed
+            if isinstance(ip_addresses, str):
+                try:
+                    import json
+                    ip_addresses = json.loads(ip_addresses)
+                except (json.JSONDecodeError, TypeError):
+                    ip_addresses = []
             for ip in ip_addresses:
-                src_ips.add(ip)
+                if isinstance(ip, str):
+                    src_ips.add(ip)
 
         self._detect_network_range(src_ips)
 
@@ -1184,10 +1280,10 @@ class NetworkDevicePanel(Static):
                 is_dest_last = dest_idx == len(destinations) - 1
                 flow_prefix = "│  └─" if is_dest_last else "│  ├─"
 
-                lines.append(f"[dim]{flow_prefix}[/dim] [{proto_color}]{proto}[/{proto_color}] [{dest_color}]{dst_ip}:{dst_port}[/{dest_color}] x{count}")
+                lines.append(f"[dim]{flow_prefix}[/dim][cyan]→[/cyan] [{proto_color}]{proto}[/{proto_color}] [{dest_color}]{dst_ip}:{dst_port}[/{dest_color}] x{count}")
 
         lines.append("")
-        lines.append("[dim]T=TCP U=UDP | !=Crit ~=Med .=Low[/dim]")
+        lines.append("[dim]→=Out T=TCP U=UDP | !=Crit ~=Med .=Low[/dim]")
 
     def _render_devices_only(self, lines: list):
         """Render device inventory without flow details"""
@@ -1210,7 +1306,14 @@ class NetworkDevicePanel(Static):
             conn_count = device.get('connection_count', 0)
 
             ip_addresses = device.get('ip_addresses', [])
-            primary_ip = ip_addresses[0] if ip_addresses else ''
+            # Handle JSON string that wasn't parsed
+            if isinstance(ip_addresses, str):
+                try:
+                    import json
+                    ip_addresses = json.loads(ip_addresses)
+                except (json.JSONDecodeError, TypeError):
+                    ip_addresses = []
+            primary_ip = ip_addresses[0] if ip_addresses and isinstance(ip_addresses[0], str) else ''
 
             is_last = idx == len(sorted_devices) - 1
             prefix = "[cyan]└[/cyan]" if is_last else "[cyan]├[/cyan]"
@@ -1320,9 +1423,17 @@ class ConnectionDetailModal(Static):
 
         # Network Information
         lines.append("[bold cyan]═══ NETWORK INFORMATION ═══[/bold cyan]")
-        lines.append(f"  [cyan]Source IP:[/cyan]      {conn.get('src_ip', 'local')}")
+
+        # Determine direction
+        src_ip = conn.get('src_ip', 'local')
+        dst_ip = conn.get('dst_ip', 'Unknown')
+        dir_label, dir_color, dir_symbol = get_direction(src_ip, dst_ip)
+        dir_full = {"OUT": "Outgoing", "IN": "Incoming", "INT": "Internal", "EXT": "External"}.get(dir_label, "Unknown")
+        lines.append(f"  [cyan]Direction:[/cyan]      [{dir_color}]{dir_symbol} {dir_full}[/{dir_color}]")
+
+        lines.append(f"  [cyan]Source IP:[/cyan]      {src_ip}")
         lines.append(f"  [cyan]Source MAC:[/cyan]     {conn.get('src_mac', 'Unknown')}")
-        lines.append(f"  [cyan]Destination IP:[/cyan] {conn.get('dst_ip', 'Unknown')}")
+        lines.append(f"  [cyan]Destination IP:[/cyan] {dst_ip}")
         lines.append(f"  [cyan]Port:[/cyan]           {conn.get('dst_port', '-')}")
         lines.append(f"  [cyan]Protocol:[/cyan]       {conn.get('protocol', 'TCP')}")
         lines.append("")
@@ -1693,6 +1804,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         ("g", "toggle_globe", "Pause/Resume Globe Animation"),
         ("i", "cycle_intel_map", "Cycle Intel Map Type"),
         ("m", "toggle_mode_panel", "Toggle Mode Panel"),
+        ("k", "show_metric_key", "Show Full Metric Key"),
+        ("v", "cycle_verification_filter", "Cycle Verification Filter"),
         ("escape", "close_modal", "Close Modal"),
         ("?", "help", "Show Keybindings"),
         ("ctrl+p", "command_palette", "Command Palette"),
@@ -1858,8 +1971,34 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         yield Footer()
 
     def action_refresh(self) -> None:
-        """Manual refresh action"""
-        self._refresh_data()
+        """Manual refresh action - resets view to show only new data from this point onward"""
+        # Call parent to set timestamp and clear base panels
+        super().action_refresh()
+
+        # Also clear enhanced dashboard specific panels
+        if self.globe_panel:
+            self.globe_panel.globe_data = {'connections': [], 'heatmap': {}}
+
+        if self.connection_table:
+            self.connection_table.connections = []
+
+        if self.anomaly_panel:
+            if hasattr(self.anomaly_panel, 'anomalies'):
+                self.anomaly_panel.anomalies = []
+            if hasattr(self.anomaly_panel, 'alert_data'):
+                self.anomaly_panel.alert_data = {'alerts': [], 'anomalies': []}
+
+        if self.mode_specific_panel:
+            if hasattr(self.mode_specific_panel, 'topology_data'):
+                self.mode_specific_panel.topology_data = {}
+            if hasattr(self.mode_specific_panel, 'devices'):
+                self.mode_specific_panel.devices = []
+
+        # Clear filter cache so it doesn't restore old data
+        if hasattr(self, '_all_connections'):
+            delattr(self, '_all_connections')
+        if hasattr(self, '_verification_filter'):
+            self._verification_filter = 0
 
     def on_mount(self) -> None:
         """Initialize dashboard on mount"""
@@ -1907,8 +2046,11 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 logger.warning("Data manager not connected - skipping refresh")
                 return
 
-            # Get connections
-            connections = self.data_manager.get_connections(limit=100)
+            # Get connections - filter by refresh timestamp if set
+            connections = self.data_manager.get_connections(
+                limit=100,
+                since_timestamp=self._refresh_timestamp
+            )
             if not connections:
                 logger.debug("No connections returned from database")
             else:
@@ -1951,7 +2093,11 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
             # Update unified device panel with both topology and device data
             if self.mode_specific_panel:
-                devices = self.data_manager.get_devices() if hasattr(self.data_manager, 'get_devices') else []
+                # Use timestamp filter if refresh was triggered
+                if hasattr(self.data_manager, 'get_devices'):
+                    devices = self.data_manager.get_devices(since_timestamp=self._refresh_timestamp)
+                else:
+                    devices = []
                 # Always provide topology data (shows flows) and device data
                 self.mode_specific_panel.topology_data = self._build_topology(connections, devices)
                 self.mode_specific_panel.devices = devices
@@ -2041,12 +2187,11 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                     heartbeat.beat("consensus", "Threat scoring active")
                     break
 
-            # Check if capture is active based on recent timestamps
+            # Check if capture is active - beat if we have connections (capture is working)
+            # The capture monitor was started if pipeline is running, so beat unconditionally
+            # when there are connections in the system (even if older than 60s)
             if self.recent_connections:
-                latest = list(self.recent_connections)[0]
-                latest_ts = latest.get('timestamp', 0)
-                if latest_ts and (time.time() - float(latest_ts)) < 60:
-                    heartbeat.beat("capture", "Receiving connections")
+                heartbeat.beat("capture", "Capture active")
 
             # Reputation service heartbeat - check if reputation data exists
             for conn in list(self.recent_connections)[:10]:
@@ -2223,7 +2368,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def action_help(self) -> None:
         """Show keybindings help in subtitle"""
-        help_text = "Keys: Q=Quit | R=Refresh | A=Anomalies | O=OrgIntel | M=Devices | G=Globe | ?=Help | ESC=Close"
+        help_text = "Q=Quit R=Refresh A=Anom O=Org M=Dev G=Globe I=Map K=Key V=Filter Enter=Details ?=Help ESC=Close"
         self.sub_title = help_text
 
     def _show_connection_detail(self, connection: dict) -> None:
@@ -2303,6 +2448,64 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.mode_specific_panel.styles.display = "block"
         panel_name = "Network Topology" if self.mode == "network" else "Device Discovery"
         self.sub_title = f"Showing {panel_name} (press 'a' for anomalies, 'o' for org intel)"
+
+    def action_show_metric_key(self) -> None:
+        """Show full metric key/legend in subtitle area"""
+        # Cycle through key display modes
+        if not hasattr(self, '_key_mode'):
+            self._key_mode = 0
+
+        self._key_mode = (self._key_mode + 1) % 3
+
+        if self._key_mode == 0:
+            self.sub_title = "Key: ●=Critical ◉=High ◯=Med ○=Low | V: ✓=Verified !=Flagged ?=Pending | T: 4=All 3=Good 2=Partial"
+        elif self._key_mode == 1:
+            self.sub_title = "Verification: ✓=AI verified !=Needs review ?=Awaiting data ✗=Cannot verify | Triangulation=scorer agreement"
+        else:
+            self.sub_title = "Press 'k' to cycle key | Enter=Details | i=Map | v=Filter | ?=Help"
+
+    def action_cycle_verification_filter(self) -> None:
+        """Cycle verification filter for connection table (All/Verified/Flagged/Unknown)"""
+        if not hasattr(self, '_verification_filter'):
+            self._verification_filter = 0
+
+        filters = ["all", "verified", "flagged", "pending", "unknown"]
+        self._verification_filter = (self._verification_filter + 1) % len(filters)
+        current_filter = filters[self._verification_filter]
+
+        # Update subtitle to show current filter
+        filter_labels = {
+            "all": "Showing ALL connections",
+            "verified": "Showing VERIFIED connections only (✓)",
+            "flagged": "Showing FLAGGED connections only (!)",
+            "pending": "Showing PENDING connections only (?)",
+            "unknown": "Showing UNKNOWN connections only (✗)",
+        }
+        self.sub_title = f"Filter: {filter_labels[current_filter]} (press 'v' to cycle)"
+
+        # Apply filter to connection table
+        if hasattr(self, 'connection_table_panel') and self.connection_table_panel:
+            self._apply_verification_filter(current_filter)
+
+    def _apply_verification_filter(self, filter_status: str) -> None:
+        """Apply verification filter to connection table"""
+        if not hasattr(self, 'connection_table_panel') or not self.connection_table_panel:
+            return
+
+        # Store original connections if not already stored
+        if not hasattr(self, '_all_connections'):
+            self._all_connections = self.connection_table_panel.connections.copy()
+
+        if filter_status == "all":
+            # Show all connections
+            self.connection_table_panel.connections = self._all_connections
+        else:
+            # Filter by verification status
+            filtered = [
+                c for c in self._all_connections
+                if c.get('verification_status', 'pending') == filter_status
+            ]
+            self.connection_table_panel.connections = filtered
 
     def _hide_all_bottom_right_panels(self) -> None:
         """Hide all toggleable bottom-right panels"""

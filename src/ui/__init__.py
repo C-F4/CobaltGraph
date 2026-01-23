@@ -39,17 +39,24 @@ except ImportError:
     boot_sequence = None
     BOOT_AVAILABLE = False
 
-# Import intel_map module (geographic visualization)
+# Import consolidated maps module (geographic visualization)
 try:
-    from .intel_map import IntelMapPanel, IntelMapKey, FlatWorldMap, RotatingGlobe, SimpleGlobe
+    from .maps import FlatWorldMap, RotatingGlobe, SimpleGlobe, MapKey
+    IntelMapKey = MapKey  # Alias for compatibility
     INTEL_MAP_AVAILABLE = True
 except ImportError:
-    IntelMapPanel = None
-    IntelMapKey = None
     FlatWorldMap = None
     RotatingGlobe = None
     SimpleGlobe = None
+    MapKey = None
+    IntelMapKey = None
     INTEL_MAP_AVAILABLE = False
+
+# Import IntelMapPanel from panels module
+try:
+    from .panels import IntelMapPanel
+except ImportError:
+    IntelMapPanel = None
 
 __all__ = [
     'CobaltGraphDashboardEnhanced',
@@ -58,6 +65,7 @@ __all__ = [
     'BOOT_AVAILABLE',
     'IntelMapPanel',
     'IntelMapKey',
+    'MapKey',
     'FlatWorldMap',
     'RotatingGlobe',
     'SimpleGlobe',

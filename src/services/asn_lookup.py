@@ -230,6 +230,109 @@ class ASNLookup:
         r'orange s\.a': ('Orange', OrgType.ISP_RESIDENTIAL, 0.6),
     }
 
+    # Regional ISPs - North America
+    ISP_NA_PATTERNS = {
+        r'shaw comm|shaw cable': ('Shaw', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'rogers comm|rogers cable': ('Rogers', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'bell canada|bell internet': ('Bell Canada', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'telus': ('Telus', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'videotron': ('Videotron', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'optimum|cablevision': ('Optimum', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'windstream': ('Windstream', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'mediacom': ('Mediacom', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'suddenlink|altice': ('Altice/Suddenlink', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'earthlink': ('EarthLink', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'hughesnet': ('HughesNet', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'starlink': ('Starlink', OrgType.ISP_RESIDENTIAL, 0.6),
+    }
+
+    # Regional ISPs - Europe
+    ISP_EU_PATTERNS = {
+        r'virgin media': ('Virgin Media', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'sky broadband|sky uk': ('Sky UK', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'talktalk': ('TalkTalk', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'plusnet': ('Plusnet', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'ee limited': ('EE', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'sfr|societe francaise': ('SFR', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'free\.fr|iliad|free sas': ('Free/Iliad', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'bouygues': ('Bouygues', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'swisscom': ('Swisscom', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'sunrise': ('Sunrise', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'kpn': ('KPN', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'ziggo': ('Ziggo', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'tele2': ('Tele2', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'telefonica|movistar': ('Telefonica', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'telenor': ('Telenor', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'telia': ('Telia', OrgType.ISP_RESIDENTIAL, 0.6),
+    }
+
+    # Regional ISPs - Asia Pacific
+    ISP_APAC_PATTERNS = {
+        r'ntt comm|ntt docomo|ntt east|ntt west': ('NTT', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'softbank': ('SoftBank', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'kddi|au\.com': ('KDDI', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'china telecom': ('China Telecom', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'china unicom': ('China Unicom', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'china mobile': ('China Mobile', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'jio|reliance': ('Jio/Reliance', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'airtel': ('Airtel', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'bsnl': ('BSNL', OrgType.ISP_RESIDENTIAL, 0.5),
+        r'singtel': ('Singtel', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'starhub': ('StarHub', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'telstra': ('Telstra', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'optus': ('Optus', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'kt corp|korea telecom': ('KT', OrgType.ISP_RESIDENTIAL, 0.6),
+        r'sk broadband|sk telecom': ('SK Telecom', OrgType.ISP_RESIDENTIAL, 0.6),
+    }
+
+    # Modern Hosting & Platform Providers
+    MODERN_HOSTING_PATTERNS = {
+        r'vercel': ('Vercel', OrgType.HOSTING, 0.7),
+        r'netlify': ('Netlify', OrgType.HOSTING, 0.7),
+        r'fly\.io': ('Fly.io', OrgType.HOSTING, 0.6),
+        r'railway': ('Railway', OrgType.HOSTING, 0.6),
+        r'render': ('Render', OrgType.HOSTING, 0.6),
+        r'kinsta': ('Kinsta', OrgType.HOSTING, 0.6),
+        r'wp engine|wpengine': ('WP Engine', OrgType.HOSTING, 0.6),
+        r'pantheon': ('Pantheon', OrgType.HOSTING, 0.6),
+        r'heroku': ('Heroku', OrgType.CLOUD_PROVIDER, 0.7),
+        r'deno deploy': ('Deno Deploy', OrgType.HOSTING, 0.6),
+        r'cloudways': ('Cloudways', OrgType.HOSTING, 0.5),
+        r'siteground': ('SiteGround', OrgType.HOSTING, 0.5),
+        r'a2 hosting': ('A2 Hosting', OrgType.HOSTING, 0.5),
+        r'namecheap': ('Namecheap', OrgType.HOSTING, 0.5),
+    }
+
+    # Enterprise Subsidiaries & Major Services
+    ENTERPRISE_SUBSIDIARY_PATTERNS = {
+        r'twitch': ('Twitch (Amazon)', OrgType.ENTERPRISE, 0.8),
+        r'zoom video|zoom\.us': ('Zoom', OrgType.ENTERPRISE, 0.8),
+        r'slack|slack technologies': ('Slack', OrgType.ENTERPRISE, 0.8),
+        r'discord': ('Discord', OrgType.ENTERPRISE, 0.75),
+        r'spotify': ('Spotify', OrgType.ENTERPRISE, 0.8),
+        r'dropbox': ('Dropbox', OrgType.ENTERPRISE, 0.8),
+        r'box\.com|box inc': ('Box', OrgType.ENTERPRISE, 0.8),
+        r'stripe': ('Stripe', OrgType.ENTERPRISE, 0.85),
+        r'square|block inc': ('Block/Square', OrgType.ENTERPRISE, 0.8),
+        r'shopify': ('Shopify', OrgType.ENTERPRISE, 0.8),
+        r'uber': ('Uber', OrgType.ENTERPRISE, 0.75),
+        r'lyft': ('Lyft', OrgType.ENTERPRISE, 0.75),
+        r'airbnb': ('Airbnb', OrgType.ENTERPRISE, 0.75),
+        r'doordash': ('DoorDash', OrgType.ENTERPRISE, 0.7),
+        r'instacart': ('Instacart', OrgType.ENTERPRISE, 0.7),
+        r'atlassian': ('Atlassian', OrgType.ENTERPRISE, 0.8),
+        r'datadog': ('Datadog', OrgType.ENTERPRISE, 0.8),
+        r'snowflake': ('Snowflake', OrgType.ENTERPRISE, 0.8),
+        r'mongodb inc': ('MongoDB', OrgType.ENTERPRISE, 0.8),
+        r'elastic|elasticsearch': ('Elastic', OrgType.ENTERPRISE, 0.8),
+        r'cloudflare r2|cloudflare workers': ('Cloudflare', OrgType.CDN, 0.85),
+        r'digitalocean spaces': ('DigitalOcean', OrgType.CLOUD_PROVIDER, 0.7),
+        r'pinterest': ('Pinterest', OrgType.ENTERPRISE, 0.75),
+        r'reddit': ('Reddit', OrgType.ENTERPRISE, 0.75),
+        r'snapchat|snap inc': ('Snap', OrgType.ENTERPRISE, 0.75),
+        r'tiktok|bytedance': ('TikTok/ByteDance', OrgType.ENTERPRISE, 0.6),
+    }
+
     # Tor/VPN/Proxy indicators
     TOR_PROXY_PATTERNS = {
         r'tor exit|tor-exit': ('Tor Exit Node', OrgType.TOR_PROXY, 0.1),
@@ -306,11 +409,16 @@ class ASNLookup:
             self.CLOUD_PATTERNS,
             self.CDN_PATTERNS,
             self.HOSTING_PATTERNS,
+            self.MODERN_HOSTING_PATTERNS,
             self.ISP_RESIDENTIAL_PATTERNS,
+            self.ISP_NA_PATTERNS,
+            self.ISP_EU_PATTERNS,
+            self.ISP_APAC_PATTERNS,
             self.TOR_PROXY_PATTERNS,
             self.EDUCATION_PATTERNS,
             self.GOV_PATTERNS,
             self.ENTERPRISE_PATTERNS,
+            self.ENTERPRISE_SUBSIDIARY_PATTERNS,
         ]
 
         for pattern_dict in all_pattern_dicts:
@@ -557,8 +665,17 @@ class ASNLookup:
             info.org_type = OrgType.ISP_RESIDENTIAL
             info.trust_score = 0.5
         else:
+            # Fallback: Use ASN name when no pattern matches
             info.org_type = OrgType.UNKNOWN
-            info.trust_score = 0.5
+            info.trust_score = 0.5  # Neutral trust score for unknown orgs
+
+            # If we have an ASN name but no organization, use the ASN name
+            if info.asn_name and (not info.organization or info.organization == ""):
+                info.organization = info.asn_name
+                info.description = f"Unclassified ASN: {info.asn_name}"
+            elif not info.organization and info.asn > 0:
+                info.organization = f"AS{info.asn}"
+                info.description = "Unknown organization (ASN lookup only)"
 
         return info
 

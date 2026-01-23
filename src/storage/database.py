@@ -52,7 +52,15 @@ class Database:
         "confidence", "high_uncertainty", "scoring_method",
         # Individual scorer results (Phase 1 - Dashboard Evolution)
         "score_statistical", "score_rule_based", "score_ml_based", "score_organization",
-        "anomaly_score", "score_spread"
+        "anomaly_score", "score_spread",
+        # AI Verification fields
+        "verification_status", "verification_reason", "verification_confidence",
+        "triangulation_score", "triangulation_sources",
+        # Protocol Enrichment fields (DNS, TLS, TCP analysis)
+        "dns_query", "dns_query_type", "tls_sni", "tls_version",
+        "tcp_state", "tcp_is_scan",
+        # Domain Intelligence fields
+        "domain_trust", "dga_detected", "domain_asn_mismatch"
     ]
 
     def __init__(self, db_path: str = "database/cobaltgraph.db"):
@@ -156,7 +164,24 @@ class Database:
                         score_ml_based REAL,
                         score_organization REAL,
                         anomaly_score REAL,
-                        score_spread REAL
+                        score_spread REAL,
+                        -- AI Verification fields
+                        verification_status TEXT DEFAULT 'pending',
+                        verification_reason TEXT,
+                        verification_confidence REAL DEFAULT 0,
+                        triangulation_score REAL,
+                        triangulation_sources INTEGER DEFAULT 0,
+                        -- Protocol Enrichment fields (DNS, TLS, TCP analysis)
+                        dns_query TEXT,
+                        dns_query_type TEXT,
+                        tls_sni TEXT,
+                        tls_version TEXT,
+                        tcp_state TEXT,
+                        tcp_is_scan INTEGER DEFAULT 0,
+                        -- Domain Intelligence fields
+                        domain_trust TEXT,
+                        dga_detected INTEGER DEFAULT 0,
+                        domain_asn_mismatch INTEGER DEFAULT 0
                     )
                 """)
 
@@ -226,6 +251,7 @@ class Database:
                         ip_addresses TEXT,
                         vendor TEXT,
                         hostname TEXT,
+                        display_name TEXT,
                         first_seen REAL NOT NULL,
                         last_seen REAL NOT NULL,
                         packet_count INTEGER DEFAULT 0,
@@ -285,6 +311,23 @@ class Database:
             ("score_organization", "REAL"),
             ("anomaly_score", "REAL"),
             ("score_spread", "REAL"),
+            # AI Verification fields
+            ("verification_status", "TEXT DEFAULT 'pending'"),
+            ("verification_reason", "TEXT"),
+            ("verification_confidence", "REAL DEFAULT 0"),
+            ("triangulation_score", "REAL"),
+            ("triangulation_sources", "INTEGER DEFAULT 0"),
+            # Protocol Enrichment fields (DNS, TLS, TCP analysis)
+            ("dns_query", "TEXT"),
+            ("dns_query_type", "TEXT"),
+            ("tls_sni", "TEXT"),
+            ("tls_version", "TEXT"),
+            ("tcp_state", "TEXT"),
+            ("tcp_is_scan", "INTEGER DEFAULT 0"),
+            # Domain Intelligence fields
+            ("domain_trust", "TEXT"),
+            ("dga_detected", "INTEGER DEFAULT 0"),
+            ("domain_asn_mismatch", "INTEGER DEFAULT 0"),
         ]
 
         cursor = self.conn.execute("PRAGMA table_info(connections)")
@@ -297,6 +340,26 @@ class Database:
                     logger.info(f"Migrated: added column {col_name}")
                 except sqlite3.Error:
                     pass
+
+        # Migrate devices table
+        devices_columns = [
+            ("display_name", "TEXT"),
+        ]
+
+        try:
+            cursor = self.conn.execute("PRAGMA table_info(devices)")
+            existing_device_cols = {row[1] for row in cursor.fetchall()}
+
+            for col_name, col_type in devices_columns:
+                if col_name not in existing_device_cols:
+                    try:
+                        self.conn.execute(f"ALTER TABLE devices ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"Migrated devices: added column {col_name}")
+                    except sqlite3.Error:
+                        pass
+        except sqlite3.Error:
+            # devices table may not exist yet
+            pass
 
     def _create_intelligence_views(self):
         """
@@ -429,6 +492,10 @@ class Database:
 
     def _conn_to_tuple(self, conn_data: Dict) -> Tuple:
         """Convert connection dict to tuple for batch insert"""
+        # Normalize org_type: use "unknown" instead of empty/None for consistent triaging
+        raw_org_type = conn_data.get("dst_org_type")
+        normalized_org_type = raw_org_type if raw_org_type else "unknown"
+
         return (
             conn_data.get("timestamp", time.time()),
             conn_data.get("src_mac"),
@@ -445,7 +512,7 @@ class Database:
             conn_data.get("protocol", "TCP"),
             conn_data.get("dst_asn"),
             conn_data.get("dst_asn_name"),
-            conn_data.get("dst_org_type"),
+            normalized_org_type,
             conn_data.get("dst_cidr"),
             conn_data.get("ttl_observed"),
             conn_data.get("ttl_initial"),
@@ -462,6 +529,23 @@ class Database:
             conn_data.get("score_organization"),
             conn_data.get("anomaly_score"),
             conn_data.get("score_spread"),
+            # AI Verification fields
+            conn_data.get("verification_status", "pending"),
+            conn_data.get("verification_reason"),
+            conn_data.get("verification_confidence", 0),
+            conn_data.get("triangulation_score"),
+            conn_data.get("triangulation_sources", 0),
+            # Protocol Enrichment fields (DNS, TLS, TCP analysis)
+            conn_data.get("dns_query"),
+            conn_data.get("dns_query_type"),
+            conn_data.get("tls_sni"),
+            conn_data.get("tls_version"),
+            conn_data.get("tcp_state"),
+            1 if conn_data.get("tcp_is_scan") else 0,
+            # Domain Intelligence fields
+            conn_data.get("domain_trust"),
+            1 if conn_data.get("dga_detected") else 0,
+            1 if conn_data.get("domain_asn_mismatch") else 0,
         )
 
     def _flush_batch(self):
@@ -895,6 +979,22 @@ class Database:
     # DEVICE DISCOVERY METHODS (Network Mode)
     # =========================================================================
 
+    def _compute_display_name(self, mac: str, vendor: str = None,
+                               hostname: str = None, ip_addresses: list = None) -> str:
+        """
+        Compute human-readable display name for device
+
+        Priority: hostname > vendor+partial_mac > IP > MAC
+        """
+        if hostname:
+            return hostname
+        if vendor:
+            mac_suffix = ':'.join(mac.split(':')[-2:])
+            return f"{vendor}-{mac_suffix}"
+        if ip_addresses and len(ip_addresses) > 0:
+            return ip_addresses[0]
+        return mac
+
     def upsert_device(self, mac: str, ip: str = None, vendor: str = None,
                       hostname: str = None, packet_type: str = None,
                       threat_score: float = 0.0):
@@ -917,7 +1017,8 @@ class Database:
                 # Check if device exists
                 cursor = self.conn.execute(
                     "SELECT ip_addresses, packet_count, connection_count, "
-                    "threat_score_sum, high_threat_count, broadcast_count, arp_count "
+                    "threat_score_sum, high_threat_count, broadcast_count, arp_count, "
+                    "vendor, hostname "
                     "FROM devices WHERE mac = ?",
                     (mac,)
                 )
@@ -935,6 +1036,8 @@ class Database:
                     high_threat_count = existing[4]
                     broadcast_count = existing[5]
                     arp_count = existing[6]
+                    existing_vendor = existing[7]
+                    existing_hostname = existing[8]
 
                     # Update counters based on packet type
                     if packet_type == 'connection':
@@ -947,11 +1050,19 @@ class Database:
                     elif packet_type == 'arp':
                         arp_count += 1
 
+                    # Compute display name with latest info
+                    final_vendor = vendor or existing_vendor
+                    final_hostname = hostname or existing_hostname
+                    display_name = self._compute_display_name(
+                        mac, final_vendor, final_hostname, ip_addresses
+                    )
+
                     self.conn.execute("""
                         UPDATE devices SET
                             ip_addresses = ?,
                             vendor = COALESCE(?, vendor),
                             hostname = COALESCE(?, hostname),
+                            display_name = ?,
                             last_seen = ?,
                             packet_count = ?,
                             connection_count = ?,
@@ -962,7 +1073,7 @@ class Database:
                             is_active = 1
                         WHERE mac = ?
                     """, (
-                        json.dumps(ip_addresses), vendor, hostname, now,
+                        json.dumps(ip_addresses), vendor, hostname, display_name, now,
                         packet_count, connection_count, threat_sum,
                         high_threat_count, broadcast_count, arp_count, mac
                     ))
@@ -974,15 +1085,20 @@ class Database:
                     arp_count = 1 if packet_type == 'arp' else 0
                     high_threat_count = 1 if threat_score >= 0.5 else 0
 
+                    # Compute display name
+                    display_name = self._compute_display_name(
+                        mac, vendor, hostname, ip_addresses
+                    )
+
                     self.conn.execute("""
                         INSERT INTO devices (
-                            mac, ip_addresses, vendor, hostname,
+                            mac, ip_addresses, vendor, hostname, display_name,
                             first_seen, last_seen, packet_count,
                             connection_count, threat_score_sum, high_threat_count,
                             broadcast_count, arp_count, is_active
-                        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 1)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 1)
                     """, (
-                        mac, json.dumps(ip_addresses), vendor, hostname,
+                        mac, json.dumps(ip_addresses), vendor, hostname, display_name,
                         now, now, connection_count, threat_score,
                         high_threat_count, broadcast_count, arp_count
                     ))
@@ -1011,7 +1127,7 @@ class Database:
                 if active_only:
                     cutoff = time.time() - 300  # 5 minutes
                     cursor = self.conn.execute("""
-                        SELECT mac, ip_addresses, vendor, hostname,
+                        SELECT mac, ip_addresses, vendor, hostname, display_name,
                                first_seen, last_seen, packet_count,
                                connection_count, threat_score_sum, high_threat_count,
                                broadcast_count, arp_count, risk_flags, notes
@@ -1022,7 +1138,7 @@ class Database:
                     """, (cutoff, limit))
                 else:
                     cursor = self.conn.execute("""
-                        SELECT mac, ip_addresses, vendor, hostname,
+                        SELECT mac, ip_addresses, vendor, hostname, display_name,
                                first_seen, last_seen, packet_count,
                                connection_count, threat_score_sum, high_threat_count,
                                broadcast_count, arp_count, risk_flags, notes
@@ -1037,11 +1153,20 @@ class Database:
                 for row in cursor.fetchall():
                     mac = row[0]
                     ip_addresses = json.loads(row[1]) if row[1] else []
-                    connection_count = row[7] or 0
-                    threat_sum = row[8] or 0
-                    high_threat_count = row[9] or 0
-                    broadcast_count = row[10] or 0
-                    arp_count = row[11] or 0
+                    vendor = row[2]
+                    hostname = row[3]
+                    display_name = row[4]
+                    connection_count = row[8] or 0
+                    threat_sum = row[9] or 0
+                    high_threat_count = row[10] or 0
+                    broadcast_count = row[11] or 0
+                    arp_count = row[12] or 0
+
+                    # Compute display_name if not stored
+                    if not display_name:
+                        display_name = self._compute_display_name(
+                            mac, vendor, hostname, ip_addresses
+                        )
 
                     # Calculate average threat score
                     avg_threat = threat_sum / connection_count if connection_count > 0 else 0
@@ -1051,7 +1176,7 @@ class Database:
                     risk_score = 0.0
 
                     # Unknown vendor is suspicious
-                    if not row[2]:
+                    if not vendor:
                         risk_flags.append("UNKNOWN_VENDOR")
                         risk_score += 0.2
 
@@ -1085,11 +1210,12 @@ class Database:
                         "mac": mac,
                         "ip_addresses": ip_addresses,
                         "primary_ip": ip_addresses[0] if ip_addresses else None,
-                        "vendor": row[2] or "Unknown",
-                        "hostname": row[3],
-                        "first_seen": row[4],
-                        "last_seen": row[5],
-                        "packet_count": row[6] or 0,
+                        "vendor": vendor or "Unknown",
+                        "hostname": hostname,
+                        "display_name": display_name,
+                        "first_seen": row[5],
+                        "last_seen": row[6],
+                        "packet_count": row[7] or 0,
                         "connection_count": connection_count,
                         "avg_threat": avg_threat,
                         "high_threat_count": high_threat_count,
@@ -1098,8 +1224,8 @@ class Database:
                         "risk_score": min(1.0, risk_score),
                         "threat_level": threat_level,
                         "risk_flags": risk_flags,
-                        "is_active": (now - row[5]) < 300,
-                        "notes": row[13],
+                        "is_active": (now - row[6]) < 300,
+                        "notes": row[14],
                     })
 
                 return devices

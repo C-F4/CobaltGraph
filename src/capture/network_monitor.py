@@ -26,6 +26,14 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, Optional, Set
 
+# Protocol enrichment for application-layer intelligence
+try:
+    from src.capture.protocol_enrichment import ProtocolEnricher
+    PROTOCOL_ENRICHMENT_AVAILABLE = True
+except ImportError:
+    PROTOCOL_ENRICHMENT_AVAILABLE = False
+    ProtocolEnricher = None
+
 
 class NetworkDevice:
     """Represents a discovered network device"""
@@ -48,6 +56,22 @@ class NetworkDevice:
         if ip and ip not in self.ip_addresses:
             self.ip_addresses.add(ip)
 
+    def get_display_name(self) -> str:
+        """
+        Get human-readable display name for device
+
+        Priority: hostname > vendor+partial_mac > IP > MAC
+        """
+        if self.hostname:
+            return self.hostname
+        if self.vendor:
+            # Use last 2 octets of MAC for identification
+            mac_suffix = ':'.join(self.mac.split(':')[-2:])
+            return f"{self.vendor}-{mac_suffix}"
+        if self.ip_addresses:
+            return list(self.ip_addresses)[0]
+        return self.mac
+
     def to_dict(self) -> Dict:
         """Convert device to dictionary for JSON serialization"""
         return {
@@ -55,6 +79,7 @@ class NetworkDevice:
             "ip_addresses": list(self.ip_addresses),
             "hostname": self.hostname,
             "vendor": self.vendor,
+            "display_name": self.get_display_name(),
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "packet_count": self.packet_count,
@@ -65,65 +90,49 @@ class NetworkDevice:
 
 
 class MACVendorResolver:
-    """Resolve MAC addresses to vendor names"""
+    """
+    Resolve MAC addresses to vendor names
 
-    # Common vendor OUI prefixes (first 3 bytes of MAC)
-    # In production, use IEEE OUI database
-    VENDOR_MAP = {
-        "00:50:56": "VMware",
-        "00:0c:29": "VMware",
-        "00:05:69": "VMware",
-        "08:00:27": "VirtualBox",
-        "52:54:00": "QEMU/KVM",
-        "00:15:5d": "Microsoft Hyper-V",
-        "00:1c:42": "Parallels",
-        "dc:a6:32": "Raspberry Pi",
-        "b8:27:eb": "Raspberry Pi",
-        "e4:5f:01": "Raspberry Pi",
-        "28:cd:c1": "Raspberry Pi",
-        "00:50:f2": "Microsoft",
-        "00:1b:63": "Apple",
-        "00:25:00": "Apple",
-        "00:26:bb": "Apple",
-        "ac:de:48": "Apple",
-        "f0:18:98": "Apple",
-        "3c:07:54": "Roku",
-        "00:04:20": "Roku",
-        "b0:a7:37": "Roku",
-        "cc:6d:a0": "Google",
-        "f4:f5:d8": "Google",
-        "18:b4:30": "Google Nest",
-        "44:07:0b": "Amazon Echo",
-        "84:d6:d0": "Amazon",
-        "fc:a6:67": "Amazon",
-        "00:17:88": "Philips Hue",
-        "00:1c:b3": "Netgear",
-        "00:14:6c": "Netgear",
-        "a0:63:91": "Netgear",
-        "00:1d:7e": "D-Link",
-        "00:05:cd": "D-Link",
-        "00:0d:88": "D-Link",
-    }
+    This class now wraps the OUIDatabase for backwards compatibility.
+    For new code, prefer using OUIDatabase directly.
+    """
+
+    _oui_db = None
+
+    @classmethod
+    def _get_oui_db(cls):
+        """Get or create OUI database instance"""
+        if cls._oui_db is None:
+            try:
+                from src.services.oui_lookup import OUIDatabase
+                cls._oui_db = OUIDatabase()
+                cls._oui_db.initialize()
+            except ImportError:
+                # Fallback if module not available
+                cls._oui_db = None
+        return cls._oui_db
 
     @staticmethod
     def resolve(mac: str) -> Optional[str]:
-        """Resolve MAC address to vendor name"""
-        # Normalize MAC format
-        mac_normalized = mac.upper().replace("-", ":")
+        """Resolve MAC address to vendor name using IEEE OUI database"""
+        oui_db = MACVendorResolver._get_oui_db()
+        if oui_db:
+            return oui_db.resolve(mac)
 
-        # Check first 3 bytes (OUI)
+        # Fallback to basic built-in map if OUI database unavailable
+        FALLBACK_VENDORS = {
+            "00:50:56": "VMware",
+            "00:0c:29": "VMware",
+            "08:00:27": "VirtualBox",
+            "52:54:00": "QEMU/KVM",
+            "dc:a6:32": "Raspberry Pi",
+            "b8:27:eb": "Raspberry Pi",
+            "f0:18:98": "Apple",
+            "00:17:88": "Philips Hue",
+        }
+        mac_normalized = mac.lower().replace("-", ":")
         oui = ":".join(mac_normalized.split(":")[:3])
-
-        # Try exact match
-        if oui in MACVendorResolver.VENDOR_MAP:
-            return MACVendorResolver.VENDOR_MAP[oui]
-
-        # Try lowercase variant
-        oui_lower = oui.lower()
-        if oui_lower in MACVendorResolver.VENDOR_MAP:
-            return MACVendorResolver.VENDOR_MAP[oui_lower]
-
-        return None
+        return FALLBACK_VENDORS.get(oui)
 
 
 class NetworkMonitor:
@@ -401,6 +410,21 @@ class NetworkMonitor:
         else:
             result["protocol_name"] = f"Proto-{protocol}"
 
+        # Protocol enrichment: Extract DNS queries, TLS SNI, TCP flags
+        if PROTOCOL_ENRICHMENT_AVAILABLE and ProtocolEnricher:
+            try:
+                enrichment = ProtocolEnricher.enrich(
+                    protocol=protocol,
+                    src_port=result.get("src_port", 0),
+                    dst_port=result.get("dest_port", 0),
+                    transport_data=transport_data,
+                )
+                # Add enrichment data to result
+                enrichment_dict = enrichment.to_dict()
+                result.update(enrichment_dict)
+            except Exception:
+                pass  # Graceful degradation on enrichment failure
+
         return result
 
     def get_cached_neighbors(self) -> list:
@@ -632,6 +656,16 @@ class NetworkMonitor:
             "ttl": ip_packet.get("ttl", 0),
             "device_vendor": self.devices.get(src_mac, NetworkDevice("")).vendor,
             "metadata": {"network_mode": self.mode, "interface": self.interface},
+            # Protocol enrichment data (DNS, TLS SNI, TCP flags)
+            "dns_query": ip_packet.get("dns_query"),
+            "dns_query_type": ip_packet.get("dns_query_type"),
+            "tls_sni": ip_packet.get("tls_sni"),
+            "tls_version": ip_packet.get("tls_version"),
+            "tcp_state": ip_packet.get("tcp_state"),
+            "tcp_syn": ip_packet.get("tcp_syn"),
+            "tcp_ack": ip_packet.get("tcp_ack"),
+            "tcp_rst": ip_packet.get("tcp_rst"),
+            "tcp_is_scan": ip_packet.get("tcp_is_scan"),
         }
 
         if self.callback:
@@ -653,6 +687,11 @@ class NetworkMonitor:
                 "ttl": packet_event["ttl"],
                 "device_vendor": packet_event["device_vendor"],
                 "metadata": packet_event["metadata"],
+                # Protocol enrichment data
+                "dns_query": packet_event.get("dns_query"),
+                "tls_sni": packet_event.get("tls_sni"),
+                "tcp_state": packet_event.get("tcp_state"),
+                "tcp_is_scan": packet_event.get("tcp_is_scan"),
             }
             self.connections.append(connection)
 

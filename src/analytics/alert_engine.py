@@ -40,6 +40,12 @@ class AlertCategory(Enum):
     NEW_DESTINATION = "NEW_DESTINATION"      # First connection to IP/org
     PORT_SCAN = "PORT_SCAN"                  # Potential port scanning
     GEO_ANOMALY = "GEO_ANOMALY"             # Unusual geographic destination
+    # New categories for enhanced threat intel
+    IOC_MATCH = "IOC_MATCH"                  # Local IOC database match
+    DGA_DETECTED = "DGA_DETECTED"            # Domain generation algorithm
+    DOMAIN_MISMATCH = "DOMAIN_MISMATCH"      # Domain-ASN correlation failure
+    BEACONING = "BEACONING"                  # C2 beaconing pattern
+    CORRELATED = "CORRELATED"                # Multiple correlated alerts
 
 
 @dataclass
@@ -59,6 +65,10 @@ class Alert:
     timestamp: float = field(default_factory=time.time)
     auto_dismiss: bool = False     # Should auto-dismiss after viewing
     dismissed: bool = False        # User dismissed flag
+    # Correlation tracking
+    correlated_count: int = 0      # Number of correlated alerts
+    correlated_ids: List[str] = field(default_factory=list)  # IDs of correlated alerts
+    is_correlated: bool = False    # True if this alert was created from correlation
 
 
 @dataclass
@@ -129,7 +139,14 @@ class AlertEngine:
             "auto_dismissed": 0,
             "deduplicated": 0,
             "rate_limited": 0,
+            "correlated": 0,
         }
+
+        # Correlation tracking - for grouping related alerts
+        self._correlation_window = 900  # 15 minutes
+        self._correlation_threshold = 3  # Alerts needed to trigger correlation
+        self._recent_alerts_by_ip: Dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
+        self._recent_alerts_by_org: Dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
 
         # Callback functions for alert notifications (Dashboard Evolution)
         # Each callback receives: (alert: Alert) -> None
@@ -233,6 +250,67 @@ class AlertEngine:
                 message_template="Potential port scan from {src_ip}: {unique_ports_count} ports",
                 auto_dismiss=False,
                 cooldown_seconds=300,
+            ),
+
+            # Enhanced threat intel rules - CRITICAL
+            AlertRule(
+                name="local_ioc_match",
+                category=AlertCategory.IOC_MATCH,
+                severity=AlertSeverity.CRITICAL,
+                condition=lambda ctx: ctx.get("local_ioc_match", False),
+                message_template="Local IOC match: {local_ioc_type} from {local_ioc_source}",
+                auto_dismiss=False,
+                cooldown_seconds=60,
+            ),
+            AlertRule(
+                name="dga_detected",
+                category=AlertCategory.DGA_DETECTED,
+                severity=AlertSeverity.CRITICAL,
+                condition=lambda ctx: ctx.get("dga_detected", False),
+                message_template="DGA domain detected: {domain}",
+                auto_dismiss=False,
+                cooldown_seconds=120,
+            ),
+
+            # Enhanced threat intel rules - WARNING
+            AlertRule(
+                name="domain_asn_mismatch",
+                category=AlertCategory.DOMAIN_MISMATCH,
+                severity=AlertSeverity.WARNING,
+                condition=lambda ctx: (
+                    ctx.get("domain_asn_mismatch", False) and
+                    ctx.get("threat_score", 0) >= 0.3
+                ),
+                message_template="Domain-ASN mismatch: {domain} -> {dst_org}",
+                auto_dismiss=True,
+                cooldown_seconds=300,
+            ),
+            AlertRule(
+                name="otx_multiple_pulses",
+                category=AlertCategory.HIGH_THREAT,
+                severity=AlertSeverity.WARNING,
+                condition=lambda ctx: ctx.get("otx_pulse_count", 0) >= 3,
+                message_template="Found in {otx_pulse_count} OTX pulses: {dst_ip}",
+                auto_dismiss=False,
+                cooldown_seconds=600,
+            ),
+            AlertRule(
+                name="greynoise_malicious",
+                category=AlertCategory.HIGH_THREAT,
+                severity=AlertSeverity.WARNING,
+                condition=lambda ctx: ctx.get("greynoise_malicious", False),
+                message_template="GreyNoise malicious scanner: {greynoise_name}",
+                auto_dismiss=False,
+                cooldown_seconds=300,
+            ),
+            AlertRule(
+                name="beaconing_pattern",
+                category=AlertCategory.BEACONING,
+                severity=AlertSeverity.WARNING,
+                condition=lambda ctx: ctx.get("beaconing_detected", False),
+                message_template="Beaconing pattern to {dst_ip}: interval {beaconing_interval}s",
+                auto_dismiss=False,
+                cooldown_seconds=600,
             ),
 
             # INFO alerts
@@ -453,6 +531,16 @@ class AlertEngine:
         with self._lock:
             self._active_alerts[alert.alert_id] = alert
 
+        # Track for correlation
+        self._track_for_correlation(alert)
+
+        # Check if this triggers a correlation alert
+        correlated_alert = self._check_correlation(alert)
+        if correlated_alert:
+            with self._lock:
+                self._active_alerts[correlated_alert.alert_id] = correlated_alert
+            self.stats["correlated"] += 1
+
         # Update stats
         self.stats["total_generated"] += 1
         if rule.severity == AlertSeverity.CRITICAL:
@@ -473,6 +561,9 @@ class AlertEngine:
         for callback in self._alert_callbacks:
             try:
                 callback(alert)
+                # Also notify about correlated alert if created
+                if correlated_alert:
+                    callback(correlated_alert)
             except Exception as e:
                 logger.error(
                     f"Alert callback failed: {e}\n"
@@ -483,6 +574,97 @@ class AlertEngine:
         logger.info(f"Alert generated: [{alert.severity.value}] {alert.title}")
 
         return alert
+
+    def _track_for_correlation(self, alert: Alert):
+        """Track alert for correlation analysis"""
+        with self._lock:
+            now = time.time()
+            alert_entry = (alert.alert_id, now, alert.severity, alert.category)
+
+            # Track by destination IP
+            if alert.dst_ip:
+                self._recent_alerts_by_ip[alert.dst_ip].append(alert_entry)
+
+            # Track by organization
+            if alert.dst_org:
+                self._recent_alerts_by_org[alert.dst_org].append(alert_entry)
+
+    def _check_correlation(self, new_alert: Alert) -> Optional[Alert]:
+        """
+        Check if new alert correlates with recent alerts to form a pattern.
+
+        Correlation triggers when:
+        - 3+ alerts for same IP within 15 minutes
+        - 5+ alerts for same organization within 15 minutes
+
+        Returns a new CRITICAL correlated alert if threshold met.
+        """
+        with self._lock:
+            now = time.time()
+            cutoff = now - self._correlation_window
+
+            # Check IP-based correlation
+            if new_alert.dst_ip:
+                ip_alerts = self._recent_alerts_by_ip.get(new_alert.dst_ip, [])
+                recent_ip_alerts = [a for a in ip_alerts if a[1] > cutoff]
+
+                if len(recent_ip_alerts) >= self._correlation_threshold:
+                    # Check if we already created a correlation alert for this IP recently
+                    correlation_key = f"CORRELATED:IP:{new_alert.dst_ip}"
+                    if not self._is_duplicate(correlation_key):
+                        correlated_ids = [a[0] for a in recent_ip_alerts]
+                        return self._create_correlated_alert(
+                            new_alert,
+                            correlated_ids,
+                            f"Multiple alerts ({len(recent_ip_alerts)}) for IP {new_alert.dst_ip}",
+                            "ip"
+                        )
+
+            # Check organization-based correlation
+            if new_alert.dst_org:
+                org_alerts = self._recent_alerts_by_org.get(new_alert.dst_org, [])
+                recent_org_alerts = [a for a in org_alerts if a[1] > cutoff]
+
+                # Higher threshold for org-based correlation
+                if len(recent_org_alerts) >= 5:
+                    correlation_key = f"CORRELATED:ORG:{new_alert.dst_org}"
+                    if not self._is_duplicate(correlation_key):
+                        correlated_ids = [a[0] for a in recent_org_alerts]
+                        return self._create_correlated_alert(
+                            new_alert,
+                            correlated_ids,
+                            f"Multiple alerts ({len(recent_org_alerts)}) for organization {new_alert.dst_org}",
+                            "org"
+                        )
+
+            return None
+
+    def _create_correlated_alert(self, trigger_alert: Alert, correlated_ids: List[str],
+                                  description: str, correlation_type: str) -> Alert:
+        """Create a correlated/escalated alert"""
+        return Alert(
+            alert_id=self._generate_alert_id(),
+            severity=AlertSeverity.CRITICAL,
+            category=AlertCategory.CORRELATED,
+            title=f"[CORRELATED] {description}",
+            message=f"Alert correlation detected: {description}. "
+                    f"Review related alerts for potential coordinated activity.",
+            source_ip=trigger_alert.source_ip,
+            dst_ip=trigger_alert.dst_ip,
+            dst_org=trigger_alert.dst_org,
+            threat_score=min(1.0, trigger_alert.threat_score + 0.2),
+            confidence=0.9,
+            metadata={
+                "rule": "correlation_engine",
+                "category": AlertCategory.CORRELATED.value,
+                "correlation_type": correlation_type,
+                "trigger_alert_id": trigger_alert.alert_id,
+            },
+            auto_dismiss=False,
+            correlated_count=len(correlated_ids),
+            correlated_ids=correlated_ids,
+            is_correlated=True,
+        )
 
     def _log_alert_to_db(self, alert: Alert):
         """Log alert to database"""

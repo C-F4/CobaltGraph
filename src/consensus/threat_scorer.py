@@ -176,7 +176,8 @@ class ConsensusThreatScorer:
             enrichment["dst_asn"] = asn_info.asn if asn_info.asn > 0 else None
             enrichment["dst_asn_name"] = asn_info.asn_name or None
             enrichment["dst_org"] = asn_info.organization or None
-            enrichment["dst_org_type"] = asn_info.org_type.value if asn_info.org_type else None
+            # Normalize org_type: always use string value, default to "unknown"
+            enrichment["dst_org_type"] = asn_info.org_type.value if asn_info.org_type else "unknown"
             enrichment["dst_cidr"] = asn_info.cidr or None
             enrichment["hop_count"] = asn_info.estimated_hops if asn_info.estimated_hops > 0 else None
             enrichment["ttl_initial"] = asn_info.initial_ttl if asn_info.initial_ttl > 0 else None
@@ -381,6 +382,24 @@ class ConsensusThreatScorer:
         threat_score = consensus_result.consensus_score
         metadata = consensus_result.metadata
 
+        # Extract domain intelligence from individual scorer features
+        # Aggregate from all assessments to get domain-related insights
+        domain_trust = None
+        dga_detected = False
+        domain_asn_mismatch = False
+
+        for assessment in valid_assessments:
+            features = assessment.features or {}
+
+            # RuleScorer provides domain_trust and dga_detected
+            if assessment.scorer_id == "rule_based":
+                domain_trust = features.get("domain_trust")
+                dga_detected = features.get("dga_detected", False)
+
+            # OrganizationScorer provides domain_asn_mismatch
+            if assessment.scorer_id == "organization":
+                domain_asn_mismatch = features.get("domain_asn_mismatch", False)
+
         details = {
             "source": "consensus",
             "is_malicious": threat_score >= 0.7,
@@ -410,6 +429,10 @@ class ConsensusThreatScorer:
             "score_organization": metadata.get("score_organization"),
             "score_spread": metadata.get("score_spread"),
             "scoring_method": consensus_result.method,
+            # Domain Intelligence (from scorer features)
+            "domain_trust": domain_trust,
+            "dga_detected": dga_detected,
+            "domain_asn_mismatch": domain_asn_mismatch,
         }
 
         # Cache the result for future lookups

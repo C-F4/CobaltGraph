@@ -58,7 +58,7 @@ class ConnectionEvent:
     dst_asn: Optional[int] = None
     dst_asn_name: str = ""
     dst_org: str = ""
-    dst_org_type: str = ""
+    dst_org_type: str = "unknown"  # Default to "unknown" for proper triaging
     org_trust_score: float = 0.5
 
     # Network path (TTL-based estimation)
@@ -69,6 +69,33 @@ class ConnectionEvent:
     # Analytics
     anomaly_score: float = 0.0
     anomaly_type: str = "normal"
+
+    # Individual scorer results (Dashboard Evolution)
+    score_statistical: Optional[float] = None
+    score_rule_based: Optional[float] = None
+    score_ml_based: Optional[float] = None
+    score_organization: Optional[float] = None
+    score_spread: Optional[float] = None
+
+    # AI Verification Status (autonomous local assessment)
+    verification_status: str = "pending"  # pending, verified, flagged, unknown
+    verification_reason: str = ""  # Human-readable explanation for status
+    verification_confidence: float = 0.0  # AI confidence in verification (0-1)
+    triangulation_score: Optional[float] = None  # Cross-correlation from multiple sources
+    triangulation_sources: int = 0  # Number of sources that agree
+
+    # Protocol Enrichment (DNS/TLS/TCP analysis)
+    dns_query: Optional[str] = None  # DNS query domain name
+    dns_query_type: Optional[str] = None  # A, AAAA, MX, etc.
+    tls_sni: Optional[str] = None  # TLS Server Name Indication
+    tls_version: Optional[str] = None  # TLS version string
+    tcp_state: Optional[str] = None  # TCP connection state (SYN, SYN-ACK, etc.)
+    tcp_is_scan: bool = False  # Detected port scan pattern
+
+    # Domain Intelligence
+    domain_trust: Optional[str] = None  # trusted, suspicious, neutral
+    dga_detected: bool = False  # Domain Generation Algorithm detected
+    domain_asn_mismatch: bool = False  # SNI doesn't match ASN owner
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization"""
@@ -95,6 +122,29 @@ class ConnectionEvent:
             "os_fingerprint": self.os_fingerprint,
             "anomaly_score": self.anomaly_score,
             "anomaly_type": self.anomaly_type,
+            # Individual scorer results
+            "score_statistical": self.score_statistical,
+            "score_rule_based": self.score_rule_based,
+            "score_ml_based": self.score_ml_based,
+            "score_organization": self.score_organization,
+            "score_spread": self.score_spread,
+            # AI Verification
+            "verification_status": self.verification_status,
+            "verification_reason": self.verification_reason,
+            "verification_confidence": self.verification_confidence,
+            "triangulation_score": self.triangulation_score,
+            "triangulation_sources": self.triangulation_sources,
+            # Protocol Enrichment
+            "dns_query": self.dns_query,
+            "dns_query_type": self.dns_query_type,
+            "tls_sni": self.tls_sni,
+            "tls_version": self.tls_version,
+            "tcp_state": self.tcp_state,
+            "tcp_is_scan": self.tcp_is_scan,
+            # Domain Intelligence
+            "domain_trust": self.domain_trust,
+            "dga_detected": self.dga_detected,
+            "domain_asn_mismatch": self.domain_asn_mismatch,
         }
 
 
@@ -198,8 +248,19 @@ class DataPipeline:
         self.intelligence_aggregator = None  # Intelligence aggregator for dashboard
         self.device_enrichment = None  # Passive device hostname/org enrichment
         self.connection_correlator = None  # Bidirectional packet correlation
+        self.verification_engine = None  # AI verification engine
         self.database = None
         self.exporter = None
+
+        # Augmented threat intelligence services (Phase 2)
+        self.local_ioc = None  # Local IOC file loading
+        self.greynoise = None  # GreyNoise benign scanner detection
+        self.alienvault_otx = None  # AlienVault OTX community intel
+
+        # Advanced detection analytics (Phase 4)
+        self.beaconing_detector = None  # C2 beaconing pattern detection
+        self.connection_tracker = None  # TCP connection state tracking
+        self.ja3_calculator = None  # JA3 TLS fingerprinting
 
         # Processing threads
         self._processing_thread: Optional[threading.Thread] = None
@@ -309,6 +370,100 @@ class DataPipeline:
             self.connection_correlator = None
             logger.warning(f"⚠️ ConnectionCorrelator unavailable: {e}")
 
+        # AI Verification Engine (autonomous threat assessment)
+        try:
+            from src.consensus.verification_engine import get_verification_engine
+            self.verification_engine = get_verification_engine()
+            logger.info("✅ VerificationEngine initialized (local AI assessment)")
+        except Exception as e:
+            self.verification_engine = None
+            logger.warning(f"⚠️ VerificationEngine unavailable: {e}")
+
+        # Augmented Threat Intelligence Services (Phase 2)
+
+        # Local IOC Service
+        try:
+            from src.services.local_ioc import LocalIOCService
+            ioc_directory = self.config.get("ioc_directory", "data/ioc/")
+            self.local_ioc = LocalIOCService(
+                ioc_directory=ioc_directory,
+                auto_reload=True,
+                reload_interval=300,
+            )
+            stats = self.local_ioc.get_stats()
+            if stats["total_iocs"] > 0:
+                logger.info(f"✅ LocalIOC initialized: {stats['total_iocs']} indicators from {stats['files_loaded']} files")
+            else:
+                logger.info("✅ LocalIOC initialized (no IOC files found - create files in data/ioc/)")
+        except Exception as e:
+            self.local_ioc = None
+            logger.warning(f"⚠️ LocalIOC unavailable: {e}")
+
+        # GreyNoise Service (false positive reduction)
+        try:
+            from src.services.greynoise import GreyNoiseService
+            greynoise_key = self.config.get("greynoise_api_key")
+            self.greynoise = GreyNoiseService(
+                api_key=greynoise_key,
+                use_community_api=True,
+            )
+            logger.info(f"✅ GreyNoise initialized (api_key={'present' if greynoise_key else 'none'})")
+        except Exception as e:
+            self.greynoise = None
+            logger.warning(f"⚠️ GreyNoise unavailable: {e}")
+
+        # AlienVault OTX Service (community threat intel)
+        try:
+            from src.services.alienvault_otx import AlienVaultOTXService
+            otx_key = self.config.get("alienvault_otx_api_key")
+            if otx_key:
+                self.alienvault_otx = AlienVaultOTXService(api_key=otx_key)
+                logger.info("✅ AlienVault OTX initialized")
+            else:
+                self.alienvault_otx = None
+                logger.info("⚠️ AlienVault OTX skipped (no API key configured)")
+        except Exception as e:
+            self.alienvault_otx = None
+            logger.warning(f"⚠️ AlienVault OTX unavailable: {e}")
+
+        # Advanced Detection Analytics (Phase 4)
+
+        # Beaconing Detector (C2 pattern detection)
+        try:
+            from src.analytics.beaconing_detector import BeaconingDetector
+            # Get config values with safe fallback
+            min_conn = 5
+            max_jitter = 20.0
+            if hasattr(self.config, 'get'):
+                min_conn = self.config.get("beaconing_min_connections", 5)
+                max_jitter = self.config.get("beaconing_max_jitter", 20.0)
+            self.beaconing_detector = BeaconingDetector(
+                min_connections=min_conn,
+                max_jitter=max_jitter,
+            )
+            logger.info("✅ BeaconingDetector initialized (C2 pattern detection)")
+        except Exception as e:
+            self.beaconing_detector = None
+            logger.warning(f"⚠️ BeaconingDetector unavailable: {e}")
+
+        # Connection State Tracker (TCP state analysis)
+        try:
+            from src.analytics.connection_state import ConnectionStateTracker
+            self.connection_tracker = ConnectionStateTracker()
+            logger.info("✅ ConnectionStateTracker initialized (TCP state analysis)")
+        except Exception as e:
+            self.connection_tracker = None
+            logger.warning(f"⚠️ ConnectionStateTracker unavailable: {e}")
+
+        # JA3 Calculator (TLS fingerprinting)
+        try:
+            from src.analytics.ja3_fingerprint import JA3Calculator
+            self.ja3_calculator = JA3Calculator()
+            logger.info("✅ JA3Calculator initialized (TLS fingerprinting)")
+        except Exception as e:
+            self.ja3_calculator = None
+            logger.warning(f"⚠️ JA3Calculator unavailable: {e}")
+
     def start(self):
         """Start the pipeline processing threads"""
         if self._running:
@@ -365,6 +520,18 @@ class DataPipeline:
         if self.database:
             try:
                 self.database.close()
+            except Exception:
+                pass
+
+        # Cleanup analytics components
+        if self.beaconing_detector:
+            try:
+                self.beaconing_detector.shutdown()
+            except Exception:
+                pass
+        if self.connection_tracker:
+            try:
+                self.connection_tracker.shutdown()
             except Exception:
                 pass
 
@@ -473,6 +640,11 @@ class DataPipeline:
                             if hasattr(correlated_event, 'to_dict'):
                                 # Extract hop data before converting
                                 hop_data = getattr(correlated_event, 'hop_data', None)
+
+                                # Check if this is a hop-data update (response packet correlated)
+                                # If hop_count > 0, this is an update with bidirectional data
+                                has_hop_data = hop_data and hop_data.hop_count and hop_data.hop_count > 0
+
                                 raw_conn = {
                                     "type": "connection",
                                     "timestamp": correlated_event.timestamp,
@@ -488,6 +660,8 @@ class DataPipeline:
                                     "estimated_hops": hop_data.hop_count if hop_data else None,
                                     "estimated_initial_ttl": hop_data.ttl_initial if hop_data else None,
                                     "os_fingerprint": hop_data.os_fingerprint if hop_data else None,
+                                    # Mark as hop-data update to bypass deduplication
+                                    "_is_hop_update": has_hop_data,
                                 }
                             else:
                                 # It's a dict (device event passed through)
@@ -571,13 +745,86 @@ class DataPipeline:
             return {}
 
     def _enrich_threat_intel(self, dst_ip: str) -> Dict:
-        """Threat intel enrichment stage (for parallel execution)"""
-        if not self.ip_reputation:
-            return {}
-        try:
-            return self.ip_reputation.check_ip(dst_ip) or {}
-        except Exception:
-            return {}
+        """
+        Threat intel enrichment stage (for parallel execution)
+
+        Aggregates data from multiple sources:
+        - IP Reputation (VirusTotal, AbuseIPDB)
+        - Local IOC database (organizational threat intel)
+        - GreyNoise (benign scanner/service detection for false positive reduction)
+        - AlienVault OTX (community threat intel pulses)
+
+        Results are merged into a unified dict that scorers can use.
+        """
+        threat_intel = {}
+
+        # Source 1: IP Reputation (VirusTotal, AbuseIPDB)
+        if self.ip_reputation:
+            try:
+                rep_result = self.ip_reputation.check_ip(dst_ip)
+                if rep_result:
+                    threat_intel.update(rep_result)
+            except Exception as e:
+                logger.debug(f"IP reputation lookup failed for {dst_ip}: {e}")
+
+        # Source 2: Local IOC database (organizational indicators)
+        if self.local_ioc:
+            try:
+                ioc_match = self.local_ioc.check_ip(dst_ip)
+                if ioc_match and ioc_match.matched:
+                    threat_intel["local_ioc_match"] = True
+                    threat_intel["local_ioc_type"] = ioc_match.threat_type
+                    threat_intel["local_ioc_source"] = ioc_match.source
+                    threat_intel["local_ioc_confidence"] = ioc_match.confidence
+                    threat_intel["local_ioc_description"] = ioc_match.description
+                    # Note: Does NOT set threat_score directly
+                    # Scorers will see this and adjust their own scores
+            except Exception as e:
+                logger.debug(f"Local IOC lookup failed for {dst_ip}: {e}")
+
+        # Source 3: GreyNoise (false positive reduction)
+        # Identifies known benign scanners and business services
+        if self.greynoise:
+            try:
+                gn_result = self.greynoise.check_ip(dst_ip)
+                if gn_result:
+                    if gn_result.riot:
+                        # Known business service (CDN, cloud provider, etc.)
+                        threat_intel["greynoise_riot"] = True
+                        threat_intel["greynoise_name"] = gn_result.name
+                        threat_intel["greynoise_category"] = gn_result.riot_category
+                    elif gn_result.noise and gn_result.classification == "benign":
+                        # Known benign scanner (Shodan, Censys, etc.)
+                        threat_intel["greynoise_benign_scanner"] = True
+                        threat_intel["greynoise_name"] = gn_result.name
+                        threat_intel["greynoise_actor"] = gn_result.actor
+                    elif gn_result.noise and gn_result.classification == "malicious":
+                        # Known malicious scanner
+                        threat_intel["greynoise_malicious"] = True
+                        threat_intel["greynoise_name"] = gn_result.name
+                        threat_intel["greynoise_tags"] = gn_result.tags
+            except Exception as e:
+                logger.debug(f"GreyNoise lookup failed for {dst_ip}: {e}")
+
+        # Source 4: AlienVault OTX (community threat intel)
+        if self.alienvault_otx:
+            try:
+                otx_result = self.alienvault_otx.check_ip(dst_ip)
+                if otx_result and otx_result.pulse_count > 0:
+                    threat_intel["otx_pulse_count"] = otx_result.pulse_count
+                    threat_intel["otx_tags"] = otx_result.tags
+                    threat_intel["otx_reputation"] = otx_result.reputation
+                    threat_intel["otx_first_seen"] = otx_result.first_seen
+                    threat_intel["otx_last_seen"] = otx_result.last_seen
+                    # Include pulse names for context
+                    if otx_result.pulses:
+                        threat_intel["otx_pulse_names"] = [
+                            p.get("name", "") for p in otx_result.pulses[:3]
+                        ]
+            except Exception as e:
+                logger.debug(f"AlienVault OTX lookup failed for {dst_ip}: {e}")
+
+        return threat_intel
 
     def _process_device_event(self, raw_event: Dict):
         """
@@ -640,6 +887,11 @@ class DataPipeline:
         Process a single connection through the full pipeline (OPTIMIZED)
 
         Runs geo and threat_intel lookups in PARALLEL, then passes to consensus.
+
+        Supports bidirectional capture:
+        - Initial outbound packets go through full processing
+        - Hop-data updates (from correlator response packets) bypass deduplication
+          and update existing records with accurate hop estimation data
         """
         dst_ip = raw_conn.get("dst_ip")
         if not dst_ip:
@@ -650,8 +902,13 @@ class DataPipeline:
         protocol = raw_conn.get("protocol", "TCP")
         src_ip = raw_conn.get("src_ip", "local")
 
+        # Check if this is a hop-data update from bidirectional correlation
+        # These should bypass deduplication as they contain valuable response TTL data
+        is_hop_update = raw_conn.get("_is_hop_update", False)
+
         # Check for duplicate (avoid redundant processing)
-        if self._is_duplicate(dst_ip, dst_port):
+        # Skip dedup for hop updates - they provide bidirectional capture data
+        if not is_hop_update and self._is_duplicate(dst_ip, dst_port):
             return None
 
         start_time = time.time()
@@ -686,6 +943,46 @@ class DataPipeline:
         scoring_method = "fallback"
         consensus_details = {}
 
+        # Extract protocol enrichment data from raw connection
+        dns_query = raw_conn.get("dns_query")
+        dns_query_type = raw_conn.get("dns_query_type")
+        tls_sni = raw_conn.get("tls_sni")
+        tls_version = raw_conn.get("tls_version")
+        tcp_state = raw_conn.get("tcp_state")
+        tcp_syn = raw_conn.get("tcp_syn", False)
+        tcp_ack = raw_conn.get("tcp_ack", False)
+        tcp_rst = raw_conn.get("tcp_rst", False)
+        tcp_is_scan = raw_conn.get("tcp_is_scan", False)
+
+        # Stage 2.5: Domain-based threat intel enrichment
+        # Check DNS query and TLS SNI against threat intel services
+        domain_to_check = dns_query or tls_sni
+        if domain_to_check:
+            # Local IOC domain check
+            if self.local_ioc and not threat_intel.get("local_ioc_match"):
+                try:
+                    domain_match = self.local_ioc.check_domain(domain_to_check)
+                    if domain_match and domain_match.matched:
+                        threat_intel["local_ioc_match"] = True
+                        threat_intel["local_ioc_type"] = domain_match.threat_type
+                        threat_intel["local_ioc_source"] = domain_match.source
+                        threat_intel["local_ioc_confidence"] = domain_match.confidence
+                        threat_intel["local_ioc_indicator"] = domain_to_check
+                except Exception as e:
+                    logger.debug(f"Local IOC domain check failed: {e}")
+
+            # AlienVault OTX domain check
+            if self.alienvault_otx and not threat_intel.get("otx_pulse_count"):
+                try:
+                    otx_domain = self.alienvault_otx.check_domain(domain_to_check)
+                    if otx_domain and otx_domain.pulse_count > 0:
+                        threat_intel["otx_pulse_count"] = otx_domain.pulse_count
+                        threat_intel["otx_tags"] = otx_domain.tags
+                        threat_intel["otx_reputation"] = otx_domain.reputation
+                        threat_intel["otx_indicator"] = domain_to_check
+                except Exception as e:
+                    logger.debug(f"OTX domain check failed: {e}")
+
         if self.consensus_scorer:
             try:
                 connection_metadata = {
@@ -693,6 +990,16 @@ class DataPipeline:
                     "protocol": protocol,
                     "timestamp": timestamp,
                     "ttl": raw_conn.get("ttl", 0),
+                    # Protocol enrichment data for scorers
+                    "dns_query": dns_query,
+                    "dns_query_type": dns_query_type,
+                    "tls_sni": tls_sni,
+                    "tls_version": tls_version,
+                    "tcp_state": tcp_state,
+                    "tcp_syn": tcp_syn,
+                    "tcp_ack": tcp_ack,
+                    "tcp_rst": tcp_rst,
+                    "tcp_is_scan": tcp_is_scan,
                 }
 
                 threat_score, consensus_details = self.consensus_scorer.check_ip(
@@ -727,17 +1034,44 @@ class DataPipeline:
         correlator_ttl = raw_conn.get("response_ttl")
         correlator_os = raw_conn.get("os_fingerprint")
 
+        # Normalize org_type: use "unknown" instead of empty string for better triaging
+        raw_org_type = consensus_details.get("dst_org_type", "")
+        normalized_org_type = raw_org_type if raw_org_type else "unknown"
+
         asn_data = {
             "dst_asn": consensus_details.get("dst_asn"),
             "dst_asn_name": consensus_details.get("dst_asn_name", ""),
             "dst_org": consensus_details.get("dst_org", ""),
-            "dst_org_type": consensus_details.get("dst_org_type", ""),
+            "dst_org_type": normalized_org_type,
             "org_trust_score": consensus_details.get("org_trust_score", 0.5),
             # Use correlator hop data if available (from response packet TTL)
             "hop_count": correlator_hops if correlator_hops is not None else consensus_details.get("hop_count"),
             "ttl_observed": correlator_ttl if correlator_ttl is not None else consensus_details.get("ttl_observed"),
             "os_fingerprint": correlator_os if correlator_os else consensus_details.get("os_fingerprint", ""),
         }
+
+        # Fallback ASN enrichment if consensus didn't provide org data
+        if not asn_data.get("dst_org") and self.consensus_scorer:
+            try:
+                ttl = raw_conn.get("ttl", 0) or correlator_ttl or 0
+                fallback_asn = self.consensus_scorer.enrich_with_asn(dst_ip, ttl)
+                if fallback_asn:
+                    asn_data["dst_asn"] = fallback_asn.get("dst_asn") or asn_data["dst_asn"]
+                    asn_data["dst_asn_name"] = fallback_asn.get("dst_asn_name") or asn_data["dst_asn_name"]
+                    asn_data["dst_org"] = fallback_asn.get("dst_org") or asn_data["dst_org"]
+                    # Normalize fallback org_type: use "unknown" instead of empty/None
+                    fallback_org_type = fallback_asn.get("dst_org_type", "")
+                    asn_data["dst_org_type"] = fallback_org_type if fallback_org_type else "unknown"
+                    asn_data["org_trust_score"] = fallback_asn.get("org_trust_score", 0.5)
+                    # Only use fallback hop data if correlator didn't provide it
+                    if asn_data["hop_count"] is None:
+                        asn_data["hop_count"] = fallback_asn.get("hop_count")
+                    if asn_data["ttl_observed"] is None:
+                        asn_data["ttl_observed"] = fallback_asn.get("ttl_observed")
+                    if not asn_data["os_fingerprint"]:
+                        asn_data["os_fingerprint"] = fallback_asn.get("os_fingerprint", "")
+            except Exception as e:
+                logger.debug(f"Fallback ASN enrichment failed: {e}")
 
         # Stage 4: Analytics processing
         anomaly_score = 0.0
@@ -933,6 +1267,50 @@ class DataPipeline:
         with self.stats_lock:
             self.stats.total_connections += 1
 
+        # Stage 7: AI Verification (autonomous local assessment)
+        verification_status = "pending"
+        verification_reason = ""
+        verification_confidence = 0.0
+        triangulation_score = None
+        triangulation_sources = 0
+
+        if self.verification_engine:
+            try:
+                verification_result = self.verification_engine.verify_connection(
+                    dst_ip=dst_ip,
+                    threat_score=threat_score,
+                    confidence=confidence,
+                    score_statistical=consensus_details.get("score_statistical"),
+                    score_rule_based=consensus_details.get("score_rule_based"),
+                    score_ml_based=consensus_details.get("score_ml_based"),
+                    score_organization=consensus_details.get("score_organization"),
+                    score_spread=consensus_details.get("score_spread"),
+                    high_uncertainty=high_uncertainty,
+                    org_type=asn_data.get("dst_org_type", ""),
+                    org_trust_score=asn_data.get("org_trust_score", 0.5),
+                    hop_count=asn_data.get("hop_count"),
+                    anomaly_score=anomaly_score,
+                )
+                verification_status = verification_result.status
+                verification_reason = verification_result.reason
+                verification_confidence = verification_result.confidence
+                triangulation_score = verification_result.triangulation_score
+                triangulation_sources = verification_result.triangulation_sources
+
+                logger.debug(
+                    f"Verification for {dst_ip}: {verification_status} "
+                    f"(tri={triangulation_score:.2f}, sources={triangulation_sources})"
+                )
+            except Exception as e:
+                logger.debug(f"Verification failed for {dst_ip}: {e}")
+
+        # Extract domain intelligence from consensus details
+        # The RuleScorer provides domain_trust and dga_detected
+        # The OrganizationScorer provides domain_asn_mismatch
+        domain_trust = consensus_details.get("domain_trust")
+        dga_detected = consensus_details.get("dga_detected", False)
+        domain_asn_mismatch = consensus_details.get("domain_asn_mismatch", False)
+
         # Build final event
         return ConnectionEvent(
             timestamp=timestamp,
@@ -957,6 +1335,29 @@ class DataPipeline:
             os_fingerprint=asn_data.get("os_fingerprint", ""),
             anomaly_score=anomaly_score,
             anomaly_type=anomaly_type,
+            # Individual scorer results
+            score_statistical=consensus_details.get("score_statistical"),
+            score_rule_based=consensus_details.get("score_rule_based"),
+            score_ml_based=consensus_details.get("score_ml_based"),
+            score_organization=consensus_details.get("score_organization"),
+            score_spread=consensus_details.get("score_spread"),
+            # AI Verification
+            verification_status=verification_status,
+            verification_reason=verification_reason,
+            verification_confidence=verification_confidence,
+            triangulation_score=triangulation_score,
+            triangulation_sources=triangulation_sources,
+            # Protocol Enrichment
+            dns_query=dns_query,
+            dns_query_type=dns_query_type,
+            tls_sni=tls_sni,
+            tls_version=tls_version,
+            tcp_state=tcp_state,
+            tcp_is_scan=tcp_is_scan,
+            # Domain Intelligence
+            domain_trust=domain_trust,
+            dga_detected=dga_detected,
+            domain_asn_mismatch=domain_asn_mismatch,
         )
 
 

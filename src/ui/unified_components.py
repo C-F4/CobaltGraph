@@ -27,7 +27,57 @@ from textual.reactive import reactive
 from textual.app import ComposeResult
 from textual.message import Message
 
+# Import port service resolver for port display
+try:
+    from src.services.port_service import PortServiceResolver
+except ImportError:
+    PortServiceResolver = None
+
 logger = logging.getLogger(__name__)
+
+
+def _is_private_ip(ip: str) -> bool:
+    """Check if IP is private/local (RFC 1918 + loopback)"""
+    if not ip or ip == 'local':
+        return True
+    if ip.startswith("10."):
+        return True
+    if ip.startswith("192.168."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second_octet = int(ip.split(".")[1])
+            if 16 <= second_octet <= 31:
+                return True
+        except (IndexError, ValueError):
+            pass
+    if ip.startswith("127."):
+        return True
+    return False
+
+
+def get_direction(src_ip: str, dst_ip: str) -> tuple:
+    """
+    Determine packet/connection direction based on source and destination IPs.
+
+    Returns:
+        tuple: (direction_label, direction_color, direction_symbol)
+        - "OUT" for outgoing (local -> external)
+        - "IN" for incoming (external -> local)
+        - "INT" for internal (local -> local)
+        - "EXT" for external (external -> external, passthrough)
+    """
+    src_is_private = _is_private_ip(src_ip)
+    dst_is_private = _is_private_ip(dst_ip)
+
+    if src_is_private and not dst_is_private:
+        return ("OUT", "cyan", "→")  # Outgoing
+    elif not src_is_private and dst_is_private:
+        return ("IN", "magenta", "←")  # Incoming
+    elif src_is_private and dst_is_private:
+        return ("INT", "dim", "↔")  # Internal
+    else:
+        return ("EXT", "yellow", "⇄")  # External/passthrough
 
 
 class ThreatRadarGraph:
@@ -844,14 +894,15 @@ class ConnectionTablePanel(Static):
         """Create data table with cursor enabled for selection"""
         self.table = DataTable(id="connection_table", cursor_type="row")
 
-        # Add columns - include confidence indicator
+        # Add columns - include direction, verification and confidence indicators
         self.table.add_column("Time", key="time", width=8)
+        self.table.add_column("Dir", key="direction", width=3)  # Direction indicator
         self.table.add_column("Dst IP", key="dst_ip", width=15)
-        self.table.add_column("Port", key="port", width=5)
-        self.table.add_column("Org", key="org", width=12)
-        self.table.add_column("Type", key="org_type", width=8)
+        self.table.add_column("Port", key="port", width=12)  # Wider for service names
+        self.table.add_column("Org", key="org", width=10)
         self.table.add_column("Threat", key="threat", width=6)
-        self.table.add_column("", key="indicator", width=3)  # Status indicator
+        self.table.add_column("V", key="verified", width=2)  # Verification status
+        self.table.add_column("T", key="triangulation", width=2)  # Triangulation indicator
 
         yield self.table
         # Yield connection key/legend
@@ -860,6 +911,13 @@ class ConnectionTablePanel(Static):
     def _render_connection_key(self) -> Text:
         """Render a concise key explaining security metrics per connection"""
         key = Text()
+        # Direction indicators
+        key.append("Dir:", style="dim bold")
+        key.append(" →", style="cyan")
+        key.append("Out", style="dim")
+        key.append(" ←", style="magenta")
+        key.append("In", style="dim")
+        key.append(" │ ", style="dim")
         # Threat level indicators
         key.append("Threat:", style="dim bold")
         key.append(" ●", style="bold red")
@@ -869,19 +927,14 @@ class ConnectionTablePanel(Static):
         key.append(" ●", style="green")
         key.append("Low", style="dim")
         key.append(" │ ", style="dim")
-        # Confidence and anomaly indicators
-        key.append("⚠", style="yellow")
-        key.append("=LowConf", style="dim")
-        key.append(" !", style="bold magenta")
-        key.append("=Anom", style="dim")
-        key.append(" │ ", style="dim")
-        # Organization trust indicators
-        key.append("Type:", style="dim bold")
-        key.append(" TOR", style="bold red")
-        key.append("/VPN", style="bold magenta")
-        key.append("=Risk ", style="dim")
-        key.append("ENT", style="bold green")
-        key.append("=Trust", style="dim")
+        # Verification status indicators
+        key.append("V:", style="dim bold")
+        key.append(" ✓", style="bold green")
+        key.append("=Verified", style="dim")
+        key.append(" !", style="bold yellow")
+        key.append("=Flag", style="dim")
+        key.append(" ?", style="dim")
+        key.append("=Pend", style="dim")
         return key
 
     def watch_connections(self, new_connections: list) -> None:
@@ -898,8 +951,13 @@ class ConnectionTablePanel(Static):
                 time_str = datetime.fromtimestamp(conn.get('timestamp', 0)).strftime("%H:%M:%S")
                 threat = float(conn.get('threat_score', 0) or 0)
                 confidence = float(conn.get('confidence', 0) or 0)
-                org_type = (conn.get('dst_org_type') or 'unknown').lower()
-                high_uncertainty = conn.get('high_uncertainty', False)
+                verification_status = conn.get('verification_status', 'pending')
+                triangulation_sources = conn.get('triangulation_sources', 0)
+
+                # Determine direction (incoming/outgoing)
+                src_ip = conn.get('src_ip') or 'local'
+                dst_ip = conn.get('dst_ip') or 'Unknown'
+                dir_label, dir_color, dir_symbol = get_direction(src_ip, dst_ip)
 
                 # Color based on threat
                 if threat >= 0.7:
@@ -909,27 +967,43 @@ class ConnectionTablePanel(Static):
                 else:
                     threat_color = "green"
 
-                # Status indicator
-                if high_uncertainty:
-                    indicator = "[yellow]⚠[/yellow]"  # Uncertainty warning
-                elif threat >= 0.7:
-                    indicator = "[red]●[/red]"  # Critical
-                elif threat >= 0.5:
-                    indicator = "[yellow]●[/yellow]"  # Warning
-                elif confidence >= 0.8:
-                    indicator = "[green]●[/green]"  # High confidence clean
+                # Verification status indicator
+                if verification_status == "verified":
+                    verified_indicator = "[bold green]✓[/bold green]"
+                elif verification_status == "flagged":
+                    verified_indicator = "[bold yellow]![/bold yellow]"
+                elif verification_status == "unknown":
+                    verified_indicator = "[bold red]✗[/bold red]"
+                else:  # pending
+                    verified_indicator = "[dim]?[/dim]"
+
+                # Triangulation indicator (number of agreeing sources)
+                if triangulation_sources >= 4:
+                    tri_indicator = "[bold green]4[/bold green]"
+                elif triangulation_sources >= 3:
+                    tri_indicator = "[cyan]3[/cyan]"
+                elif triangulation_sources >= 2:
+                    tri_indicator = "[yellow]2[/yellow]"
                 else:
-                    indicator = "[dim]○[/dim]"  # Normal
+                    tri_indicator = "[dim]1[/dim]"
+
+                # Format port with service name
+                port = conn.get('dst_port', 0)
+                if PortServiceResolver and port:
+                    port_display = PortServiceResolver.format_port(port, "short")
+                else:
+                    port_display = str(port) if port else '-'
 
                 # Add row and store the connection data mapping
                 row_key = self.table.add_row(
                     f"[dim]{time_str}[/]",
-                    f"[cyan]{conn.get('dst_ip', 'Unknown')[:15]}[/]",
-                    f"[magenta]{conn.get('dst_port', '-')}[/]",
-                    f"[white]{(conn.get('dst_org') or 'Unknown')[:12]}[/]",
-                    f"[dim]{org_type:>8}[/]",
+                    f"[{dir_color}]{dir_symbol}[/]",  # Direction indicator
+                    f"[cyan]{dst_ip[:15]}[/]",
+                    f"[magenta]{port_display}[/]",
+                    f"[white]{(conn.get('dst_org') or 'Unknown')[:10]}[/]",
                     f"[{threat_color}]{threat:.2f}[/{threat_color}]",
-                    indicator,
+                    verified_indicator,
+                    tri_indicator,
                 )
                 self._row_to_connection[row_key] = conn
 
@@ -1016,17 +1090,16 @@ class ThreatGlobePanel(Static):
         }
         self.intel_map = None
         self.map_type = map_type
+        self._unknown_ips: set = set()
 
         # Try to initialize intel map from refactored module
         self._init_intel_map()
 
     def _init_intel_map(self) -> None:
         """Initialize intel map with fallback chain"""
-        # Try new intel_map module first
+        # Try consolidated maps module first
         try:
-            from src.ui.intel_map import IntelMapPanel
-            # Create a map instance directly (not as widget)
-            from src.ui.intel_map import FlatWorldMap, RotatingGlobe, SimpleGlobe
+            from src.ui.maps import FlatWorldMap, RotatingGlobe, SimpleGlobe
 
             if self.map_type == "rotating":
                 self.intel_map = RotatingGlobe(width=60, height=15)
@@ -1034,21 +1107,6 @@ class ThreatGlobePanel(Static):
                 self.intel_map = SimpleGlobe(width=60, height=15)
             else:
                 self.intel_map = FlatWorldMap(width=60, height=15)
-            return
-        except ImportError:
-            pass
-
-        # Fallback to legacy globe_flat
-        try:
-            from src.ui.globe_flat import FlatWorldMap
-            self.intel_map = FlatWorldMap(width=60, height=15)
-            return
-        except ImportError:
-            pass
-
-        try:
-            from globe_flat import FlatWorldMap
-            self.intel_map = FlatWorldMap(width=60, height=15)
             return
         except ImportError:
             pass
@@ -1061,10 +1119,18 @@ class ThreatGlobePanel(Static):
             self.refresh()
             return
 
+        # Import utility
+        try:
+            from src.ui.maps import is_unknown_location
+        except ImportError:
+            is_unknown_location = lambda lat, lon: lat == 0.0 and lon == 0.0
+
         connections = new_data.get('connections', [])
 
         # Clear and add threats
         self.intel_map.clear_threats()
+        self._unknown_ips.clear()
+
         for conn in connections[-30:]:
             try:
                 lat = float(conn.get('dst_lat', 0) or 0)
@@ -1073,9 +1139,18 @@ class ThreatGlobePanel(Static):
                 org_type = (conn.get('dst_org_type') or 'unknown').lower()
                 ip = conn.get('dst_ip', 'Unknown')
 
+                # Filter out (0,0) unknown locations - track separately
+                if is_unknown_location(lat, lon):
+                    self._unknown_ips.add(ip)
+                    continue
+
                 self.intel_map.add_threat(lat, lon, ip, threat, org_type)
             except Exception as e:
                 logger.debug(f"Failed to add threat to globe: {e}")
+
+        # Update unknown count on map implementation
+        if hasattr(self.intel_map, 'set_unknown_count'):
+            self.intel_map.set_unknown_count(len(self._unknown_ips))
 
         self.refresh()
 
