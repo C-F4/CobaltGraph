@@ -168,58 +168,101 @@ class GeoData:
         return countries
 
     def _load_coastlines(self) -> List[Polygon]:
-        """Load simplified continent outlines for better visual representation"""
+        """Load continent outlines with improved detail (~40-50 points per continent)."""
         coastlines = []
 
-        # North America - simplified outline
+        # North America - improved outline (~45 points)
         coastlines.append(Polygon('North America', [
-            Point(50, -140), Point(50, -100), Point(48, -95),
-            Point(45, -93), Point(42, -85), Point(40, -75),
-            Point(35, -80), Point(30, -85), Point(25, -97),
-            Point(20, -105), Point(25, -110), Point(30, -115),
-            Point(35, -120), Point(45, -125), Point(50, -140)
+            Point(71, -156), Point(70, -141), Point(60, -141),  # Alaska
+            Point(55, -130), Point(50, -127), Point(48, -124),  # Pacific NW
+            Point(45, -124), Point(42, -124), Point(38, -123),  # California
+            Point(34, -120), Point(32, -117), Point(28, -114),  # Baja
+            Point(24, -110), Point(22, -106), Point(20, -105),  # Mexico Pacific
+            Point(18, -103), Point(16, -95), Point(18, -92),    # Central America
+            Point(20, -87), Point(22, -86), Point(25, -81),     # Yucatan
+            Point(26, -80), Point(30, -81), Point(32, -80),     # Florida
+            Point(35, -75), Point(37, -76), Point(39, -74),     # Mid-Atlantic
+            Point(41, -71), Point(43, -70), Point(45, -67),     # New England
+            Point(47, -64), Point(50, -58), Point(52, -56),     # Maritime Canada
+            Point(55, -60), Point(60, -64), Point(63, -68),     # Labrador
+            Point(66, -62), Point(70, -70), Point(72, -80),     # Baffin
+            Point(75, -95), Point(72, -115), Point(71, -156),   # Arctic
         ]))
 
-        # South America - simplified outline
+        # South America - improved outline (~40 points)
         coastlines.append(Polygon('South America', [
-            Point(12, -60), Point(10, -65), Point(5, -70),
-            Point(0, -72), Point(-5, -72), Point(-10, -72),
-            Point(-15, -70), Point(-20, -68), Point(-25, -65),
-            Point(-30, -60), Point(-35, -55), Point(-40, -56),
-            Point(-40, -60), Point(-35, -62), Point(-30, -65),
-            Point(-20, -70), Point(-10, -72), Point(0, -70),
-            Point(5, -65), Point(12, -60)
+            Point(12, -72), Point(10, -75), Point(5, -77),      # Venezuela/Colombia coast
+            Point(1, -79), Point(-2, -80), Point(-5, -81),      # Ecuador
+            Point(-10, -78), Point(-15, -75), Point(-18, -70),  # Peru
+            Point(-22, -70), Point(-27, -70), Point(-33, -72),  # Chile north
+            Point(-40, -73), Point(-46, -75), Point(-52, -72),  # Chile south
+            Point(-55, -68), Point(-54, -65), Point(-52, -59),  # Tierra del Fuego
+            Point(-46, -67), Point(-42, -64), Point(-38, -57),  # Argentina coast
+            Point(-35, -57), Point(-30, -50), Point(-25, -47),  # Uruguay/Brazil south
+            Point(-20, -42), Point(-15, -39), Point(-10, -37),  # Brazil east
+            Point(-5, -35), Point(0, -48), Point(5, -52),       # Brazil north
+            Point(8, -58), Point(10, -62), Point(12, -72),      # Guianas
         ]))
 
-        # Europe + Africa - simplified
-        coastlines.append(Polygon('Africa & Europe', [
-            Point(70, -10), Point(65, 0), Point(60, 10),
-            Point(55, 20), Point(50, 25), Point(45, 20),
-            Point(40, 10), Point(35, 0), Point(30, -10),
-            Point(25, -20), Point(20, -30), Point(15, -35),
-            Point(10, -35), Point(5, -30), Point(0, -20),
-            Point(-5, -10), Point(-10, -5), Point(-15, 0),
-            Point(-20, 10), Point(-15, 20), Point(-5, 25),
-            Point(5, 20), Point(15, 15), Point(25, 10),
-            Point(35, 5), Point(45, 15), Point(55, 20),
-            Point(65, 10), Point(70, -10)
+        # Europe - separate for clarity (~35 points)
+        coastlines.append(Polygon('Europe', [
+            Point(71, 25), Point(70, 30), Point(68, 25),        # Norway north
+            Point(64, 10), Point(58, 5), Point(56, 8),          # Scandinavia west
+            Point(55, 12), Point(54, 10), Point(52, 4),         # Denmark/Netherlands
+            Point(51, 2), Point(49, -5), Point(48, -5),         # France
+            Point(44, -9), Point(37, -9), Point(36, -6),        # Iberia west
+            Point(36, -2), Point(38, 0), Point(41, 2),          # Spain south/east
+            Point(43, 3), Point(43, 6), Point(44, 8),           # France south
+            Point(44, 12), Point(41, 18), Point(39, 20),        # Italy
+            Point(40, 24), Point(41, 29), Point(46, 31),        # Greece/Turkey
+            Point(55, 28), Point(60, 30), Point(65, 40),        # Baltic/Russia
+            Point(69, 35), Point(70, 28), Point(71, 25),        # Norway
         ]))
 
-        # Asia - simplified
+        # Africa - improved outline (~40 points)
+        coastlines.append(Polygon('Africa', [
+            Point(35, -6), Point(34, 10), Point(32, 25),        # Mediterranean
+            Point(31, 33), Point(29, 33), Point(25, 35),        # Egypt
+            Point(20, 38), Point(15, 43), Point(12, 44),        # Horn approach
+            Point(10, 50), Point(5, 48), Point(0, 42),          # Horn of Africa
+            Point(-5, 40), Point(-10, 40), Point(-15, 38),      # East Africa
+            Point(-20, 35), Point(-25, 35), Point(-30, 31),     # Mozambique
+            Point(-34, 26), Point(-34, 18), Point(-30, 17),     # South Africa
+            Point(-25, 15), Point(-20, 13), Point(-15, 12),     # Namibia/Angola
+            Point(-10, 13), Point(-5, 10), Point(0, 6),         # Congo
+            Point(5, 5), Point(10, 5), Point(15, 0),            # Gulf of Guinea
+            Point(20, -5), Point(25, -10), Point(28, -14),      # West Africa
+            Point(32, -13), Point(35, -6),                       # Morocco
+        ]))
+
+        # Asia - improved outline (~50 points)
         coastlines.append(Polygon('Asia', [
-            Point(70, 30), Point(70, 100), Point(60, 120),
-            Point(50, 130), Point(40, 135), Point(30, 140),
-            Point(20, 130), Point(15, 110), Point(10, 90),
-            Point(15, 70), Point(25, 50), Point(35, 40),
-            Point(45, 35), Point(55, 30), Point(65, 25),
-            Point(70, 30)
+            Point(70, 70), Point(72, 80), Point(75, 100),       # Siberia north
+            Point(72, 130), Point(70, 170), Point(65, 170),     # Siberia east
+            Point(60, 165), Point(55, 160), Point(50, 145),     # Far east Russia
+            Point(45, 142), Point(40, 132), Point(35, 129),     # Korea/Japan area
+            Point(30, 122), Point(25, 120), Point(22, 114),     # China coast
+            Point(20, 110), Point(15, 108), Point(10, 105),     # Vietnam
+            Point(5, 103), Point(1, 104), Point(-5, 106),       # Indonesia start
+            Point(-8, 114), Point(-8, 122), Point(-2, 130),     # Indonesia
+            Point(5, 127), Point(12, 125), Point(18, 120),      # Philippines
+            Point(20, 100), Point(15, 95), Point(10, 93),       # Thailand
+            Point(8, 80), Point(10, 75), Point(15, 73),         # India south
+            Point(20, 72), Point(25, 68), Point(25, 62),        # India west
+            Point(28, 57), Point(27, 51), Point(30, 48),        # Arabian Peninsula
+            Point(35, 35), Point(40, 30), Point(45, 35),        # Turkey
+            Point(55, 55), Point(60, 60), Point(70, 70),        # Central Asia
         ]))
 
-        # Australia
+        # Australia - improved outline (~25 points)
         coastlines.append(Polygon('Australia', [
-            Point(-10, 115), Point(-10, 155), Point(-30, 155),
-            Point(-40, 150), Point(-43, 140), Point(-40, 130),
-            Point(-25, 128), Point(-15, 125), Point(-10, 115)
+            Point(-10, 142), Point(-12, 140), Point(-15, 130),  # North coast
+            Point(-18, 122), Point(-20, 115), Point(-25, 113),  # West coast
+            Point(-30, 115), Point(-34, 116), Point(-35, 118),  # SW corner
+            Point(-35, 137), Point(-37, 140), Point(-39, 145),  # South coast
+            Point(-38, 147), Point(-33, 152), Point(-28, 154),  # SE coast
+            Point(-24, 152), Point(-20, 149), Point(-16, 145),  # East coast
+            Point(-12, 143), Point(-10, 142),                    # Back to north
         ]))
 
         return coastlines

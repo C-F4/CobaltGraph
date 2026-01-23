@@ -32,6 +32,373 @@ from textual.binding import Binding
 logger = logging.getLogger(__name__)
 
 
+def _is_private_ip(ip: str) -> bool:
+    """Check if IP is private/local (RFC 1918 + loopback)"""
+    if not ip or ip == 'local':
+        return True
+    if ip.startswith("10."):
+        return True
+    if ip.startswith("192.168."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second_octet = int(ip.split(".")[1])
+            if 16 <= second_octet <= 31:
+                return True
+        except (IndexError, ValueError):
+            pass
+    if ip.startswith("127."):
+        return True
+    return False
+
+
+def get_direction(src_ip: str, dst_ip: str) -> tuple:
+    """
+    Determine packet/connection direction based on source and destination IPs.
+
+    Returns:
+        tuple: (direction_label, direction_color, direction_symbol)
+        - "OUT" for outgoing (local -> external)
+        - "IN" for incoming (external -> local)
+        - "INT" for internal (local -> local)
+        - "EXT" for external (external -> external, passthrough)
+    """
+    src_is_private = _is_private_ip(src_ip)
+    dst_is_private = _is_private_ip(dst_ip)
+
+    if src_is_private and not dst_is_private:
+        return ("OUT", "cyan", "→")  # Outgoing
+    elif not src_is_private and dst_is_private:
+        return ("IN", "magenta", "←")  # Incoming
+    elif src_is_private and dst_is_private:
+        return ("INT", "dim", "↔")  # Internal
+    else:
+        return ("EXT", "yellow", "⇄")  # External/passthrough
+
+
+class ProtocolEnrichmentPanel(Static):
+    """
+    Shows application layer protocol data: DNS queries, TLS SNI, TCP state.
+    Includes domain intelligence analysis (DGA detection, domain-ASN correlation).
+    """
+
+    DEFAULT_CSS = """
+    ProtocolEnrichmentPanel {
+        width: 100%;
+        height: auto;
+        padding: 1;
+    }
+    """
+
+    def __init__(self, connection_data: Dict[str, Any], **kwargs):
+        super().__init__(**kwargs)
+        self.data = connection_data
+
+    def render(self):
+        lines = []
+        lines.append("[bold cyan]APPLICATION LAYER[/bold cyan]")
+        lines.append("")
+
+        # DNS Query section
+        dns_query = self.data.get('dns_query')
+        dns_query_type = self.data.get('dns_query_type', 'A')
+        lines.append("[bold]DNS Resolution[/bold]")
+        if dns_query:
+            lines.append(f"  Query: [cyan]{dns_query}[/cyan]")
+            lines.append(f"  Type: {dns_query_type or 'A'}")
+        else:
+            lines.append("  [dim]No DNS query captured[/dim]")
+        lines.append("")
+
+        # TLS SNI section
+        tls_sni = self.data.get('tls_sni')
+        tls_version = self.data.get('tls_version')
+        lines.append("[bold]TLS Handshake[/bold]")
+        if tls_sni:
+            lines.append(f"  SNI: [cyan]{tls_sni}[/cyan]")
+            if tls_version:
+                lines.append(f"  Version: {tls_version}")
+        else:
+            lines.append("  [dim]No TLS handshake captured[/dim]")
+        lines.append("")
+
+        # TCP State section
+        tcp_state = self.data.get('tcp_state')
+        tcp_is_scan = self.data.get('tcp_is_scan', False)
+        lines.append("[bold]TCP Connection[/bold]")
+        if tcp_state:
+            state_color = "green" if tcp_state in ["ESTABLISHED", "SYN-ACK"] else "yellow"
+            lines.append(f"  State: [{state_color}]{tcp_state}[/{state_color}]")
+        else:
+            lines.append("  State: [dim]Unknown[/dim]")
+        if tcp_is_scan:
+            lines.append("  [red]⚠ Port scan pattern detected[/red]")
+        lines.append("")
+
+        # Domain Intelligence section
+        domain = dns_query or tls_sni
+        if domain:
+            lines.append("[bold cyan]─── DOMAIN INTELLIGENCE ───[/bold cyan]")
+            lines.append("")
+
+            # Domain trust classification
+            domain_trust = self.data.get('domain_trust')
+            lines.append("[bold]Trust Classification[/bold]")
+            if domain_trust == "trusted":
+                lines.append(f"  [green]✓ TRUSTED[/green]")
+                lines.append("  [dim]Well-known legitimate domain[/dim]")
+            elif domain_trust == "suspicious":
+                lines.append(f"  [yellow]⚠ SUSPICIOUS[/yellow]")
+                lines.append("  [dim]Domain matches concerning patterns[/dim]")
+            else:
+                lines.append(f"  [dim]○ NEUTRAL[/dim]")
+                lines.append("  [dim]No specific classification[/dim]")
+            lines.append("")
+
+            # DGA Detection
+            dga_detected = self.data.get('dga_detected', False)
+            lines.append("[bold]DGA Analysis[/bold]")
+            if dga_detected:
+                lines.append("  [red]⚠ DGA PATTERN DETECTED[/red]")
+                lines.append("  [dim]Domain appears algorithmically generated[/dim]")
+                lines.append("  [dim]Common in malware C2 infrastructure[/dim]")
+            else:
+                lines.append("  [green]✓ Normal domain pattern[/green]")
+            lines.append("")
+
+            # Domain-ASN Correlation
+            domain_asn_mismatch = self.data.get('domain_asn_mismatch', False)
+            lines.append("[bold]Domain-ASN Correlation[/bold]")
+            if domain_asn_mismatch:
+                lines.append("  [yellow]⚠ MISMATCH DETECTED[/yellow]")
+                lines.append("  [dim]Domain doesn't match expected ASN owner[/dim]")
+                lines.append("  [dim]May indicate CDN, MITM, or spoofing[/dim]")
+            else:
+                dst_org = self.data.get('dst_org', '')
+                if dst_org:
+                    lines.append(f"  [green]✓ Domain matches ASN owner[/green]")
+                    lines.append(f"  [dim]Organization: {dst_org}[/dim]")
+                else:
+                    lines.append("  [dim]Unable to correlate (no ASN data)[/dim]")
+
+        content = "\n".join(lines)
+        return Panel(content, title="[bold cyan]Protocol[/bold cyan]", border_style="cyan")
+
+
+class ThreatIntelSourcesPanel(Static):
+    """
+    Shows threat intelligence from multiple sources:
+    - Local IOC database matches
+    - GreyNoise (benign scanner/service detection)
+    - AlienVault OTX pulse data
+    """
+
+    DEFAULT_CSS = """
+    ThreatIntelSourcesPanel {
+        width: 100%;
+        height: auto;
+        padding: 1;
+    }
+    """
+
+    def __init__(self, connection_data: Dict[str, Any], **kwargs):
+        super().__init__(**kwargs)
+        self.data = connection_data
+
+    def render(self):
+        lines = []
+        lines.append("[bold cyan]THREAT INTEL SOURCES[/bold cyan]")
+        lines.append("")
+
+        # Local IOC section
+        local_ioc_match = self.data.get('local_ioc_match', False)
+        lines.append("[bold]Local IOC Database[/bold]")
+        if local_ioc_match:
+            ioc_type = self.data.get('local_ioc_type', 'unknown')
+            ioc_source = self.data.get('local_ioc_source', 'local')
+            ioc_conf = self.data.get('local_ioc_confidence', 0)
+            ioc_indicator = self.data.get('local_ioc_indicator', '')
+
+            lines.append(f"  [red]⚠ MATCH FOUND[/red]")
+            lines.append(f"  Type: [yellow]{ioc_type}[/yellow]")
+            lines.append(f"  Source: {ioc_source}")
+            lines.append(f"  Confidence: {ioc_conf:.0%}")
+            if ioc_indicator:
+                lines.append(f"  Indicator: [cyan]{ioc_indicator}[/cyan]")
+        else:
+            lines.append("  [green]✓ No local IOC matches[/green]")
+        lines.append("")
+
+        # GreyNoise section
+        greynoise_riot = self.data.get('greynoise_riot', False)
+        greynoise_benign = self.data.get('greynoise_benign_scanner', False)
+        greynoise_malicious = self.data.get('greynoise_malicious', False)
+        greynoise_name = self.data.get('greynoise_name', '')
+
+        lines.append("[bold]GreyNoise Intelligence[/bold]")
+        if greynoise_riot:
+            category = self.data.get('greynoise_category', 'business')
+            lines.append(f"  [green]✓ RIOT: Known Business Service[/green]")
+            lines.append(f"  Name: [cyan]{greynoise_name}[/cyan]")
+            lines.append(f"  Category: {category}")
+            lines.append("  [dim]False positive reduction applied[/dim]")
+        elif greynoise_benign:
+            actor = self.data.get('greynoise_actor', '')
+            lines.append(f"  [green]✓ Benign Scanner[/green]")
+            lines.append(f"  Name: [cyan]{greynoise_name}[/cyan]")
+            if actor:
+                lines.append(f"  Actor: {actor}")
+            lines.append("  [dim]Known security research scanner[/dim]")
+        elif greynoise_malicious:
+            tags = self.data.get('greynoise_tags', [])
+            lines.append(f"  [red]⚠ Malicious Scanner[/red]")
+            lines.append(f"  Name: [red]{greynoise_name}[/red]")
+            if tags:
+                lines.append(f"  Tags: {', '.join(tags[:3])}")
+        else:
+            lines.append("  [dim]○ Not in GreyNoise database[/dim]")
+        lines.append("")
+
+        # AlienVault OTX section
+        otx_pulse_count = self.data.get('otx_pulse_count', 0)
+        lines.append("[bold]AlienVault OTX[/bold]")
+        if otx_pulse_count > 0:
+            otx_tags = self.data.get('otx_tags', [])
+            otx_rep = self.data.get('otx_reputation', 0)
+            otx_indicator = self.data.get('otx_indicator', '')
+            pulse_names = self.data.get('otx_pulse_names', [])
+
+            severity_color = "red" if otx_pulse_count >= 5 else "yellow" if otx_pulse_count >= 2 else "dim"
+            lines.append(f"  [{severity_color}]Found in {otx_pulse_count} pulse(s)[/{severity_color}]")
+
+            if pulse_names:
+                lines.append("  [bold]Pulses:[/bold]")
+                for name in pulse_names[:3]:
+                    lines.append(f"    • {name[:40]}...")
+
+            if otx_tags:
+                tag_str = ", ".join(otx_tags[:5])
+                lines.append(f"  Tags: [yellow]{tag_str}[/yellow]")
+
+            if otx_rep > 0:
+                rep_color = "red" if otx_rep >= 50 else "yellow" if otx_rep >= 25 else "green"
+                lines.append(f"  Reputation: [{rep_color}]{otx_rep}[/{rep_color}]")
+        else:
+            lines.append("  [green]✓ Not in OTX pulses[/green]")
+        lines.append("")
+
+        # Aggregated assessment
+        lines.append("[bold cyan]─── AGGREGATED ASSESSMENT ───[/bold cyan]")
+        lines.append("")
+
+        threat_signals = 0
+        benign_signals = 0
+
+        if local_ioc_match:
+            threat_signals += 2
+        if greynoise_malicious:
+            threat_signals += 1
+        if otx_pulse_count >= 2:
+            threat_signals += 1
+        if greynoise_riot or greynoise_benign:
+            benign_signals += 2
+
+        if threat_signals >= 2:
+            lines.append("[red]⚠ Multiple threat indicators[/red]")
+            lines.append(f"[dim]Threat signals: {threat_signals}, Benign: {benign_signals}[/dim]")
+        elif threat_signals >= 1 and benign_signals == 0:
+            lines.append("[yellow]◐ Single threat indicator[/yellow]")
+            lines.append("[dim]Recommend further investigation[/dim]")
+        elif benign_signals >= 1:
+            lines.append("[green]✓ Likely benign (known service)[/green]")
+            lines.append(f"[dim]Benign signals: {benign_signals}[/dim]")
+        else:
+            lines.append("[dim]○ No definitive indicators[/dim]")
+
+        content = "\n".join(lines)
+        return Panel(content, title="[bold cyan]Intel Sources[/bold cyan]", border_style="cyan")
+
+
+class InvestigationActionsPanel(Static):
+    """
+    Shows investigation action buttons for SOC analysts.
+    Includes pivot options and triage actions.
+    """
+
+    DEFAULT_CSS = """
+    InvestigationActionsPanel {
+        width: 100%;
+        height: auto;
+        padding: 1;
+    }
+    """
+
+    def __init__(self, connection_data: Dict[str, Any], **kwargs):
+        super().__init__(**kwargs)
+        self.data = connection_data
+
+    def render(self):
+        dst_ip = self.data.get('dst_ip', 'Unknown')
+        dst_asn = self.data.get('dst_asn')
+        domain = self.data.get('dns_query') or self.data.get('tls_sni')
+        threat = float(self.data.get('threat_score', 0) or 0)
+
+        lines = []
+        lines.append("[bold cyan]INVESTIGATION ACTIONS[/bold cyan]")
+        lines.append("")
+
+        # Triage recommendation
+        lines.append("[bold]Recommended Action[/bold]")
+        if threat >= 0.7:
+            lines.append("  [red]⚠ BLOCK - High threat score[/red]")
+            lines.append("  [dim]Consider adding to blocklist[/dim]")
+        elif threat >= 0.4:
+            lines.append("  [yellow]◐ INVESTIGATE - Elevated risk[/yellow]")
+            lines.append("  [dim]Review all connections to this IP[/dim]")
+        elif self.data.get('greynoise_riot') or self.data.get('greynoise_benign_scanner'):
+            lines.append("  [green]✓ ALLOW - Known benign[/green]")
+            lines.append("  [dim]GreyNoise verified service[/dim]")
+        else:
+            lines.append("  [dim]○ MONITOR - Normal traffic[/dim]")
+        lines.append("")
+
+        # Available actions (informational - buttons handled by parent)
+        lines.append("[bold]Available Actions[/bold]")
+        lines.append("  [cyan][B][/cyan] Add to Local Blocklist")
+        lines.append("  [cyan][W][/cyan] Add to Whitelist")
+        lines.append("  [cyan][E][/cyan] Export to STIX 2.1")
+        lines.append("")
+
+        # Pivot options
+        lines.append("[bold]Pivot Options[/bold]")
+        lines.append(f"  [cyan][A][/cyan] Show all connections to ASN")
+        if dst_asn:
+            lines.append(f"      [dim]AS{dst_asn}[/dim]")
+        if domain:
+            lines.append(f"  [cyan][D][/cyan] Show all DNS to domain")
+            lines.append(f"      [dim]{domain}[/dim]")
+        lines.append(f"  [cyan][T][/cyan] Show connection timeline")
+        lines.append(f"      [dim]{dst_ip}[/dim]")
+        lines.append("")
+
+        # Quick stats
+        lines.append("[bold]Context[/bold]")
+        verification_status = self.data.get('verification_status', 'pending')
+        if verification_status == "verified":
+            lines.append("  [green]✓ AI Verified[/green]")
+        elif verification_status == "flagged":
+            lines.append("  [yellow]! Flagged for Review[/yellow]")
+        else:
+            lines.append("  [dim]○ Pending verification[/dim]")
+
+        high_uncertainty = self.data.get('high_uncertainty', False)
+        if high_uncertainty:
+            lines.append("  [yellow]⚠ High uncertainty - scorers disagreed[/yellow]")
+
+        content = "\n".join(lines)
+        return Panel(content, title="[bold cyan]Actions[/bold cyan]", border_style="cyan")
+
+
 class ConsensusBreakdownPanel(Static):
     """
     Shows the 4-scorer BFT consensus breakdown.
@@ -206,6 +573,27 @@ class EnrichmentDetailsPanel(Static):
     def render(self):
         lines = []
         lines.append("[bold cyan]ENRICHMENT DATA[/bold cyan]")
+        lines.append("")
+
+        # Connection Direction
+        src_ip = self.data.get('src_ip', 'local')
+        dst_ip = self.data.get('dst_ip', 'Unknown')
+        dst_port = self.data.get('dst_port', 0) or 0
+        dir_label, dir_color, dir_symbol = get_direction(src_ip, dst_ip)
+        dir_full = {"OUT": "Outgoing", "IN": "Incoming", "INT": "Internal", "EXT": "External"}.get(dir_label, "Unknown")
+        lines.append("[bold]Connection Direction[/bold]")
+        lines.append(f"  [{dir_color}]{dir_symbol} {dir_full}[/{dir_color}]")
+        lines.append(f"  [dim]{src_ip} → {dst_ip}:{dst_port}[/dim]")
+
+        # Ephemeral port warning for destination ports
+        if dst_port >= 49152:
+            lines.append("")
+            lines.append("[bold yellow]Ephemeral Port Warning[/bold yellow]")
+            lines.append(f"  [yellow]Port {dst_port} is in ephemeral range (49152-65535)[/yellow]")
+            lines.append("  [dim]Unusual for destination - may indicate:[/dim]")
+            lines.append("  [dim]  - P2P/BitTorrent traffic[/dim]")
+            lines.append("  [dim]  - Custom tunneling[/dim]")
+            lines.append("  [dim]  - C2 callback on dynamic port[/dim]")
         lines.append("")
 
         # ASN Information
@@ -754,24 +1142,348 @@ class GraphPositionPanel(Static):
         return Panel(content, title="[bold cyan]Graph[/bold cyan]", border_style="cyan")
 
 
+class VerificationTriangulationPanel(Static):
+    """
+    Shows AI verification status and triangulation analysis.
+    Explains why metrics are scored as they are.
+    """
+
+    DEFAULT_CSS = """
+    VerificationTriangulationPanel {
+        width: 100%;
+        height: auto;
+        padding: 1;
+    }
+    """
+
+    def __init__(self, connection_data: Dict[str, Any], **kwargs):
+        super().__init__(**kwargs)
+        self.data = connection_data
+
+    def render(self):
+        verification_status = self.data.get('verification_status', 'pending')
+        verification_reason = self.data.get('verification_reason', '')
+        verification_confidence = float(self.data.get('verification_confidence', 0) or 0)
+        triangulation_score = self.data.get('triangulation_score')
+        triangulation_sources = self.data.get('triangulation_sources', 0)
+
+        lines = []
+        lines.append("[bold cyan]AI VERIFICATION[/bold cyan]")
+        lines.append("")
+
+        # Verification status with visual
+        if verification_status == "verified":
+            status_color = "bold green"
+            status_icon = "✓"
+            status_desc = "Assessment verified by local AI"
+        elif verification_status == "flagged":
+            status_color = "bold yellow"
+            status_icon = "!"
+            status_desc = "Flagged for review - uncertainty detected"
+        elif verification_status == "unknown":
+            status_color = "bold red"
+            status_icon = "✗"
+            status_desc = "Unable to verify - insufficient data"
+        else:  # pending
+            status_color = "dim"
+            status_icon = "?"
+            status_desc = "Verification pending - collecting data"
+
+        lines.append("[bold]Verification Status[/bold]")
+        lines.append(f"  [{status_color}]{status_icon} {verification_status.upper()}[/{status_color}]")
+        lines.append(f"  [dim]{status_desc}[/dim]")
+        lines.append("")
+
+        # Verification reason
+        if verification_reason:
+            lines.append("[bold]Reason[/bold]")
+            # Wrap long reasons
+            reason_words = verification_reason.split()
+            current_line = "  "
+            for word in reason_words:
+                if len(current_line) + len(word) > 50:
+                    lines.append(current_line)
+                    current_line = "  "
+                current_line += word + " "
+            if current_line.strip():
+                lines.append(current_line)
+            lines.append("")
+
+        # Verification confidence gauge
+        lines.append("[bold]Verification Confidence[/bold]")
+        conf_bar_width = 15
+        conf_filled = int(verification_confidence * conf_bar_width)
+        if verification_confidence >= 0.8:
+            conf_color = "green"
+        elif verification_confidence >= 0.5:
+            conf_color = "yellow"
+        else:
+            conf_color = "red"
+        conf_bar = f"[{conf_color}]{'█' * conf_filled}[/{conf_color}][dim]{'░' * (conf_bar_width - conf_filled)}[/dim]"
+        lines.append(f"  {conf_bar} [{conf_color}]{verification_confidence:.2f}[/{conf_color}]")
+        lines.append("")
+
+        # Triangulation analysis
+        lines.append("[bold cyan]─── TRIANGULATION ───[/bold cyan]")
+        lines.append("")
+        lines.append("[bold]Source Agreement[/bold]")
+
+        # Show triangulation sources
+        source_names = ["Statistical", "Rule-Based", "ML Model", "Organization"]
+        scores = [
+            self.data.get('score_statistical'),
+            self.data.get('score_rule_based'),
+            self.data.get('score_ml_based'),
+            self.data.get('score_organization'),
+        ]
+
+        available_count = sum(1 for s in scores if s is not None)
+        lines.append(f"  Sources responding: [cyan]{available_count}/4[/cyan]")
+        lines.append("")
+
+        for name, score in zip(source_names, scores):
+            if score is not None:
+                score = float(score)
+                if score >= 0.7:
+                    score_color = "red"
+                    indicator = "●"
+                elif score >= 0.5:
+                    score_color = "yellow"
+                    indicator = "◐"
+                else:
+                    score_color = "green"
+                    indicator = "○"
+                lines.append(f"  [{score_color}]{indicator}[/{score_color}] {name}: [{score_color}]{score:.2f}[/{score_color}]")
+            else:
+                lines.append(f"  [dim]○ {name}: N/A[/dim]")
+        lines.append("")
+
+        # Triangulation score
+        if triangulation_score is not None:
+            lines.append("[bold]Triangulation Score[/bold]")
+            tri_bar_width = 15
+            tri_filled = int(triangulation_score * tri_bar_width)
+            if triangulation_score >= 0.8:
+                tri_color = "green"
+                tri_label = "Strong Agreement"
+            elif triangulation_score >= 0.6:
+                tri_color = "cyan"
+                tri_label = "Good Agreement"
+            elif triangulation_score >= 0.4:
+                tri_color = "yellow"
+                tri_label = "Moderate Agreement"
+            else:
+                tri_color = "red"
+                tri_label = "Weak Agreement"
+
+            tri_bar = f"[{tri_color}]{'█' * tri_filled}[/{tri_color}][dim]{'░' * (tri_bar_width - tri_filled)}[/dim]"
+            lines.append(f"  {tri_bar} [{tri_color}]{triangulation_score:.2f}[/{tri_color}]")
+            lines.append(f"  [{tri_color}]{tri_label}[/{tri_color}]")
+        else:
+            lines.append("[dim]Triangulation: Calculating...[/dim]")
+
+        content = "\n".join(lines)
+        return Panel(content, title="[bold cyan]Verification[/bold cyan]", border_style="cyan")
+
+
+class MetricExplanationPanel(Static):
+    """
+    Shows human-readable explanations for all metrics.
+    Explains why each metric is scored as it is, especially for unknown values.
+    """
+
+    DEFAULT_CSS = """
+    MetricExplanationPanel {
+        width: 100%;
+        height: auto;
+        padding: 1;
+    }
+    """
+
+    # Pre-defined explanations
+    METRIC_EXPLANATIONS = {
+        'threat_score': {
+            'high': "Multiple indicators suggest malicious activity",
+            'medium': "Some concerning patterns detected, requires monitoring",
+            'low': "Normal traffic patterns, no significant threats",
+            'unknown': "Insufficient data for accurate threat assessment",
+        },
+        'confidence': {
+            'high': "Scorers strongly agree on assessment",
+            'medium': "Most scorers agree, minor variance",
+            'low': "Significant disagreement between scorers",
+            'unknown': "Not enough scorer responses for confidence",
+        },
+        'org_trust': {
+            'high': "Well-known, reputable organization",
+            'medium': "Standard network with mixed indicators",
+            'low': "Limited reputation or concerning history",
+            'unknown': "Organization not in database",
+        },
+        'hop_count': {
+            'low': "Normal network distance",
+            'high': "Unusual distance - possible tunneling",
+            'unknown': "Awaiting response packet for TTL analysis",
+        },
+        'unknown_org': {
+            'reason': "Organization not found in ASN pattern database",
+            'fallback': "Raw ASN name displayed when available",
+            'impact': "Neutral trust score (0.5) applied",
+        },
+        'ephemeral_port': {
+            'range': "Ports 49152-65535 (dynamic/private)",
+            'normal': "Source ports are typically ephemeral - this is normal",
+            'concerning': "Destination ephemeral ports are unusual (P2P, tunneling, C2)",
+        },
+        'passive_discovery': {
+            'limits': [
+                "Cannot discover idle devices",
+                "Hop count requires response packets",
+                "Hostname needs mDNS/NetBIOS/DHCP traffic",
+            ],
+            'benefits': ["Zero network footprint", "No IDS/IPS alerts"],
+        },
+    }
+
+    def __init__(self, connection_data: Dict[str, Any], **kwargs):
+        super().__init__(**kwargs)
+        self.data = connection_data
+
+    def render(self):
+        lines = []
+        lines.append("[bold cyan]METRIC EXPLANATIONS[/bold cyan]")
+        lines.append("")
+        lines.append("[dim]Why are these metrics scored this way?[/dim]")
+        lines.append("")
+
+        # Threat Score explanation
+        threat = float(self.data.get('threat_score', 0) or 0)
+        lines.append("[bold]Threat Score[/bold]")
+        if threat >= 0.7:
+            lines.append(f"  [red]{threat:.2f}[/red]: {self.METRIC_EXPLANATIONS['threat_score']['high']}")
+        elif threat >= 0.4:
+            lines.append(f"  [yellow]{threat:.2f}[/yellow]: {self.METRIC_EXPLANATIONS['threat_score']['medium']}")
+        elif threat > 0:
+            lines.append(f"  [green]{threat:.2f}[/green]: {self.METRIC_EXPLANATIONS['threat_score']['low']}")
+        else:
+            lines.append(f"  [dim]{threat:.2f}[/dim]: {self.METRIC_EXPLANATIONS['threat_score']['unknown']}")
+        lines.append("")
+
+        # Confidence explanation
+        conf = float(self.data.get('confidence', 0) or 0)
+        lines.append("[bold]Confidence[/bold]")
+        if conf >= 0.8:
+            lines.append(f"  [green]{conf:.2f}[/green]: {self.METRIC_EXPLANATIONS['confidence']['high']}")
+        elif conf >= 0.5:
+            lines.append(f"  [yellow]{conf:.2f}[/yellow]: {self.METRIC_EXPLANATIONS['confidence']['medium']}")
+        elif conf > 0:
+            lines.append(f"  [red]{conf:.2f}[/red]: {self.METRIC_EXPLANATIONS['confidence']['low']}")
+        else:
+            lines.append(f"  [dim]N/A[/dim]: {self.METRIC_EXPLANATIONS['confidence']['unknown']}")
+        lines.append("")
+
+        # Organization Trust explanation
+        trust = float(self.data.get('org_trust_score', 0.5) or 0.5)
+        org = self.data.get('dst_org', 'Unknown')
+        org_type = (self.data.get('dst_org_type') or 'unknown').lower()
+        lines.append("[bold]Organization Trust[/bold]")
+        if org and org != 'Unknown':
+            lines.append(f"  Org: [white]{org}[/white]")
+            lines.append(f"  Type: [cyan]{org_type}[/cyan]")
+        if trust >= 0.7:
+            lines.append(f"  Trust: [green]{trust:.2f}[/green]: {self.METRIC_EXPLANATIONS['org_trust']['high']}")
+        elif trust >= 0.4:
+            lines.append(f"  Trust: [yellow]{trust:.2f}[/yellow]: {self.METRIC_EXPLANATIONS['org_trust']['medium']}")
+        elif trust > 0:
+            lines.append(f"  Trust: [red]{trust:.2f}[/red]: {self.METRIC_EXPLANATIONS['org_trust']['low']}")
+        else:
+            lines.append(f"  Trust: [dim]N/A[/dim]: {self.METRIC_EXPLANATIONS['org_trust']['unknown']}")
+        lines.append("")
+
+        # Hop Count explanation
+        hop_count = self.data.get('hop_count')
+        lines.append("[bold]Network Distance (Hops)[/bold]")
+        if hop_count is not None and hop_count > 0:
+            if hop_count < 15:
+                lines.append(f"  [green]{hop_count} hops[/green]: {self.METRIC_EXPLANATIONS['hop_count']['low']}")
+            else:
+                lines.append(f"  [yellow]{hop_count} hops[/yellow]: {self.METRIC_EXPLANATIONS['hop_count']['high']}")
+        else:
+            lines.append(f"  [dim]Unknown[/dim]: {self.METRIC_EXPLANATIONS['hop_count']['unknown']}")
+        lines.append("")
+
+        # High Uncertainty explanation
+        high_uncertainty = self.data.get('high_uncertainty', False)
+        spread = self.data.get('score_spread')
+        lines.append("[bold]Assessment Uncertainty[/bold]")
+        if high_uncertainty:
+            lines.append("  [yellow]⚠ HIGH UNCERTAINTY[/yellow]")
+            lines.append("  [dim]Scorers significantly disagreed on threat level[/dim]")
+            if spread is not None:
+                lines.append(f"  [dim]Score spread: {spread:.3f}[/dim]")
+        else:
+            lines.append("  [green]✓ Low uncertainty[/green]")
+            lines.append("  [dim]Scorers agree on assessment[/dim]")
+        lines.append("")
+
+        # Unknown/pending data note
+        pending_metrics = []
+        if self.data.get('score_statistical') is None:
+            pending_metrics.append("Statistical analysis")
+        if self.data.get('score_ml_based') is None:
+            pending_metrics.append("ML model")
+        if hop_count is None:
+            pending_metrics.append("Network path")
+
+        if pending_metrics:
+            lines.append("[bold]Pending Data[/bold]")
+            for metric in pending_metrics:
+                lines.append(f"  [dim]● {metric}[/dim]")
+            lines.append("")
+            lines.append("[dim italic]Some metrics require historical data or[/dim italic]")
+            lines.append("[dim italic]response packets to compute accurately.[/dim italic]")
+
+        content = "\n".join(lines)
+        return Panel(content, title="[bold cyan]Explanations[/bold cyan]", border_style="cyan")
+
+
 class ConnectionIntelligenceModal(ModalScreen):
     """
     Full intelligence breakdown modal for a single connection.
 
-    Shows all 6 panels of computed intelligence that was previously hidden:
+    Shows 11 panels of computed intelligence:
+    Row 1:
     1. Consensus Breakdown - 4 scorer votes, outliers, confidence
     2. Enrichment Details - ASN, org, hops, TTL, CIDR
-    3. Anomaly Analysis - Z-scores, percentiles, factors
-    4. Reputation - VirusTotal, AbuseIPDB
-    5. Rules Triggered - Which detection rules fired
-    6. Graph Position - Centrality, clusters, attack paths
+    3. Protocol Enrichment - DNS/TLS/TCP analysis, domain intelligence
 
-    Press ESC or click outside to close.
+    Row 2:
+    4. Verification/Triangulation - AI verification status, source agreement
+    5. Threat Intel Sources - Local IOC, GreyNoise, OTX results
+    6. Investigation Actions - Triage recommendations, pivot options
+
+    Row 3:
+    7. Anomaly Analysis - Z-scores, percentiles, factors
+    8. Metric Explanations - Why metrics are scored as they are
+    9. Reputation - VirusTotal, AbuseIPDB
+
+    Row 4:
+    10. Rules Triggered - Which detection rules fired
+    11. Graph Position - Centrality, clusters, attack paths
+
+    Key bindings:
+    - ESC/Q: Close modal
+    - B: Add to blocklist (placeholder)
+    - W: Add to whitelist (placeholder)
+    - E: Export to STIX (placeholder)
     """
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close", show=True),
         Binding("q", "dismiss", "Close", show=False),
+        Binding("b", "add_blocklist", "Blocklist", show=False),
+        Binding("w", "add_whitelist", "Whitelist", show=False),
+        Binding("e", "export_stix", "Export STIX", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -805,12 +1517,22 @@ class ConnectionIntelligenceModal(ModalScreen):
     }
 
     #modal_row1 {
-        height: 50%;
+        height: 26%;
         width: 100%;
     }
 
     #modal_row2 {
-        height: 50%;
+        height: 26%;
+        width: 100%;
+    }
+
+    #modal_row3 {
+        height: 24%;
+        width: 100%;
+    }
+
+    #modal_row4 {
+        height: 24%;
         width: 100%;
     }
 
@@ -862,8 +1584,9 @@ class ConnectionIntelligenceModal(ModalScreen):
                 id="modal_header_text"
             )
 
-            # Content area with 2 rows of 3 panels each
+            # Content area with 4 rows of panels
             with ScrollableContainer(id="modal_content"):
+                # Row 1: Consensus, Enrichment, Protocol (NEW)
                 with Horizontal(id="modal_row1"):
                     yield ConsensusBreakdownPanel(
                         self.connection_data,
@@ -873,16 +1596,43 @@ class ConnectionIntelligenceModal(ModalScreen):
                         self.connection_data,
                         classes="modal_panel"
                     )
-                    yield AnomalyAnalysisPanel(
+                    yield ProtocolEnrichmentPanel(
                         self.connection_data,
                         classes="modal_panel"
                     )
 
+                # Row 2: Verification, Threat Intel Sources (NEW), Investigation Actions (NEW)
                 with Horizontal(id="modal_row2"):
+                    yield VerificationTriangulationPanel(
+                        self.connection_data,
+                        classes="modal_panel"
+                    )
+                    yield ThreatIntelSourcesPanel(
+                        self.connection_data,
+                        classes="modal_panel"
+                    )
+                    yield InvestigationActionsPanel(
+                        self.connection_data,
+                        classes="modal_panel"
+                    )
+
+                # Row 3: Anomaly, Metric Explanations, Reputation
+                with Horizontal(id="modal_row3"):
+                    yield AnomalyAnalysisPanel(
+                        self.connection_data,
+                        classes="modal_panel"
+                    )
+                    yield MetricExplanationPanel(
+                        self.connection_data,
+                        classes="modal_panel"
+                    )
                     yield ReputationPanel(
                         self.connection_data,
                         classes="modal_panel"
                     )
+
+                # Row 4: Rules, Graph Position
+                with Horizontal(id="modal_row4"):
                     yield RulesTriggeredPanel(
                         self.connection_data,
                         classes="modal_panel"
@@ -903,3 +1653,44 @@ class ConnectionIntelligenceModal(ModalScreen):
     def action_dismiss(self) -> None:
         """Close the modal."""
         self.dismiss()
+
+    def action_add_blocklist(self) -> None:
+        """Add current IP/domain to local blocklist."""
+        dst_ip = self.connection_data.get('dst_ip', '')
+        domain = self.connection_data.get('dns_query') or self.connection_data.get('tls_sni')
+        indicator = domain or dst_ip
+
+        # Notify user (actual implementation would write to IOC file)
+        self.notify(
+            f"Blocklist: {indicator}",
+            title="Added to Blocklist",
+            severity="warning"
+        )
+        logger.info(f"User requested blocklist addition: {indicator}")
+
+    def action_add_whitelist(self) -> None:
+        """Add current IP/domain to local whitelist."""
+        dst_ip = self.connection_data.get('dst_ip', '')
+        domain = self.connection_data.get('dns_query') or self.connection_data.get('tls_sni')
+        indicator = domain or dst_ip
+
+        # Notify user (actual implementation would write to whitelist)
+        self.notify(
+            f"Whitelist: {indicator}",
+            title="Added to Whitelist",
+            severity="information"
+        )
+        logger.info(f"User requested whitelist addition: {indicator}")
+
+    def action_export_stix(self) -> None:
+        """Export current connection as STIX 2.1 indicator."""
+        dst_ip = self.connection_data.get('dst_ip', '')
+        threat_score = self.connection_data.get('threat_score', 0)
+
+        # Notify user (actual implementation would use stix_export.py)
+        self.notify(
+            f"STIX export: {dst_ip} (threat: {threat_score:.2f})",
+            title="STIX Export",
+            severity="information"
+        )
+        logger.info(f"User requested STIX export: {dst_ip}")

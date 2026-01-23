@@ -8,10 +8,12 @@ Approach:
 - Network distance weighting (hops)
 - Trust inheritance from organization classification
 - Multi-hop path anomaly detection
+- Domain-ASN correlation (SNI verification)
 """
 
+import re
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Set
 
 from .scorer_base import ScorerAssessment, ThreatScorer
 
@@ -87,6 +89,56 @@ class OrganizationScorer(ThreatScorer):
         (30, 0.25),    # Extremely far - highly suspicious routing
     ]
 
+    # Domain to expected organization mapping for SNI-ASN correlation
+    # Maps domain patterns to expected ASN owners
+    DOMAIN_ASN_MAP = {
+        # Google
+        "google.com": {"Google", "GOOGLE"},
+        "googleapis.com": {"Google", "GOOGLE"},
+        "gstatic.com": {"Google", "GOOGLE"},
+        "youtube.com": {"Google", "GOOGLE"},
+        "googlevideo.com": {"Google", "GOOGLE"},
+        # Microsoft
+        "microsoft.com": {"Microsoft", "MICROSOFT"},
+        "windows.com": {"Microsoft", "MICROSOFT"},
+        "azure.com": {"Microsoft", "MICROSOFT"},
+        "live.com": {"Microsoft", "MICROSOFT"},
+        "office.com": {"Microsoft", "MICROSOFT"},
+        "outlook.com": {"Microsoft", "MICROSOFT"},
+        # Amazon/AWS
+        "amazon.com": {"Amazon", "AMAZON"},
+        "amazonaws.com": {"Amazon", "AMAZON"},
+        "cloudfront.net": {"Amazon", "AMAZON", "Cloudflare", "CLOUDFLARE"},  # CDN may vary
+        # Cloudflare (CDN - expected to host many domains)
+        "cloudflare.com": {"Cloudflare", "CLOUDFLARE"},
+        "cloudflare-dns.com": {"Cloudflare", "CLOUDFLARE"},
+        # Apple
+        "apple.com": {"Apple", "APPLE"},
+        "icloud.com": {"Apple", "APPLE"},
+        # Facebook/Meta
+        "facebook.com": {"Facebook", "META", "FACEBOOK"},
+        "fbcdn.net": {"Facebook", "META", "FACEBOOK"},
+        "instagram.com": {"Facebook", "META", "FACEBOOK"},
+        # Other major services
+        "github.com": {"GitHub", "GITHUB", "Microsoft", "MICROSOFT"},
+        "twitter.com": {"Twitter", "TWITTER", "X Corp"},
+        "linkedin.com": {"LinkedIn", "LINKEDIN", "Microsoft", "MICROSOFT"},
+    }
+
+    # CDN organizations that legitimately host many domains
+    CDN_ORGANIZATIONS = {
+        "Cloudflare", "CLOUDFLARE",
+        "Akamai", "AKAMAI",
+        "Fastly", "FASTLY",
+        "Amazon CloudFront", "AMAZON",
+        "Google Cloud CDN", "GOOGLE",
+        "Microsoft Azure CDN", "MICROSOFT",
+        "StackPath", "STACKPATH",
+        "KeyCDN", "KEYCDN",
+        "Imperva", "IMPERVA",
+        "Sucuri", "SUCURI",
+    }
+
     def __init__(self, asn_service: Optional['ASNLookup'] = None):
         """
         Initialize organization scorer
@@ -106,6 +158,100 @@ class OrganizationScorer(ThreatScorer):
 
         # Cache for repeated lookups in same session
         self._session_cache: Dict[str, ASNInfo] = {}
+
+    def _get_expected_orgs_for_domain(self, domain: str) -> Optional[Set[str]]:
+        """
+        Get expected organizations for a domain based on known mappings
+
+        Returns:
+            Set of expected organization names, or None if domain not mapped
+        """
+        if not domain:
+            return None
+
+        domain_lower = domain.lower()
+
+        # Direct lookup
+        for mapped_domain, orgs in self.DOMAIN_ASN_MAP.items():
+            if domain_lower == mapped_domain or domain_lower.endswith("." + mapped_domain):
+                return orgs
+
+        return None
+
+    def _is_cdn_organization(self, org_name: str) -> bool:
+        """Check if organization is a known CDN (legitimately hosts many domains)"""
+        if not org_name:
+            return False
+
+        org_upper = org_name.upper()
+        for cdn in self.CDN_ORGANIZATIONS:
+            if cdn.upper() in org_upper or org_upper in cdn.upper():
+                return True
+        return False
+
+    def _check_domain_asn_correlation(
+        self,
+        domain: str,
+        asn_org: str,
+        asn_name: str,
+    ) -> tuple[bool, Optional[str], float]:
+        """
+        Check if domain matches expected ASN ownership
+
+        This helps detect:
+        - Potential MITM attacks (domain resolving to unexpected network)
+        - CDN/proxy usage (legitimate but noteworthy)
+        - Domain fronting or suspicious hosting
+
+        Args:
+            domain: TLS SNI or DNS query domain
+            asn_org: Organization name from ASN lookup
+            asn_name: ASN name from lookup
+
+        Returns:
+            Tuple of (is_mismatch, reason, score_adjustment)
+            - is_mismatch: True if domain doesn't match expected owner
+            - reason: Human-readable reason for mismatch
+            - score_adjustment: Score adjustment (-0.1 to +0.2)
+        """
+        if not domain:
+            return False, None, 0.0
+
+        # Get expected organizations for this domain
+        expected_orgs = self._get_expected_orgs_for_domain(domain)
+
+        if expected_orgs is None:
+            # Domain not in our mapping - can't verify
+            return False, None, 0.0
+
+        # Check if current ASN org matches any expected
+        org_match = False
+        if asn_org:
+            asn_org_upper = asn_org.upper()
+            for expected in expected_orgs:
+                if expected.upper() in asn_org_upper or asn_org_upper in expected.upper():
+                    org_match = True
+                    break
+
+        if not org_match and asn_name:
+            asn_name_upper = asn_name.upper()
+            for expected in expected_orgs:
+                if expected.upper() in asn_name_upper or asn_name_upper in expected.upper():
+                    org_match = True
+                    break
+
+        if org_match:
+            # Domain matches expected ASN - good sign
+            return False, None, -0.05  # Slight trust boost
+
+        # Mismatch detected - check if it's a CDN (legitimate)
+        if self._is_cdn_organization(asn_org) or self._is_cdn_organization(asn_name):
+            # CDN hosting - legitimate but noteworthy
+            return True, f"cdn_hosted({asn_org or asn_name})", 0.0  # No score change
+
+        # Genuine mismatch - potentially suspicious
+        expected_list = ", ".join(list(expected_orgs)[:3])
+        return True, f"expected({expected_list}),got({asn_org or asn_name})", 0.15
 
     def assess(
         self, dst_ip: str, threat_intel: Dict, geo_data: Dict, connection_metadata: Dict
@@ -204,13 +350,45 @@ class OrganizationScorer(ThreatScorer):
             # Could add CIDR-specific reputation here
 
         # Factor 7: Cross-reference with geo risk
-        country = geo_data.get("country_code", "") or (asn_info.country if asn_info else "")
+        country = geo_data.get("country", "") or (asn_info.country if asn_info else "")
         if country and asn_info:
             # Mismatch between ASN country and geo country is suspicious
             if asn_info.country and country != asn_info.country:
                 base_score += 0.1
                 factors.append(f"GEO_ASN_MISMATCH({country} vs {asn_info.country})")
                 features["geo_asn_mismatch"] = True
+
+        # Factor 8: Domain-ASN correlation (SNI/DNS verification)
+        tls_sni = connection_metadata.get("tls_sni")
+        dns_query = connection_metadata.get("dns_query")
+        domain = tls_sni or dns_query
+
+        if domain and asn_info:
+            is_mismatch, mismatch_reason, score_adj = self._check_domain_asn_correlation(
+                domain=domain,
+                asn_org=asn_info.organization,
+                asn_name=asn_info.asn_name,
+            )
+
+            features["domain"] = domain
+            features["domain_source"] = "tls_sni" if tls_sni else "dns"
+
+            if is_mismatch:
+                features["domain_asn_mismatch"] = True
+                features["domain_asn_mismatch_reason"] = mismatch_reason
+
+                if score_adj > 0:
+                    # Suspicious mismatch
+                    base_score += score_adj
+                    factors.append(f"DOMAIN_ASN_MISMATCH({mismatch_reason})")
+                elif score_adj == 0 and "cdn_hosted" in (mismatch_reason or ""):
+                    # CDN hosting - note but don't penalize
+                    factors.append(f"CDN_HOSTED({domain})")
+                    features["cdn_hosted"] = True
+            elif score_adj < 0:
+                # Domain matches expected owner - trust boost
+                base_score += score_adj
+                features["domain_asn_verified"] = True
 
         # Clamp score
         final_score = max(0.0, min(1.0, base_score))

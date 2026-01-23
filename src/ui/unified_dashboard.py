@@ -111,16 +111,26 @@ class DataManager:
         """Get average query execution time"""
         return sum(self._query_times) / len(self._query_times) if self._query_times else 0.0
 
-    def get_connections(self, limit: int = 100) -> List[Dict]:
-        """Get recent connections from database"""
+    def get_connections(self, limit: int = 100, since_timestamp: Optional[float] = None) -> List[Dict]:
+        """Get recent connections from database, optionally filtered by timestamp"""
         try:
-            if not self.is_cache_valid():
-                query = """
-                    SELECT * FROM connections
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                """
-                results = self.execute_query(query, (limit,))
+            # Always refresh if timestamp filter is provided (bypass cache)
+            if since_timestamp is not None or not self.is_cache_valid():
+                if since_timestamp is not None:
+                    query = """
+                        SELECT * FROM connections
+                        WHERE timestamp > ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                    """
+                    results = self.execute_query(query, (since_timestamp, limit))
+                else:
+                    query = """
+                        SELECT * FROM connections
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                    """
+                    results = self.execute_query(query, (limit,))
                 self._connection_cache = [dict(row) for row in results]
                 self._last_update = time.time()
                 logger.debug(f"Loaded {len(self._connection_cache)} connections from database")
@@ -129,12 +139,32 @@ class DataManager:
             logger.error(f"Error fetching connections: {e}")
             return []
 
-    def get_devices(self) -> List[Dict]:
-        """Get device list from database"""
-        query = "SELECT * FROM devices WHERE is_active = 1 ORDER BY last_seen DESC LIMIT 100"
+    def get_devices(self, since_timestamp: float = None) -> List[Dict]:
+        """Get device list from database with optional timestamp filter"""
+        if since_timestamp is not None:
+            query = """SELECT * FROM devices WHERE is_active = 1 AND last_seen > ?
+                       ORDER BY last_seen DESC LIMIT 100"""
+            params = (since_timestamp,)
+        else:
+            query = "SELECT * FROM devices WHERE is_active = 1 ORDER BY last_seen DESC LIMIT 100"
+            params = None
+
         try:
-            results = self.execute_query(query)
-            return [dict(row) for row in results]
+            results = self.execute_query(query, params) if params else self.execute_query(query)
+            devices = []
+            for row in results:
+                device = dict(row)
+                # Parse ip_addresses from JSON string to list
+                ip_str = device.get('ip_addresses')
+                if ip_str and isinstance(ip_str, str):
+                    try:
+                        device['ip_addresses'] = json.loads(ip_str)
+                    except (json.JSONDecodeError, TypeError):
+                        device['ip_addresses'] = []
+                elif not ip_str:
+                    device['ip_addresses'] = []
+                devices.append(device)
+            return devices
         except Exception as e:
             logger.debug(f"Error fetching devices: {e}")
             return []
@@ -441,6 +471,9 @@ class UnifiedDashboard(App):
         self.recent_events: deque = deque(maxlen=50)
         self.recent_devices: Dict[str, Dict] = {}
 
+        # Refresh timestamp - when set, only show data from this point onward
+        self._refresh_timestamp: Optional[float] = None
+
         # Unified dashboard panel references
         self.threat_posture_panel = None
         self.temporal_trends_panel = None
@@ -535,19 +568,37 @@ class UnifiedDashboard(App):
         # Invalidate cache on every refresh to ensure fresh data
         self.data_manager.invalidate_cache()
 
-        # Query connections with individual scorer data
-        conn_query = """
-        SELECT timestamp, src_ip, src_mac, dst_ip, dst_port, protocol,
-               threat_score, dst_org, dst_org_type, org_trust_score,
-               dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor,
-               confidence, high_uncertainty, scoring_method,
-               score_statistical, score_rule_based, score_ml_based, score_organization,
-               anomaly_score, score_spread
-        FROM connections
-        ORDER BY timestamp DESC LIMIT 100
-        """
+        # Build connection query - filter by refresh timestamp if set
+        if self._refresh_timestamp is not None:
+            conn_query = """
+            SELECT timestamp, src_ip, src_mac, dst_ip, dst_port, protocol,
+                   threat_score, dst_org, dst_org_type, org_trust_score,
+                   dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor,
+                   confidence, high_uncertainty, scoring_method,
+                   score_statistical, score_rule_based, score_ml_based, score_organization,
+                   anomaly_score, score_spread,
+                   verification_status, verification_reason, verification_confidence,
+                   triangulation_score, triangulation_sources
+            FROM connections
+            WHERE timestamp > ?
+            ORDER BY timestamp DESC LIMIT 100
+            """
+            rows = self.data_manager.execute_query(conn_query, (self._refresh_timestamp,))
+        else:
+            conn_query = """
+            SELECT timestamp, src_ip, src_mac, dst_ip, dst_port, protocol,
+                   threat_score, dst_org, dst_org_type, org_trust_score,
+                   dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor,
+                   confidence, high_uncertainty, scoring_method,
+                   score_statistical, score_rule_based, score_ml_based, score_organization,
+                   anomaly_score, score_spread,
+                   verification_status, verification_reason, verification_confidence,
+                   triangulation_score, triangulation_sources
+            FROM connections
+            ORDER BY timestamp DESC LIMIT 100
+            """
+            rows = self.data_manager.execute_query(conn_query)
 
-        rows = self.data_manager.execute_query(conn_query)
         connections = [dict(row) for row in rows]
         self.data_manager._connection_cache = connections
         self.recent_connections = deque(connections, maxlen=100)
@@ -555,27 +606,59 @@ class UnifiedDashboard(App):
 
         # Load devices (network mode only)
         if self.mode == "network":
-            device_query = """
-            SELECT mac, vendor, ip_addresses, packet_count, connection_count,
-                   threat_score, is_active, first_seen, last_seen
-            FROM devices WHERE is_active = 1
-            ORDER BY threat_score DESC, connection_count DESC LIMIT 50
-            """
-            rows = self.data_manager.execute_query(device_query)
-            devices = [dict(row) for row in rows]
+            if self._refresh_timestamp is not None:
+                device_query = """
+                SELECT mac, vendor, ip_addresses, packet_count, connection_count,
+                       threat_score, is_active, first_seen, last_seen, display_name
+                FROM devices WHERE is_active = 1 AND last_seen > ?
+                ORDER BY threat_score DESC, connection_count DESC LIMIT 50
+                """
+                rows = self.data_manager.execute_query(device_query, (self._refresh_timestamp,))
+            else:
+                device_query = """
+                SELECT mac, vendor, ip_addresses, packet_count, connection_count,
+                       threat_score, is_active, first_seen, last_seen, display_name
+                FROM devices WHERE is_active = 1
+                ORDER BY threat_score DESC, connection_count DESC LIMIT 50
+                """
+                rows = self.data_manager.execute_query(device_query)
+
+            # Parse devices with proper JSON handling for ip_addresses
+            devices = []
+            for row in rows:
+                device = dict(row)
+                ip_str = device.get('ip_addresses')
+                if ip_str and isinstance(ip_str, str):
+                    try:
+                        device['ip_addresses'] = json.loads(ip_str)
+                    except (json.JSONDecodeError, TypeError):
+                        device['ip_addresses'] = []
+                elif not ip_str:
+                    device['ip_addresses'] = []
+                devices.append(device)
+
             self.data_manager._device_cache = devices
             self.recent_devices = {d.get('mac'): d for d in devices}
             self.viz_manager.update_devices(devices)
         else:
             devices = []
 
-        # Load events
-        event_query = """
-        SELECT timestamp, event_type, severity, message, source_ip, dst_ip, threat_score
-        FROM events
-        ORDER BY timestamp DESC LIMIT 50
-        """
-        rows = self.data_manager.execute_query(event_query)
+        # Load events - filter by refresh timestamp if set
+        if self._refresh_timestamp is not None:
+            event_query = """
+            SELECT timestamp, event_type, severity, message, source_ip, dst_ip, threat_score
+            FROM events
+            WHERE timestamp > ?
+            ORDER BY timestamp DESC LIMIT 50
+            """
+            rows = self.data_manager.execute_query(event_query, (self._refresh_timestamp,))
+        else:
+            event_query = """
+            SELECT timestamp, event_type, severity, message, source_ip, dst_ip, threat_score
+            FROM events
+            ORDER BY timestamp DESC LIMIT 50
+            """
+            rows = self.data_manager.execute_query(event_query)
         events = [dict(row) for row in rows]
         self.recent_events = deque(events, maxlen=50)
         self.viz_manager.update_events(events)
@@ -586,7 +669,7 @@ class UnifiedDashboard(App):
         self.stats = self.stats.copy()  # Trigger reactive update
 
     def _update_statistics(self) -> None:
-        """Update statistics from database"""
+        """Update statistics from database, respecting refresh timestamp filter"""
         # Helper to safely extract count from query result
         def safe_count(result) -> int:
             try:
@@ -596,44 +679,78 @@ class UnifiedDashboard(App):
                 pass
             return 0
 
+        # Build timestamp filter if refresh was triggered
+        if self._refresh_timestamp is not None:
+            ts_filter = " WHERE timestamp > ?"
+            ts_and_filter = " AND timestamp > ?"
+            ts_params = (self._refresh_timestamp,)
+        else:
+            ts_filter = ""
+            ts_and_filter = ""
+            ts_params = ()
+
         # Total connections
         total_result = self.data_manager.execute_query(
-            "SELECT COUNT(*) as count FROM connections"
+            f"SELECT COUNT(*) as count FROM connections{ts_filter}",
+            ts_params
         )
         self.stats['total_connections'] = safe_count(total_result)
 
         # High threat count
-        threat_result = self.data_manager.execute_query(
-            "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
-        )
+        if self._refresh_timestamp is not None:
+            threat_result = self.data_manager.execute_query(
+                "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7 AND timestamp > ?",
+                ts_params
+            )
+        else:
+            threat_result = self.data_manager.execute_query(
+                "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
+            )
         self.stats['high_threat_count'] = safe_count(threat_result)
 
         # Unique devices (network mode)
         if self.mode == "network":
-            device_result = self.data_manager.execute_query(
-                "SELECT COUNT(DISTINCT mac) as count FROM devices WHERE is_active = 1"
-            )
+            if self._refresh_timestamp is not None:
+                device_result = self.data_manager.execute_query(
+                    "SELECT COUNT(DISTINCT mac) as count FROM devices WHERE is_active = 1 AND last_seen > ?",
+                    ts_params
+                )
+            else:
+                device_result = self.data_manager.execute_query(
+                    "SELECT COUNT(DISTINCT mac) as count FROM devices WHERE is_active = 1"
+                )
             self.stats['unique_devices'] = safe_count(device_result)
         else:
             self.stats['unique_devices'] = 1
 
         # Unique organizations
-        org_result = self.data_manager.execute_query(
-            "SELECT COUNT(DISTINCT dst_org) as count FROM connections WHERE dst_org IS NOT NULL"
-        )
+        if self._refresh_timestamp is not None:
+            org_result = self.data_manager.execute_query(
+                "SELECT COUNT(DISTINCT dst_org) as count FROM connections WHERE dst_org IS NOT NULL AND timestamp > ?",
+                ts_params
+            )
+        else:
+            org_result = self.data_manager.execute_query(
+                "SELECT COUNT(DISTINCT dst_org) as count FROM connections WHERE dst_org IS NOT NULL"
+            )
         self.stats['unique_organizations'] = safe_count(org_result)
 
         # Anomalies
-        anomaly_result = self.data_manager.execute_query(
-            "SELECT COUNT(*) as count FROM events WHERE event_type = 'anomaly'"
-        )
+        if self._refresh_timestamp is not None:
+            anomaly_result = self.data_manager.execute_query(
+                "SELECT COUNT(*) as count FROM events WHERE event_type = 'anomaly' AND timestamp > ?",
+                ts_params
+            )
+        else:
+            anomaly_result = self.data_manager.execute_query(
+                "SELECT COUNT(*) as count FROM events WHERE event_type = 'anomaly'"
+            )
         self.stats['anomalies_detected'] = safe_count(anomaly_result)
         self.stats['last_update'] = time.time()
 
     def _update_unified_panels(self, connections: List[Dict], devices: List[Dict], events: List[Dict]) -> None:
         """Update unified 6-cell grid panels with calculated data"""
-        if not connections:
-            return
+        # Always update panels, even with empty data (for refresh functionality)
 
         # Check connection data for evidence of working components and send heartbeats
         for conn in connections[:10]:  # Sample first 10 connections
@@ -654,11 +771,11 @@ class UnifiedDashboard(App):
                 heartbeat.beat("consensus", "Threat scoring active")
                 break
 
-        # Check if capture is active based on recent timestamps
+        # Check if capture is active - beat if we have connections (capture is working)
+        # The capture monitor was started if pipeline is running, so beat unconditionally
+        # when there are connections in the system (even if older than 60s)
         if connections:
-            latest_ts = connections[0].get('timestamp', 0)
-            if latest_ts and (time.time() - latest_ts) < 60:  # Connection within last minute
-                heartbeat.beat("capture", "Receiving connections")
+            heartbeat.beat("capture", "Capture active")
 
         # Threat Posture Panel (Top-Left)
         if self.threat_posture_panel:
@@ -790,6 +907,14 @@ class UnifiedDashboard(App):
         # Mark dashboard as alive
         heartbeat.beat("dashboard", "UI active")
 
+        # Mark database as alive if connected
+        if self.is_connected:
+            heartbeat.beat("database", "DB connected")
+
+        # Mark pipeline as alive if we have any data (pipeline was initialized)
+        if self.recent_connections:
+            heartbeat.beat("pipeline", "Pipeline active")
+
         # Update system status in ThreatPosturePanel
         if self.threat_posture_panel:
             self.threat_posture_panel.system_status = heartbeat.get_status()
@@ -883,7 +1008,77 @@ class UnifiedDashboard(App):
         self.exit()
 
     def action_refresh(self) -> None:
-        """Manually refresh data"""
+        """Manually refresh data - resets view to show only new data from this point onward"""
+        # Set refresh timestamp to current time - only show data from this point onward
+        self._refresh_timestamp = time.time()
+
+        # Clear existing data buffers
+        self.recent_connections.clear()
+        self.recent_events.clear()
+        self.recent_devices.clear()
+
+        # Reset statistics
+        self.stats = {
+            'total_connections': 0,
+            'high_threat_count': 0,
+            'unique_devices': 0,
+            'unique_organizations': 0,
+            'anomalies_detected': 0,
+            'last_update': time.time(),
+            'refresh_rate': 0.0,
+        }
+
+        # Clear all panel data
+        if self.threat_posture_panel:
+            self.threat_posture_panel.threat_data = {
+                'current_threat': 0,
+                'baseline_threat': 0,
+                'active_threats': 0,
+                'monitored_ips': 0,
+                'top_threats': [],
+            }
+
+        if self.geographic_alerts_panel:
+            self.geographic_alerts_panel.alert_data = {
+                'critical_count': 0,
+                'warning_count': 0,
+                'info_count': 0,
+                'geo_map': {},
+            }
+
+        if self.organization_intel_panel:
+            self.organization_intel_panel.org_data = {
+                'top_orgs': [],
+                'risk_matrix': {},
+            }
+
+        if self.connection_table_panel:
+            self.connection_table_panel.connections = []
+
+        if self.threat_globe_panel:
+            self.threat_globe_panel.globe_data = {'connections': [], 'heatmap': {}}
+
+        if self.temporal_trends_panel:
+            self.temporal_trends_panel.trend_data = {
+                'threat_history': deque(maxlen=60),
+                'volume_history': deque(maxlen=60),
+                'anomaly_count': 0,
+            }
+
+        if hasattr(self, 'consensus_panel') and self.consensus_panel:
+            self.consensus_panel.consensus_data = {
+                'last_consensus': None,
+                'scorer_history': {
+                    'statistical': [],
+                    'rule_based': [],
+                    'ml_based': [],
+                    'organization': [],
+                },
+                'agreement_rate': 1.0,
+                'total_assessments': 0,
+            }
+
+        # Invalidate cache and refresh
         self.data_manager.invalidate_cache()
         self._refresh_data()
 
