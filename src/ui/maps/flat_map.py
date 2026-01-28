@@ -25,9 +25,9 @@ from .utils import (
     get_threat_color,
     get_org_color,
     int_to_roman,
-    miller_projection,
     is_unknown_location,
 )
+import math
 
 try:
     from src.ui.geo_data import GeoData
@@ -54,9 +54,12 @@ class FlatWorldMap(BaseMap):
 
     MAP_TYPE = "FLAT"
 
-    # Size constraints
-    MIN_WIDTH = 60
-    MIN_HEIGHT = 15
+    # Size constraints (minimal to fit any panel size)
+    MIN_WIDTH = 20
+    MIN_HEIGHT = 6
+
+    # Reserved rows for legend/UI elements (keeps southern regions visible)
+    LEGEND_ROWS = 1
 
     def __init__(self, width: int = 120, height: int = 30,
                  projection: str = "miller"):
@@ -89,9 +92,17 @@ class FlatWorldMap(BaseMap):
 
         logger.debug(f"FlatWorldMap initialized: {width}x{height}, geo={bool(self._geo)}")
 
+    @property
+    def map_height(self) -> int:
+        """Effective map height excluding legend rows."""
+        return max(self.MIN_HEIGHT - self.LEGEND_ROWS, self.height - self.LEGEND_ROWS)
+
     def latlon_to_screen(self, lat: float, lon: float) -> Tuple[int, int]:
         """
         Convert latitude/longitude to screen coordinates using Miller projection.
+
+        Uses land-centric centering and cropped latitude range (MIN_LAT to MAX_LAT)
+        for better landmass visualization.
 
         Args:
             lat: Latitude (-90 to 90)
@@ -100,13 +111,39 @@ class FlatWorldMap(BaseMap):
         Returns:
             Tuple of (x, y) screen coordinates
         """
-        norm_x, norm_y = miller_projection(lat, lon)
+        # Land-centric longitude mapping
+        adjusted_lon = lon - self.CENTER_LON + self.LON_RANGE / 2
+        # Normalize to 0-LON_RANGE range
+        while adjusted_lon < 0:
+            adjusted_lon += 360
+        while adjusted_lon > self.LON_RANGE:
+            adjusted_lon -= 360
+
+        norm_x = adjusted_lon / self.LON_RANGE
+
+        # Cropped Miller projection for Y
+        # Clamp latitude to our display range
+        lat_clamped = max(self.MIN_LAT, min(self.MAX_LAT, lat))
+        lat_rad = math.radians(lat_clamped)
+
+        # Miller projection Y values at our latitude bounds
+        max_lat_rad = math.radians(self.MAX_LAT)
+        min_lat_rad = math.radians(self.MIN_LAT)
+        y_at_max = 1.25 * math.log(math.tan(math.pi / 4 + 0.4 * max_lat_rad))
+        y_at_min = 1.25 * math.log(math.tan(math.pi / 4 + 0.4 * min_lat_rad))
+        y_range = y_at_max - y_at_min
+
+        # Current latitude in Miller projection space
+        y_raw = 1.25 * math.log(math.tan(math.pi / 4 + 0.4 * lat_rad))
+
+        # Normalize to [0, 1] within our cropped range
+        norm_y = (y_at_max - y_raw) / y_range
 
         x = round(norm_x * (self.width - 1))
-        y = round(norm_y * (self.height - 1))
+        y = round(norm_y * (self.map_height - 1))
 
         x = max(0, min(self.width - 1, x))
-        y = max(0, min(self.height - 1, y))
+        y = max(0, min(self.map_height - 1, y))
 
         return (x, y)
 
@@ -175,13 +212,14 @@ class FlatWorldMap(BaseMap):
 
         content = self._canvas_to_text(canvas)
 
-        content.append("\n")
+        # Stats line (no extra newline - canvas already ends with newline)
         content.append(self.format_stats_line(), style="dim")
 
         return Panel(
             content,
             title="[bold cyan]World Threat Map[/bold cyan]",
-            border_style="cyan"
+            border_style="cyan",
+            padding=0,  # No internal padding - use full space
         )
 
     def _render_fallback(self) -> Panel:
@@ -227,46 +265,66 @@ class FlatWorldMap(BaseMap):
         return canvas
 
     def _draw_ocean(self, canvas: List[List]) -> None:
-        """Fill canvas with uniform ocean."""
-        for y in range(self.height):
+        """Fill map area with uniform ocean (reserve legend rows)."""
+        for y in range(self.map_height):
             for x in range(self.width):
                 canvas[y][x] = Text('~', style="dim blue")
 
     def _draw_land(self, canvas: List[List]) -> None:
         """Draw land masses with single character."""
-        for y in range(self.height):
+        for y in range(self.map_height):
             for x in range(self.width):
                 lat, lon = self._screen_to_latlon(x, y)
                 if self._geo.is_land_at(lat, lon):
                     canvas[y][x] = Text('\u2592', style="dim green")  # ▒
 
+    # Land-centric map: shift center to minimize Pacific Ocean visibility
+    # Center on 10°E puts Atlantic in center, splits Pacific at edges
+    CENTER_LON = 10  # Degrees East - optimal for showing populated continents
+    LON_RANGE = 340  # Show 340° of longitude (crops 20° of empty Pacific)
+
+    # Latitude range: crop to -65° to focus on populated landmasses
+    # This removes most of empty Southern Ocean while keeping key landmasses
+    MIN_LAT = -65  # Southern limit (includes South America, Australia, New Zealand)
+    MAX_LAT = 85   # Northern limit (includes Arctic regions)
+
     def _screen_to_latlon(self, x: int, y: int) -> Tuple[float, float]:
         """
         Convert screen coordinates back to latitude/longitude.
 
-        Inverse of the Miller projection used in latlon_to_screen.
+        Uses land-centric centering and cropped latitude range for better
+        landmass visualization (MIN_LAT to MAX_LAT instead of full ±85°).
         """
-        # Inverse of x normalization
+        # Land-centric longitude mapping
+        # Maps screen x to longitude range centered on CENTER_LON
         norm_x = x / max(1, self.width - 1)
-        lon = norm_x * 360 - 180
+        half_range = self.LON_RANGE / 2
+        lon = self.CENTER_LON - half_range + norm_x * self.LON_RANGE
+        # Normalize to -180 to 180
+        while lon > 180:
+            lon -= 360
+        while lon < -180:
+            lon += 360
 
-        # Inverse of Miller y projection
-        norm_y = y / max(1, self.height - 1)
+        # Cropped Miller projection for latitude
+        # Maps screen y to latitude range [MAX_LAT, MIN_LAT] using Miller projection
+        norm_y = y / max(1, self.map_height - 1)
 
-        # Miller projection constants
-        MILLER_MAX_LAT = 85
-        MILLER_MAX_LAT_RAD = math.radians(MILLER_MAX_LAT)
-        MILLER_Y_MAX = 1.25 * math.log(math.tan(math.pi / 4 + 0.4 * MILLER_MAX_LAT_RAD))
-        MILLER_Y_RANGE = 2 * MILLER_Y_MAX
+        # Miller projection Y values at our latitude bounds
+        max_lat_rad = math.radians(self.MAX_LAT)
+        min_lat_rad = math.radians(self.MIN_LAT)
+        y_at_max = 1.25 * math.log(math.tan(math.pi / 4 + 0.4 * max_lat_rad))
+        y_at_min = 1.25 * math.log(math.tan(math.pi / 4 + 0.4 * min_lat_rad))
+        y_range = y_at_max - y_at_min
 
-        # Inverse: y_raw = MILLER_Y_MAX - norm_y * MILLER_Y_RANGE
-        y_raw = MILLER_Y_MAX - norm_y * MILLER_Y_RANGE
+        # Interpolate in Miller projection space
+        y_raw = y_at_max - norm_y * y_range
 
-        # Inverse of Miller formula: lat = 2.5 * (atan(exp(y_raw / 1.25)) - pi/4)
+        # Inverse Miller formula
         try:
             lat_rad = 2.5 * (math.atan(math.exp(y_raw / 1.25)) - math.pi / 4)
             lat = math.degrees(lat_rad)
-            lat = max(-85, min(85, lat))
+            lat = max(self.MIN_LAT, min(self.MAX_LAT, lat))
         except (ValueError, OverflowError):
             lat = 0
 
@@ -280,7 +338,7 @@ class FlatWorldMap(BaseMap):
         """Draw latitude/longitude grid (fallback when no geo data)."""
         for lat in range(-60, 90, 30):
             _, y = self.latlon_to_screen(lat, 0)
-            if 0 <= y < self.height:
+            if 0 <= y < self.map_height:
                 for x in range(0, self.width, 4):
                     if canvas[y][x] == ' ':
                         canvas[y][x] = Text('\u00b7', style="dim")
@@ -288,7 +346,7 @@ class FlatWorldMap(BaseMap):
         for lon in range(-150, 180, 30):
             x, _ = self.latlon_to_screen(0, lon)
             if 0 <= x < self.width:
-                for y in range(0, self.height, 2):
+                for y in range(0, self.map_height, 2):
                     if canvas[y][x] == ' ':
                         canvas[y][x] = Text('\u00b7', style="dim")
 
@@ -308,7 +366,7 @@ class FlatWorldMap(BaseMap):
         x, y = float(x0), float(y0)
         for _ in range(int(steps) + 1):
             ix, iy = round(x), round(y)
-            if 0 <= ix < self.width and 0 <= iy < self.height:
+            if 0 <= ix < self.width and 0 <= iy < self.map_height:
                 canvas[iy][ix] = Text(char, style=style)
             x += x_inc
             y += y_inc
@@ -330,7 +388,7 @@ class FlatWorldMap(BaseMap):
         for marker, count in clustered:
             x, y = self.latlon_to_screen(marker.lat, marker.lon)
 
-            if 0 <= x < self.width and 0 <= y < self.height:
+            if 0 <= x < self.width and 0 <= y < self.map_height:
                 char = get_threat_char(marker.threat_score)
                 color = get_threat_color(marker.threat_score)
 
@@ -390,7 +448,7 @@ class FlatWorldMap(BaseMap):
             style = get_threat_color(threat.threat_score)
             for i, ch in enumerate(label):
                 lx = label_x + i
-                if 0 <= lx < self.width and 0 <= label_y < self.height:
+                if 0 <= lx < self.width and 0 <= label_y < self.map_height:
                     canvas[label_y][lx] = Text(ch, style=f"dim {style}")
                     occupied.add((lx, label_y))
 

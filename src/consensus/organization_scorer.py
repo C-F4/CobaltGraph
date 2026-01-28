@@ -4,11 +4,13 @@ Scores connections based on ASN, organization type, and network path analysis
 
 Approach:
 - Organization reputation scoring (cloud providers vs. bullet-proof hosting)
-- ASN-based threat profiling
+- ASN-based threat profiling (30+ high-risk, 15+ elevated-risk, 40+ trusted)
 - Network distance weighting (hops)
 - Trust inheritance from organization classification
 - Multi-hop path anomaly detection
-- Domain-ASN correlation (SNI verification)
+- Domain-ASN correlation (SNI verification) with 60+ domain mappings
+- CDN organization detection (20+ CDN patterns)
+- ASN abuse pattern detection in org names
 """
 
 import re
@@ -32,50 +34,176 @@ class OrganizationScorer(ThreatScorer):
     Organization and ASN-based threat scorer
 
     Features:
-    - ASN reputation scoring
-    - Organization type classification
+    - ASN reputation scoring (expanded databases)
+    - Organization type classification (including budget VPS, bulletproof)
     - TTL-based hop analysis
     - Network infrastructure profiling
-    - Known bad actor ASN detection
+    - Known bad actor ASN detection (30+ high-risk ASNs)
+    - CDN detection for legitimate multi-tenant hosting
+    - ASN abuse pattern matching
     """
 
     # Known high-risk ASNs (bullet-proof hosting, malware infrastructure)
-    # These ASNs have historically been associated with malicious activity
+    # Expanded from 4 to 30+ ASNs
     HIGH_RISK_ASNS = {
-        # Bullet-proof hosting
-        44477,   # STARK-INDUSTRIES
-        213371,  # EVOCATIVE
-        202425,  # IP VOLUME INC
-        14061,   # DigitalOcean (abused but not malicious)
-        # Note: Add more based on your threat intel feeds
+        # Bullet-proof hosting providers
+        44477,   # STARK-INDUSTRIES - notorious bulletproof
+        213371,  # EVOCATIVE - abuse reports
+        202425,  # IP VOLUME INC - bulletproof
+        49981,   # WORLDSTREAM - bulletproof hosting NL
+        209711,  # MUV BILISIM - Turkish bulletproof
+        208323,  # STARK-INDUSTRIES
+        62904,   # EONIX - bulletproof
+        60117,   # HOST SAILOR - bulletproof
+        50613,   # Micfo LLC - bulletproof
+        57043,   # HOSTKEY B.V. - bulletproof
+        # Russian/CIS bulletproof infrastructure
+        197414,  # RETN
+        48666,   # SELECTEL - Russian hosting (abuse)
+        44050,   # PIN-AS - bulletproof
+        29119,   # SERVIHOSTING
+        35913,   # DEDIPATH-LLC
+        36351,   # SOFTLAYER (IBM) - high abuse
+        # Asian bulletproof
+        45899,   # VNPT - Vietnam (high abuse)
+        4134,    # CHINANET-BACKBONE
+        17623,   # CNCGROUP-SZ - China (high abuse)
+        # Known malware C2 infrastructure
+        136987,  # QUICKPACKET
+        46844,   # SHARKTECH
+        53667,   # FRANTECH/PONYNET - bulletproof
+        16276,   # OVH - high abuse volume
+        # Offshore bulletproof
+        56630,   # MELBIKOMAS-AS - bulletproof
+        200019,  # ALEXHOST - Moldova bulletproof
+        39572,   # DATACAMP LIMITED
+        42473,   # ANEXIA-AS
+        61317,   # ASDETUK - bulletproof
+        # Crypto/darknet associated
+        53264,   # FERAL - known abuse
+        25369,   # HYDRA Communications
+    }
+
+    # Elevated risk ASNs - budget VPS, residential proxies, frequent abuse
+    ELEVATED_RISK_ASNS = {
+        14061,   # DigitalOcean - legitimate but heavily abused
+        63949,   # Linode/Akamai - legitimate but abused
+        20473,   # AS-CHOOPA/Vultr - legitimate but abused
+        46664,   # VolumeDrive - budget VPS
+        29802,   # HVC-AS HIVELOCITY - budget
+        19551,   # INCAPSULA - mixed traffic
+        206264,  # Amarutu Technology - residential proxy
+        9009,    # M247 - VPN/proxy services
+        21859,   # ZEN-ECN - budget hosting
+        51167,   # CONTABO - budget VPS DE
+        24940,   # HETZNER-AS - budget hosting
+        12876,   # SCALEWAY - budget cloud
+        132203,  # TENCENT-NET-AP-CN - Chinese cloud
+        37963,   # CNNIC-ALIBABA-CN - Alibaba Cloud
     }
 
     # Highly trusted ASNs (major tech infrastructure)
+    # Expanded from 10 to 40+ ASNs
     TRUSTED_ASNS = {
+        # Google ecosystem
         15169,   # GOOGLE
-        8075,    # MICROSOFT-CORP-MSN-AS-BLOCK
-        16509,   # AMAZON-02 (AWS)
-        13335,   # CLOUDFLARE
-        32934,   # FACEBOOK (Meta)
-        20940,   # AKAMAI
-        6185,    # APPLE
-        14618,   # AMAZON-AES (AWS US East)
         16591,   # GOOGLE-FIBER
+        19527,   # GOOGLE-2
+        36040,   # GOOGLE-GGLS2
+        # Microsoft ecosystem
+        8075,    # MICROSOFT-CORP-MSN-AS-BLOCK
+        8068,    # MICROSOFT-CORP-AS
+        8069,    # MICROSOFT-CORP-AS
+        3598,    # MICROSOFT-CORP-AS
+        8070,    # MICROSOFT-CORP-AS
+        # Amazon ecosystem
+        16509,   # AMAZON-02 (AWS)
+        14618,   # AMAZON-AES (AWS US East)
+        7224,    # AMAZON-02
+        38895,   # AMAZON-02-AP
+        # Cloudflare
+        13335,   # CLOUDFLARE
+        209242,  # CLOUDFLARE
+        # Meta/Facebook
+        32934,   # FACEBOOK (Meta)
+        63293,   # FB-CORP
+        # Apple
+        6185,    # APPLE-AUSTIN
+        714,     # APPLE-ENGINEERING
+        # CDN providers
+        20940,   # AKAMAI
+        16625,   # AKAMAI-AS
+        21342,   # AKAMAI-AS2
+        54113,   # FASTLY
+        26008,   # FASTLY
+        # GitHub/Dev platforms
         36459,   # GITHUB
+        25291,   # SYSNETWORKS-AS/Gandi
+        # Major ISPs/Telecoms (US)
+        7018,    # ATT-INTERNET4
+        7922,    # COMCAST-7922
+        20001,   # TWC-20001-PACWEST
+        209,     # CENTURYLINK
+        # Major ISPs (EU)
+        3320,    # DTAG - Deutsche Telekom
+        5400,    # BT-UK
+        3215,    # ORANGE - France
+        # DNS providers
+        19281,   # QUAD9
+        393234,  # QUAD9-SECONDARY
+        # Financial infrastructure
+        26415,   # VERISIGN
+        # Other major services
+        2906,    # NETFLIX
+        22822,   # LLNW/Limelight
+        46489,   # TWITCH
+        19679,   # DROPBOX
+        6939,    # HURRICANE (HE.net) - infrastructure
     }
 
-    # Organization type risk multipliers
+    # Infrastructure ASNs - DNS providers, NTP, CAs (should not be penalized)
+    INFRASTRUCTURE_ASNS = {
+        # DNS root/authoritative
+        19281,   # QUAD9
+        393234,  # QUAD9-SECONDARY
+        13335,   # CLOUDFLARE (DNS)
+        15169,   # GOOGLE (DNS)
+        # NTP providers
+        6939,    # HURRICANE-AS
+        # Certificate authorities
+        26415,   # VERISIGN
+        1273,    # COMODO/SECTIGO
+    }
+
+    # Organization type risk multipliers (expanded with new categories)
     ORG_TYPE_RISK = {
-        "cloud": 0.0,           # Cloud providers - neutral (legitimate + abuse)
-        "cdn": -0.15,           # CDNs - slightly lower risk
-        "hosting": 0.15,        # Hosting - slightly elevated (abuse potential)
+        "cloud": 0.0,             # Cloud providers - neutral (legitimate + abuse)
+        "cdn": -0.15,             # CDNs - slightly lower risk
+        "hosting": 0.15,          # Standard hosting - slightly elevated
+        "budget_vps": 0.25,       # Budget VPS providers - higher abuse (NEW)
+        "bulletproof": 0.50,      # Bulletproof hosting - very high risk (NEW)
         "isp_residential": -0.1,  # Residential ISP - normal traffic
-        "isp_business": -0.1,   # Business ISP - normal traffic
-        "enterprise": -0.2,     # Major enterprises - lower risk
-        "education": -0.15,     # Education - lower risk
-        "government": -0.1,     # Government - context dependent
-        "tor_proxy": 0.35,      # Tor/VPN - elevated risk (anonymization)
-        "unknown": 0.1,         # Unknown - slight risk elevation
+        "isp_business": -0.1,     # Business ISP - normal traffic
+        "enterprise": -0.2,       # Major enterprises - lower risk
+        "education": -0.15,       # Education - lower risk
+        "government": -0.1,       # Government - context dependent
+        "tor_proxy": 0.40,        # Tor exit/VPN - elevated risk (anonymization)
+        "vpn": 0.30,              # Commercial VPN - elevated (NEW)
+        "proxy": 0.35,            # Proxy services - elevated (NEW)
+        "residential_proxy": 0.45, # Residential proxies - high risk (NEW)
+        "unknown": 0.15,          # Unknown - slight risk elevation
+        "infrastructure": -0.20,  # DNS/NTP/CA infrastructure (NEW)
+    }
+
+    # Bulletproof hosting indicators in org names
+    BULLETPROOF_INDICATORS = {
+        "bulletproof", "offshore", "anonymous", "untraceable", "abuse-proof",
+        "privacy", "dmca ignore", "no logs", "anonymous hosting",
+    }
+
+    # Budget VPS indicators in org names
+    BUDGET_VPS_INDICATORS = {
+        "vps", "cheap", "budget", "discount", "low cost",
     }
 
     # Hop-based risk adjustments
@@ -90,53 +218,121 @@ class OrganizationScorer(ThreatScorer):
     ]
 
     # Domain to expected organization mapping for SNI-ASN correlation
-    # Maps domain patterns to expected ASN owners
+    # Expanded from 20 to 60+ domains
     DOMAIN_ASN_MAP = {
-        # Google
+        # Google ecosystem
         "google.com": {"Google", "GOOGLE"},
         "googleapis.com": {"Google", "GOOGLE"},
         "gstatic.com": {"Google", "GOOGLE"},
         "youtube.com": {"Google", "GOOGLE"},
         "googlevideo.com": {"Google", "GOOGLE"},
-        # Microsoft
+        "gmail.com": {"Google", "GOOGLE"},
+        "googlemail.com": {"Google", "GOOGLE"},
+        "android.com": {"Google", "GOOGLE"},
+        "googleusercontent.com": {"Google", "GOOGLE"},
+        "firebaseio.com": {"Google", "GOOGLE"},
+        "gvt1.com": {"Google", "GOOGLE"},
+        "gvt2.com": {"Google", "GOOGLE"},
+        # Microsoft ecosystem
         "microsoft.com": {"Microsoft", "MICROSOFT"},
         "windows.com": {"Microsoft", "MICROSOFT"},
         "azure.com": {"Microsoft", "MICROSOFT"},
         "live.com": {"Microsoft", "MICROSOFT"},
         "office.com": {"Microsoft", "MICROSOFT"},
         "outlook.com": {"Microsoft", "MICROSOFT"},
-        # Amazon/AWS
+        "office365.com": {"Microsoft", "MICROSOFT"},
+        "microsoftonline.com": {"Microsoft", "MICROSOFT"},
+        "msn.com": {"Microsoft", "MICROSOFT"},
+        "bing.com": {"Microsoft", "MICROSOFT"},
+        "msedge.net": {"Microsoft", "MICROSOFT"},
+        "windowsupdate.com": {"Microsoft", "MICROSOFT"},
+        "sharepoint.com": {"Microsoft", "MICROSOFT"},
+        "onedrive.com": {"Microsoft", "MICROSOFT"},
+        "visualstudio.com": {"Microsoft", "MICROSOFT"},
+        "xbox.com": {"Microsoft", "MICROSOFT"},
+        "skype.com": {"Microsoft", "MICROSOFT"},
+        "linkedin.com": {"LinkedIn", "LINKEDIN", "Microsoft", "MICROSOFT"},
+        "github.com": {"GitHub", "GITHUB", "Microsoft", "MICROSOFT"},
+        # Amazon/AWS ecosystem
         "amazon.com": {"Amazon", "AMAZON"},
         "amazonaws.com": {"Amazon", "AMAZON"},
-        "cloudfront.net": {"Amazon", "AMAZON", "Cloudflare", "CLOUDFLARE"},  # CDN may vary
+        "cloudfront.net": {"Amazon", "AMAZON", "Cloudflare", "CLOUDFLARE"},
+        "awsstatic.com": {"Amazon", "AMAZON"},
+        "elasticbeanstalk.com": {"Amazon", "AMAZON"},
         # Cloudflare (CDN - expected to host many domains)
         "cloudflare.com": {"Cloudflare", "CLOUDFLARE"},
         "cloudflare-dns.com": {"Cloudflare", "CLOUDFLARE"},
-        # Apple
+        # Apple ecosystem
         "apple.com": {"Apple", "APPLE"},
         "icloud.com": {"Apple", "APPLE"},
-        # Facebook/Meta
+        "icloud-content.com": {"Apple", "APPLE"},
+        "mzstatic.com": {"Apple", "APPLE"},
+        "itunes.com": {"Apple", "APPLE"},
+        # Meta/Facebook ecosystem
         "facebook.com": {"Facebook", "META", "FACEBOOK"},
+        "fb.com": {"Facebook", "META", "FACEBOOK"},
         "fbcdn.net": {"Facebook", "META", "FACEBOOK"},
         "instagram.com": {"Facebook", "META", "FACEBOOK"},
-        # Other major services
-        "github.com": {"GitHub", "GITHUB", "Microsoft", "MICROSOFT"},
-        "twitter.com": {"Twitter", "TWITTER", "X Corp"},
-        "linkedin.com": {"LinkedIn", "LINKEDIN", "Microsoft", "MICROSOFT"},
+        "whatsapp.com": {"Facebook", "META", "FACEBOOK"},
+        "whatsapp.net": {"Facebook", "META", "FACEBOOK"},
+        "messenger.com": {"Facebook", "META", "FACEBOOK"},
+        # Twitter/X
+        "twitter.com": {"Twitter", "TWITTER", "X Corp", "X CORP"},
+        "x.com": {"Twitter", "TWITTER", "X Corp", "X CORP"},
+        "twimg.com": {"Twitter", "TWITTER", "X Corp", "X CORP"},
+        # Other major tech
+        "netflix.com": {"Netflix", "NETFLIX"},
+        "nflxvideo.net": {"Netflix", "NETFLIX"},
+        "spotify.com": {"Spotify", "SPOTIFY"},
+        "twitch.tv": {"Twitch", "TWITCH", "Amazon", "AMAZON"},
+        "discord.com": {"Discord", "DISCORD", "Cloudflare", "CLOUDFLARE"},
+        "discordapp.com": {"Discord", "DISCORD", "Cloudflare", "CLOUDFLARE"},
+        "reddit.com": {"Reddit", "REDDIT", "Fastly", "FASTLY"},
+        "wikipedia.org": {"Wikimedia", "WIKIMEDIA"},
+        "dropbox.com": {"Dropbox", "DROPBOX"},
+        # Enterprise software
+        "salesforce.com": {"Salesforce", "SALESFORCE"},
+        "slack.com": {"Slack", "SLACK", "Salesforce", "SALESFORCE"},
+        "zoom.us": {"Zoom", "ZOOM"},
+        "atlassian.com": {"Atlassian", "ATLASSIAN"},
+        "atlassian.net": {"Atlassian", "ATLASSIAN"},
+        "okta.com": {"Okta", "OKTA"},
+        "auth0.com": {"Auth0", "AUTH0", "Okta", "OKTA"},
+        "zendesk.com": {"Zendesk", "ZENDESK"},
+        "servicenow.com": {"ServiceNow", "SERVICENOW"},
+        # Payment processors
+        "paypal.com": {"PayPal", "PAYPAL"},
+        "stripe.com": {"Stripe", "STRIPE"},
+        # Security vendors
+        "virustotal.com": {"Google", "GOOGLE"},
+        "crowdstrike.com": {"CrowdStrike", "CROWDSTRIKE"},
     }
 
     # CDN organizations that legitimately host many domains
+    # Expanded from 10 to 20+ CDN patterns
     CDN_ORGANIZATIONS = {
-        "Cloudflare", "CLOUDFLARE",
-        "Akamai", "AKAMAI",
+        # Major CDNs
+        "Cloudflare", "CLOUDFLARE", "CF-",
+        "Akamai", "AKAMAI", "AKAMAI-AS",
         "Fastly", "FASTLY",
-        "Amazon CloudFront", "AMAZON",
-        "Google Cloud CDN", "GOOGLE",
-        "Microsoft Azure CDN", "MICROSOFT",
-        "StackPath", "STACKPATH",
+        "Amazon CloudFront", "AMAZON", "AWS", "AMAZON-02",
+        "Google Cloud CDN", "GOOGLE", "GCP",
+        "Microsoft Azure CDN", "MICROSOFT", "AZURE",
+        # Specialized CDNs
+        "StackPath", "STACKPATH", "HIGHWINDS",
         "KeyCDN", "KEYCDN",
-        "Imperva", "IMPERVA",
+        "Limelight", "LIMELIGHT", "LLNW",
+        "Verizon Digital Media", "EDGECAST",
+        "Bunny CDN", "BUNNY",
+        "jsDelivr", "JSDELIVR",
+        "unpkg", "UNPKG",
+        # Security/WAF CDNs
+        "Imperva", "IMPERVA", "INCAPSULA",
         "Sucuri", "SUCURI",
+        "Cloudflare Magic Transit",
+        # Streaming CDNs
+        "Netflix Open Connect", "NFLX",
+        "Twitch", "TWITCH",
     }
 
     def __init__(self, asn_service: Optional['ASNLookup'] = None):
@@ -188,6 +384,96 @@ class OrganizationScorer(ThreatScorer):
             if cdn.upper() in org_upper or org_upper in cdn.upper():
                 return True
         return False
+
+    def _detect_abuse_patterns(self, org_name: str, asn_name: str) -> tuple[Optional[str], float]:
+        """
+        Detect abuse patterns in organization/ASN names
+
+        Looks for bulletproof hosting indicators, budget VPS patterns,
+        and other suspicious naming conventions.
+
+        Args:
+            org_name: Organization name from ASN lookup
+            asn_name: ASN name from lookup
+
+        Returns:
+            Tuple of (detected_pattern, score_adjustment)
+        """
+        if not org_name and not asn_name:
+            return None, 0.0
+
+        combined = f"{org_name or ''} {asn_name or ''}".lower()
+
+        # Check for bulletproof hosting indicators
+        for indicator in self.BULLETPROOF_INDICATORS:
+            if indicator in combined:
+                return f"bulletproof_indicator({indicator})", 0.35
+
+        # Check for budget VPS indicators
+        for indicator in self.BUDGET_VPS_INDICATORS:
+            if indicator in combined:
+                return f"budget_vps_indicator({indicator})", 0.10
+
+        # Check for suspicious country indicators in org names
+        suspicious_country_terms = {"offshore", "panama", "seychelles", "belize"}
+        for term in suspicious_country_terms:
+            if term in combined:
+                return f"offshore_indicator({term})", 0.20
+
+        return None, 0.0
+
+    def _classify_org_type_enhanced(
+        self, asn: int, org_name: str, asn_name: str, base_org_type: str
+    ) -> tuple[str, float]:
+        """
+        Enhanced organization type classification
+
+        Uses ASN databases and name pattern matching to refine
+        the organization type classification.
+
+        Args:
+            asn: ASN number
+            org_name: Organization name
+            asn_name: ASN name
+            base_org_type: Base org type from ASN lookup
+
+        Returns:
+            Tuple of (refined_org_type, risk_modifier)
+        """
+        # Check ASN databases first (most reliable)
+        if asn in self.INFRASTRUCTURE_ASNS:
+            return "infrastructure", self.ORG_TYPE_RISK.get("infrastructure", -0.20)
+
+        if asn in self.HIGH_RISK_ASNS:
+            # Determine if bulletproof or just high abuse
+            abuse_pattern, _ = self._detect_abuse_patterns(org_name, asn_name)
+            if abuse_pattern and "bulletproof" in abuse_pattern:
+                return "bulletproof", self.ORG_TYPE_RISK.get("bulletproof", 0.50)
+            return "hosting", self.ORG_TYPE_RISK.get("hosting", 0.15) + 0.20
+
+        if asn in self.ELEVATED_RISK_ASNS:
+            return "budget_vps", self.ORG_TYPE_RISK.get("budget_vps", 0.25)
+
+        if asn in self.TRUSTED_ASNS:
+            # Could be CDN, cloud, or enterprise - keep base classification
+            return base_org_type, self.ORG_TYPE_RISK.get(base_org_type, -0.15)
+
+        # Check name patterns for VPN/proxy indicators
+        combined = f"{org_name or ''} {asn_name or ''}".lower()
+        vpn_indicators = {"vpn", "virtual private", "tunneling", "hide", "private internet"}
+        for indicator in vpn_indicators:
+            if indicator in combined:
+                return "vpn", self.ORG_TYPE_RISK.get("vpn", 0.30)
+
+        proxy_indicators = {"proxy", "residential", "mobile ip", "isp proxy"}
+        for indicator in proxy_indicators:
+            if indicator in combined:
+                if "residential" in combined:
+                    return "residential_proxy", self.ORG_TYPE_RISK.get("residential_proxy", 0.45)
+                return "proxy", self.ORG_TYPE_RISK.get("proxy", 0.35)
+
+        # Fall back to base classification
+        return base_org_type, self.ORG_TYPE_RISK.get(base_org_type, 0.1)
 
     def _check_domain_asn_correlation(
         self,
@@ -260,11 +546,13 @@ class OrganizationScorer(ThreatScorer):
         Organization-based threat assessment
 
         Analyzes:
-        1. ASN reputation (known good/bad ASNs)
-        2. Organization type (cloud, CDN, hosting, ISP)
+        1. ASN reputation (known good/bad/elevated ASNs)
+        2. Organization type (cloud, CDN, hosting, ISP, bulletproof, VPN, proxy)
         3. Trust score from classification
         4. TTL-based hop count
         5. Network path anomalies
+        6. ASN abuse pattern detection
+        7. Domain-ASN correlation
         """
         timestamp = time.time()
         features = {}
@@ -281,29 +569,46 @@ class OrganizationScorer(ThreatScorer):
         features["organization"] = asn_info.organization if asn_info else "Unknown"
         features["org_type"] = asn_info.org_type.value if asn_info else "unknown"
 
-        # Factor 1: ASN reputation
+        # Factor 1: ASN reputation (expanded with elevated risk)
         if asn_info and asn_info.asn > 0:
             if asn_info.asn in self.HIGH_RISK_ASNS:
-                base_score += 0.4
+                base_score += 0.45
                 factors.append(f"HIGH_RISK_ASN(AS{asn_info.asn})")
                 features["asn_reputation"] = "high_risk"
+            elif asn_info.asn in self.ELEVATED_RISK_ASNS:
+                base_score += 0.18
+                factors.append(f"ELEVATED_RISK_ASN(AS{asn_info.asn})")
+                features["asn_reputation"] = "elevated_risk"
+            elif asn_info.asn in self.INFRASTRUCTURE_ASNS:
+                base_score -= 0.15
+                factors.append(f"INFRASTRUCTURE_ASN(AS{asn_info.asn})")
+                features["asn_reputation"] = "infrastructure"
             elif asn_info.asn in self.TRUSTED_ASNS:
-                base_score -= 0.25
+                base_score -= 0.28
                 factors.append(f"TRUSTED_ASN(AS{asn_info.asn})")
                 features["asn_reputation"] = "trusted"
             else:
                 features["asn_reputation"] = "neutral"
 
-        # Factor 2: Organization type risk
+        # Factor 2: Enhanced organization type classification
         if asn_info:
-            org_type_str = asn_info.org_type.value if hasattr(asn_info.org_type, 'value') else str(asn_info.org_type)
-            risk_modifier = self.ORG_TYPE_RISK.get(org_type_str, 0.1)
+            base_org_type = asn_info.org_type.value if hasattr(asn_info.org_type, 'value') else str(asn_info.org_type)
+
+            # Use enhanced classification
+            refined_org_type, risk_modifier = self._classify_org_type_enhanced(
+                asn=asn_info.asn,
+                org_name=asn_info.organization,
+                asn_name=asn_info.asn_name,
+                base_org_type=base_org_type,
+            )
+
+            features["org_type_refined"] = refined_org_type
             base_score += risk_modifier
 
             if risk_modifier > 0.1:
-                factors.append(f"ORG_TYPE_ELEVATED({org_type_str})")
+                factors.append(f"ORG_TYPE_ELEVATED({refined_org_type})")
             elif risk_modifier < -0.1:
-                factors.append(f"ORG_TYPE_TRUSTED({org_type_str})")
+                factors.append(f"ORG_TYPE_TRUSTED({refined_org_type})")
 
             features["org_type_risk"] = risk_modifier
 

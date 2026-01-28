@@ -35,6 +35,7 @@ from .utils import (
     miller_projection,
 )
 from .key import render_compact_key, render_key_box
+from .manager import MapManager
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,18 @@ def create_map(map_type: str = 'flat', width: int = 120,
 
 
 __all__ = [
+    # Core classes
     'BaseMap',
     'ThreatMarker',
     'ConnectionArc',
+    # Map implementations
     'FlatWorldMap',
     'RotatingGlobe',
     'SimpleGlobe',
+    # Manager and factory
+    'MapManager',
     'create_map',
+    # Utilities
     'is_unknown_location',
     'int_to_roman',
     'get_threat_char',

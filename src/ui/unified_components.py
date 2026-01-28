@@ -1091,27 +1091,42 @@ class ThreatGlobePanel(Static):
         self.intel_map = None
         self.map_type = map_type
         self._unknown_ips: set = set()
+        self._last_size = (0, 0)  # Track size for resize detection
 
-        # Try to initialize intel map from refactored module
-        self._init_intel_map()
+        # Map will be initialized on first render when we know the size
+        # Don't initialize here with fixed dimensions
 
-    def _init_intel_map(self) -> None:
-        """Initialize intel map with fallback chain"""
+    def _init_intel_map(self, width: int = 80, height: int = 20) -> None:
+        """Initialize intel map with specified dimensions"""
         # Try consolidated maps module first
         try:
             from src.ui.maps import FlatWorldMap, RotatingGlobe, SimpleGlobe
 
             if self.map_type == "rotating":
-                self.intel_map = RotatingGlobe(width=60, height=15)
+                self.intel_map = RotatingGlobe(width=width, height=height)
             elif self.map_type == "simple":
-                self.intel_map = SimpleGlobe(width=60, height=15)
+                self.intel_map = SimpleGlobe(width=width, height=height)
             else:
-                self.intel_map = FlatWorldMap(width=60, height=15)
+                self.intel_map = FlatWorldMap(width=width, height=height)
             return
         except ImportError:
             pass
 
         self.intel_map = None
+
+    def on_resize(self, event) -> None:
+        """Handle panel resize - update map dimensions"""
+        new_width = event.size.width - 2  # Account for panel border
+        new_height = event.size.height - 3  # Account for panel border and title
+
+        if new_width > 20 and new_height > 5:
+            if self._last_size != (new_width, new_height):
+                self._last_size = (new_width, new_height)
+                if self.intel_map:
+                    self.intel_map.resize(new_width, new_height)
+                else:
+                    self._init_intel_map(new_width, new_height)
+                self.refresh()
 
     def watch_globe_data(self, new_data: dict) -> None:
         """Update globe when data changes"""
@@ -1156,6 +1171,11 @@ class ThreatGlobePanel(Static):
 
     def render(self):
         """Render threat globe"""
+        # Initialize map on first render if not done via resize
+        if self.intel_map is None and self._last_size == (0, 0):
+            # Use default size, will be resized when on_resize fires
+            self._init_intel_map(80, 20)
+
         if self.intel_map:
             try:
                 self.intel_map.update(0.05)

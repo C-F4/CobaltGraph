@@ -562,6 +562,25 @@ class GeoData:
             Point(6, 81), Point(8, 82), Point(10, 81), Point(10, 80),
         ]))
 
+        # Antarctica - visible portion within Miller projection bounds (capped at -85°)
+        # Simplified outline of the Antarctic continent
+        coastlines.append(Polygon('Antarctica', [
+            # Starting from Antarctic Peninsula (pointing toward South America)
+            Point(-63, -60), Point(-65, -58), Point(-68, -62), Point(-70, -60),
+            Point(-72, -65), Point(-74, -70), Point(-76, -75), Point(-78, -80),
+            # West Antarctica / Ross Sea region
+            Point(-80, -90), Point(-82, -100), Point(-84, -110), Point(-85, -120),
+            Point(-85, -130), Point(-85, -140), Point(-85, -150), Point(-84, -160),
+            Point(-82, -170), Point(-80, -175), Point(-78, 180), Point(-76, 175),
+            # East Antarctica
+            Point(-74, 170), Point(-72, 160), Point(-70, 150), Point(-68, 140),
+            Point(-66, 130), Point(-68, 120), Point(-70, 110), Point(-68, 100),
+            Point(-66, 90), Point(-68, 80), Point(-70, 70), Point(-68, 60),
+            Point(-66, 50), Point(-68, 40), Point(-70, 30), Point(-68, 20),
+            Point(-70, 10), Point(-72, 0), Point(-70, -10), Point(-68, -20),
+            Point(-70, -30), Point(-68, -40), Point(-66, -50), Point(-63, -60),
+        ]))
+
         return coastlines
 
     def _load_water_bodies(self) -> List[Polygon]:
@@ -633,6 +652,7 @@ class GeoData:
         land = set()
 
         # First pass: fill closed coastline polygons
+        # NOTE: Antarctica excluded - handled separately with minimal footprint
         closed_coastlines = [
             'Greenland', 'Australia', 'Tasmania', 'New Zealand North',
             'New Zealand South', 'Japan', 'Hokkaido', 'Sumatra', 'Borneo',
@@ -641,6 +661,9 @@ class GeoData:
         ]
 
         for coastline in self.coastlines:
+            # Skip Antarctica polygon - handled separately with minimal footprint
+            if coastline.name == 'Antarctica':
+                continue
             if coastline.name in closed_coastlines or coastline.is_closed():
                 if len(coastline.points) >= 3:
                     lats = [p.lat for p in coastline.points]
@@ -654,25 +677,72 @@ class GeoData:
                                 land.add((lat, lon))
 
         # Second pass: continental approximations for accurate shapes
-        # North America - contiguous US + Southern Canada
+        # North America - contiguous US + Southern Canada with proper coastal detail
         for lat in range(25, 55):
             if lat >= 49:
+                # US-Canada border region
                 west, east = -125, -52
-            elif lat >= 42:
+            elif lat >= 45:
+                # Great Lakes region - narrower in east
                 west, east = -125, -66
+            elif lat >= 42:
+                # Northern US
+                west, east = -124, -70
+            elif lat >= 38:
+                # Mid-Atlantic states
+                west, east = -124, -74
+            elif lat >= 35:
+                # Southern states
+                west, east = -122, -75
             elif lat >= 30:
-                west, east = -124, -75
-            else:
+                # Gulf states / Florida panhandle
                 west, east = -118, -80
+            elif lat >= 27:
+                # Florida peninsula (narrower)
+                west, east = -98, -80
+            else:
+                # Southern Florida tip
+                west, east = -82, -80
             for lon in range(west, east + 1):
-                # Exclude Gulf of Mexico interior
-                if 20 <= lat <= 28 and -96 <= lon <= -84:
+                # Exclude Gulf of Mexico (larger exclusion)
+                if 25 <= lat <= 30 and -97 <= lon <= -82:
                     continue
+                # Exclude Great Lakes (more precise - don't exclude Chicago)
+                # Lake Superior: lat 46-49, lon -92 to -84
+                # Lake Michigan: lat 42-46, lon -87 to -84
+                # Lake Huron: lat 43-46, lon -84 to -80
+                # Lake Erie: lat 41-43, lon -84 to -78
+                # Lake Ontario: lat 43-44, lon -80 to -76
+                if 46 <= lat <= 49 and -92 <= lon <= -84:
+                    continue  # Lake Superior
+                if 42 <= lat <= 46 and -87 <= lon <= -84:
+                    continue  # Lake Michigan (east of Chicago)
+                if 43 <= lat <= 46 and -84 <= lon <= -80:
+                    continue  # Lake Huron
+                if 41 <= lat <= 43 and -84 <= lon <= -78:
+                    continue  # Lake Erie
+                if 43 <= lat <= 44 and -80 <= lon <= -76:
+                    continue  # Lake Ontario
                 land.add((lat, lon))
 
-        # Northern Canada
-        for lat in range(55, 84):
-            if lat >= 75:
+        # Florida peninsula detail
+        for lat in range(25, 31):
+            if lat >= 29:
+                for lon in range(-88, -80):
+                    land.add((lat, lon))
+            elif lat >= 27:
+                for lon in range(-83, -80):
+                    land.add((lat, lon))
+            else:
+                for lon in range(-82, -80):
+                    land.add((lat, lon))
+
+        # Northern Canada and Canadian Arctic Archipelago
+        for lat in range(55, 86):
+            if lat >= 80:
+                # High Arctic islands (Ellesmere, etc.)
+                west, east = -120, -60
+            elif lat >= 75:
                 west, east = -130, -60
             elif lat >= 65:
                 west, east = -140, -55
@@ -684,8 +754,8 @@ class GeoData:
                     continue
                 land.add((lat, lon))
 
-        # Alaska
-        for lat in range(55, 72):
+        # Alaska (extend to Arctic coast)
+        for lat in range(55, 75):
             for lon in range(-170, -130):
                 land.add((lat, lon))
 
@@ -700,143 +770,654 @@ class GeoData:
             for lon in range(west, east + 1):
                 land.add((lat, lon))
 
-        # South America
+        # South America (with Brazilian bulge and Patagonia)
         for lat in range(-56, 13):
-            if lat >= 5:
-                west, east = -82, -34
-            elif lat >= -5:
-                west, east = -81, -35
-            elif lat >= -20:
+            if lat >= 8:  # Northern SA / Venezuela / Colombia
+                west, east = -82, -50
+            elif lat >= 2:  # Ecuador / Northern Brazil (widest)
+                west, east = -80, -35
+            elif lat >= -5:  # Amazon region / Brazilian bulge eastward
+                west, east = -78, -34
+            elif lat >= -12:  # Central Brazil / Peru
                 west, east = -78, -35
-            elif lat >= -40:
-                west, east = -73, -48
+            elif lat >= -18:  # Bolivia / Central-Southern Brazil
+                west, east = -72, -38
+            elif lat >= -25:  # Paraguay / Southern Brazil
+                west, east = -68, -42
+            elif lat >= -35:  # Argentina / Uruguay / Chile narrowing
+                west, east = -72, -52
+            elif lat >= -42:  # Patagonia
+                west, east = -73, -62
+            elif lat >= -52:  # Southern Patagonia
+                west, east = -75, -66
             else:
-                west, east = -75, -63
+                # Tierra del Fuego / Cape Horn region
+                west, east = -74, -65
             for lon in range(west, east + 1):
                 land.add((lat, lon))
 
-        # Europe - detailed land coverage
-        # Iberian Peninsula
+        # Extend Tierra del Fuego to Cape Horn (-56 to -58)
+        for lat in range(-58, -55):
+            for lon in range(-72, -66):
+                land.add((lat, lon))
+
+        # Europe - enhanced detail coverage
+        # Great Britain (separate from continental Europe)
+        for lat in range(50, 59):
+            if lat >= 57:  # Northern Scotland / Highlands
+                for lon in range(-7, -1):
+                    land.add((lat, lon))
+            elif lat >= 55:  # Scotland
+                for lon in range(-6, 0):
+                    land.add((lat, lon))
+            elif lat >= 53:  # Northern England / Wales
+                for lon in range(-5, 1):
+                    land.add((lat, lon))
+            elif lat >= 51:  # Southern England
+                for lon in range(-6, 2):
+                    land.add((lat, lon))
+            else:  # Cornwall / Kent
+                for lon in range(-6, 2):
+                    land.add((lat, lon))
+        # Ireland (island separate from Britain)
+        for lat in range(51, 56):
+            if lat >= 54:  # Northern Ireland / Donegal
+                for lon in range(-11, -6):
+                    land.add((lat, lon))
+            else:  # Southern Ireland
+                for lon in range(-11, -6):
+                    land.add((lat, lon))
+
+        # Iberian Peninsula (with better coastal definition)
         for lat in range(36, 44):
-            for lon in range(-10, 4):
-                land.add((lat, lon))
+            if lat <= 37:  # Southern Spain/Gibraltar
+                for lon in range(-9, 0):
+                    land.add((lat, lon))
+            elif lat <= 40:  # Central Spain/Portugal
+                for lon in range(-10, 4):
+                    land.add((lat, lon))
+            else:  # Northern Spain
+                for lon in range(-10, 4):
+                    land.add((lat, lon))
 
-        # France
+        # France (with better coastal definition)
         for lat in range(42, 52):
-            for lon in range(-5, 9):
+            if lat <= 44:  # Southern France
+                for lon in range(-2, 8):
+                    land.add((lat, lon))
+            elif lat <= 48:  # Central France
+                for lon in range(-5, 9):
+                    land.add((lat, lon))
+            else:  # Northern France
+                for lon in range(-5, 8):
+                    land.add((lat, lon))
+
+        # Benelux
+        for lat in range(49, 54):
+            for lon in range(2, 8):
                 land.add((lat, lon))
 
-        # Germany, Poland, etc.
-        for lat in range(47, 56):
-            for lon in range(5, 25):
+        # Germany
+        for lat in range(47, 55):
+            for lon in range(6, 15):
                 land.add((lat, lon))
 
-        # Italy
-        for lat in range(36, 48):
-            if 36 <= lat <= 38:
-                for lon in range(12, 19):  # Southern Italy
+        # Poland, Czech Republic
+        for lat in range(49, 55):
+            for lon in range(14, 24):
+                land.add((lat, lon))
+
+        # Austria, Switzerland, Hungary
+        for lat in range(46, 49):
+            for lon in range(6, 23):
+                land.add((lat, lon))
+
+        # Italy (boot shape with improved detail)
+        for lat in range(36, 47):
+            if lat == 36:  # Sicily (triangular)
+                for lon in range(13, 16):
                     land.add((lat, lon))
-            elif 38 <= lat <= 42:
-                for lon in range(9, 19):  # Central Italy
+            elif lat == 37:  # Sicily
+                for lon in range(12, 16):
                     land.add((lat, lon))
-            else:
-                for lon in range(7, 15):  # Northern Italy
+            elif lat == 38:  # Sicily north / Calabria tip
+                for lon in range(13, 17):
+                    land.add((lat, lon))
+            elif lat == 39:  # Calabria (narrow boot toe)
+                for lon in range(15, 18):
+                    land.add((lat, lon))
+            elif lat == 40:  # Calabria / Campania
+                for lon in range(14, 18):
+                    land.add((lat, lon))
+            elif lat == 41:  # Campania / Naples / Puglia
+                for lon in range(13, 18):
+                    land.add((lat, lon))
+            elif lat == 42:  # Central Italy (Rome region)
+                for lon in range(11, 17):
+                    land.add((lat, lon))
+            elif lat == 43:  # Tuscany / Marche
+                for lon in range(10, 15):
+                    land.add((lat, lon))
+            elif lat == 44:  # Emilia-Romagna / Liguria
+                for lon in range(8, 13):
+                    land.add((lat, lon))
+            elif lat == 45:  # Po Valley / Veneto
+                for lon in range(7, 14):
+                    land.add((lat, lon))
+            else:  # Alps border (lat 46)
+                for lon in range(7, 14):
+                    land.add((lat, lon))
+        # Sardinia
+        for lat in range(39, 42):
+            for lon in range(8, 10):
+                land.add((lat, lon))
+        # Corsica (French island)
+        for lat in range(41, 43):
+            for lon in range(8, 10):
+                land.add((lat, lon))
+
+        # Greece (with islands)
+        for lat in range(35, 42):
+            if lat <= 36:  # Crete
+                for lon in range(23, 27):
+                    land.add((lat, lon))
+            elif lat <= 38:  # Southern Greece / Peloponnese
+                for lon in range(21, 25):
+                    land.add((lat, lon))
+            elif lat <= 40:  # Central Greece
+                for lon in range(20, 26):
+                    land.add((lat, lon))
+            else:  # Northern Greece
+                for lon in range(19, 27):
                     land.add((lat, lon))
 
-        # Greece and Balkans
-        for lat in range(35, 45):
-            if lat <= 37:
-                for lon in range(20, 26):  # Southern Greece
-                    land.add((lat, lon))
-            elif lat <= 40:
-                for lon in range(19, 29):  # Northern Greece / Albania
-                    land.add((lat, lon))
-            else:
-                for lon in range(14, 30):  # Balkans
-                    land.add((lat, lon))
+        # Balkans (Romania, Bulgaria, Serbia, etc.)
+        for lat in range(40, 46):
+            for lon in range(14, 30):
+                # Exclude Adriatic Sea
+                if lat <= 45 and lon <= 16 and lat >= 43:
+                    continue
+                land.add((lat, lon))
 
-        # Scandinavia
+        # Turkey (European side)
+        for lat in range(40, 42):
+            for lon in range(26, 30):
+                land.add((lat, lon))
+
+        # Scandinavia (solid landmass)
         for lat in range(55, 72):
-            if lat >= 65:
-                for lon in range(10, 32):
+            if lat >= 70:  # Northern Norway / Arctic coast
+                for lon in range(18, 32):
                     land.add((lat, lon))
-            else:
-                for lon in range(5, 32):
+            elif lat >= 65:  # Northern Sweden/Finland
+                for lon in range(10, 30):
                     land.add((lat, lon))
+            elif lat >= 60:  # Central Scandinavia (no fjord gaps at this resolution)
+                for lon in range(5, 30):
+                    land.add((lat, lon))
+            elif lat >= 57:  # Southern Scandinavia
+                for lon in range(8, 28):
+                    land.add((lat, lon))
+            else:  # Denmark / Southern Sweden
+                for lon in range(8, 16):
+                    land.add((lat, lon))
+
+        # Svalbard
+        for lat in range(77, 81):
+            for lon in range(15, 28):
+                land.add((lat, lon))
 
         # Baltic states, Eastern Europe
         for lat in range(48, 65):
             for lon in range(20, 45):
                 land.add((lat, lon))
 
-        # Russia / Northern Asia
-        for lat in range(42, 78):
-            for lon in range(30, 180):
-                land.add((lat, lon))
-
-        # Middle East
-        for lat in range(12, 42):
-            for lon in range(25, 75):
-                # Exclude Persian Gulf / Red Sea / Caspian
-                if 24 <= lat <= 30 and 48 <= lon <= 56:
-                    continue
-                if 13 <= lat <= 28 and 33 <= lon <= 43:
-                    continue
-                if 37 <= lat <= 46 and 47 <= lon <= 54:
-                    continue
-                land.add((lat, lon))
-
-        # South/Southeast Asia
-        for lat in range(5, 40):
-            if lat >= 28:
-                west, east = 68, 98
-            elif lat >= 20:
-                west, east = 68, 108
-            elif lat >= 10:
-                west, east = 72, 110
+        # Russia / Northern Asia (extend to Arctic coast and islands)
+        for lat in range(42, 82):
+            if lat >= 75:
+                # High Arctic (Novaya Zemlya, Franz Josef Land, Severnaya Zemlya)
+                for lon in range(45, 180):
+                    # Exclude Kara Sea
+                    if 70 <= lon <= 75:
+                        continue
+                    land.add((lat, lon))
+            elif lat >= 70:
+                # Arctic coast
+                for lon in range(30, 180):
+                    # Exclude major Arctic seas
+                    land.add((lat, lon))
+            elif lat >= 60:
+                # Northern Siberia
+                for lon in range(30, 175):
+                    land.add((lat, lon))
+            elif lat >= 50:
+                # Central Russia/Siberia (exclude Sea of Okhotsk)
+                for lon in range(30, 170):
+                    # Sea of Okhotsk exclusion
+                    if lat <= 60 and 140 <= lon <= 160:
+                        continue
+                    land.add((lat, lon))
             else:
-                west, east = 95, 105
-            for lon in range(west, east + 1):
+                # Southern Russia/Kazakhstan border
+                for lon in range(40, 135):
+                    land.add((lat, lon))
+
+        # Kamchatka Peninsula
+        for lat in range(51, 62):
+            for lon in range(155, 165):
                 land.add((lat, lon))
 
-        # China / East Asia (mainland)
-        for lat in range(18, 55):
-            for lon in range(75, 135):
+        # Sakhalin Island
+        for lat in range(46, 55):
+            for lon in range(141, 145):
                 land.add((lat, lon))
 
-        # Korea
+        # Turkey (Asian side / Anatolia)
+        for lat in range(36, 42):
+            for lon in range(26, 45):
+                # Exclude Mediterranean coast details
+                land.add((lat, lon))
+
+        # Middle East (better coastal definition)
+        # Arabian Peninsula
+        for lat in range(12, 32):
+            if lat >= 28:  # Northern Arabia / Jordan
+                for lon in range(34, 48):
+                    land.add((lat, lon))
+            elif lat >= 22:  # Central Arabia
+                for lon in range(36, 56):
+                    # Exclude Persian Gulf
+                    if lon >= 48 and lat <= 28:
+                        continue
+                    land.add((lat, lon))
+            elif lat >= 15:  # Southern Arabia / Yemen
+                for lon in range(42, 55):
+                    land.add((lat, lon))
+            else:
+                for lon in range(43, 52):
+                    land.add((lat, lon))
+
+        # Iran / Central Asia
+        for lat in range(25, 40):
+            for lon in range(44, 65):
+                # Exclude Caspian Sea (more precise - don't exclude Tehran at lat 36)
+                if 37 <= lat <= 48 and 48 <= lon <= 54:
+                    continue
+                land.add((lat, lon))
+
+        # Central Asian republics (Kazakhstan, Turkmenistan, Uzbekistan, etc.)
+        for lat in range(35, 55):
+            for lon in range(50, 75):
+                # Exclude Caspian Sea (more precise)
+                if 37 <= lat <= 47 and 48 <= lon <= 54:
+                    continue
+                land.add((lat, lon))
+
+        # India (triangular peninsula shape - distinctive subcontinent)
+        for lat in range(6, 36):
+            if lat >= 33:  # Kashmir / Himalayan foothills (narrow)
+                for lon in range(74, 92):
+                    land.add((lat, lon))
+            elif lat >= 30:  # Northern India (wide)
+                for lon in range(68, 95):
+                    land.add((lat, lon))
+            elif lat >= 26:  # Gangetic plain (widest part)
+                for lon in range(68, 92):
+                    land.add((lat, lon))
+            elif lat >= 22:  # Central India / Gujarat
+                for lon in range(68, 90):
+                    land.add((lat, lon))
+            elif lat >= 18:  # Maharashtra / Deccan plateau
+                for lon in range(70, 88):
+                    land.add((lat, lon))
+            elif lat >= 14:  # Karnataka / Andhra (narrowing)
+                for lon in range(72, 84):
+                    land.add((lat, lon))
+            elif lat >= 10:  # Tamil Nadu (narrower)
+                for lon in range(75, 82):
+                    land.add((lat, lon))
+            elif lat >= 8:  # Southern tip of India
+                for lon in range(76, 80):
+                    land.add((lat, lon))
+            else:  # Cape Comorin
+                for lon in range(77, 79):
+                    land.add((lat, lon))
+
+        # Indochina Peninsula (Myanmar, Thailand, Vietnam, Cambodia, Laos)
+        for lat in range(1, 28):
+            if lat >= 22:  # Northern region (wide)
+                for lon in range(92, 110):
+                    land.add((lat, lon))
+            elif lat >= 16:  # Central region
+                for lon in range(93, 110):
+                    land.add((lat, lon))
+            elif lat >= 10:  # Southern region / Thailand
+                for lon in range(97, 110):
+                    land.add((lat, lon))
+            elif lat >= 5:  # Malay Peninsula extending south
+                for lon in range(99, 106):
+                    land.add((lat, lon))
+            else:  # Southern tip of Malaysia/Singapore
+                for lon in range(100, 105):
+                    land.add((lat, lon))
+
+        # China (better coastal definition)
+        for lat in range(18, 54):
+            if lat >= 45:  # Northern China / Mongolia border
+                for lon in range(75, 135):
+                    land.add((lat, lon))
+            elif lat >= 35:  # Central China
+                for lon in range(75, 125):
+                    land.add((lat, lon))
+            elif lat >= 25:  # Southern China
+                for lon in range(97, 122):
+                    land.add((lat, lon))
+            else:  # Hainan region
+                for lon in range(105, 120):
+                    land.add((lat, lon))
+
+        # Korean Peninsula (better shape)
         for lat in range(33, 43):
-            for lon in range(124, 132):
+            if lat >= 40:  # North Korea
+                for lon in range(124, 131):
+                    land.add((lat, lon))
+            elif lat >= 37:  # Central Korea
+                for lon in range(126, 130):
+                    land.add((lat, lon))
+            else:  # South Korea
+                for lon in range(126, 130):
+                    land.add((lat, lon))
+
+        # Hainan Island
+        for lat in range(18, 21):
+            for lon in range(108, 111):
                 land.add((lat, lon))
 
-        # Africa
+        # Africa - detailed continental shape with proper features
         for lat in range(-35, 38):
-            if lat >= 20:
-                west, east = -17, 55
-            elif lat >= 5:
+            if lat >= 35:  # Mediterranean coast (Morocco to Libya)
+                west, east = -6, 25
+            elif lat >= 32:  # North Africa with Egypt
+                west, east = -8, 35
+            elif lat >= 28:  # Sahara north
+                west, east = -12, 35
+            elif lat >= 22:  # Sahara / Sahel with Horn approach
+                west, east = -17, 40
+            elif lat >= 15:  # West Africa bulge + Horn of Africa
                 west, east = -17, 52
-            elif lat >= -10:
-                west, east = -17, 51
-            elif lat >= -25:
-                west, east = 10, 50
-            else:
-                west, east = 15, 35
+            elif lat >= 10:  # West African bulge (max extent) + Ethiopia
+                west, east = -17, 48
+            elif lat >= 5:  # Gulf of Guinea coast + Somalia
+                west, east = -8, 50
+            elif lat >= 0:  # Equatorial (narrower west, wide east for Kenya)
+                west, east = 8, 42
+            elif lat >= -5:  # Congo basin / Tanzania
+                west, east = 12, 40
+            elif lat >= -10:  # Angola / Tanzania
+                west, east = 12, 40
+            elif lat >= -18:  # Zambia / Mozambique
+                west, east = 12, 38
+            elif lat >= -24:  # Botswana / Zimbabwe region
+                west, east = 14, 36
+            elif lat >= -30:  # South Africa proper
+                west, east = 16, 32
+            elif lat >= -33:  # Cape region
+                west, east = 18, 30
+            else:  # Cape of Good Hope
+                west, east = 18, 28
             for lon in range(west, east + 1):
                 land.add((lat, lon))
 
-        # Additional islands not covered by closed polygons
+        # Horn of Africa detail (Somalia peninsula)
+        for lat in range(0, 12):
+            if lat >= 10:
+                for lon in range(42, 52):
+                    land.add((lat, lon))
+            elif lat >= 5:
+                for lon in range(45, 52):
+                    land.add((lat, lon))
+            else:
+                for lon in range(47, 52):
+                    land.add((lat, lon))
+
+        # West Africa bulge detail (Senegal, Guinea)
+        for lat in range(8, 16):
+            for lon in range(-18, -12):
+                land.add((lat, lon))
+
+        # Madagascar (island off east coast)
+        for lat in range(-26, -12):
+            if lat >= -16:
+                for lon in range(46, 51):
+                    land.add((lat, lon))
+            elif lat >= -22:
+                for lon in range(44, 50):
+                    land.add((lat, lon))
+            else:
+                for lon in range(44, 48):
+                    land.add((lat, lon))
+
+        # Additional islands and regions not covered by closed polygons
+        # NOTE: Gaps between regions prevent continents from connecting
         islands = [
-            (63, 66, -24, -13),   # Iceland
+            (63, 66, -26, -16),   # Iceland (moved west, gap from Europe)
             (22, 26, 119, 122),   # Taiwan
             (20, 24, -85, -74),   # Cuba
             (18, 20, -75, -68),   # Hispaniola
             # Japan - main islands
             (30, 46, 129, 146),   # Honshu, Kyushu, Shikoku, Hokkaido
+            # Indonesian archipelago - clear separation from Australia
+            (-6, 6, 95, 106),     # Sumatra
+            (-9, -6, 105, 115),   # Java (STOP at 115, well before Australia)
+            (-5, 8, 108, 118),    # Borneo (Kalimantan)
+            (-6, 2, 119, 126),    # Sulawesi (STOP at 126)
+            # Philippines
+            (5, 20, 117, 127),    # Philippine islands
+            # Sri Lanka
+            (6, 10, 79, 82),      # Sri Lanka
+            # New Zealand (separate from Australia)
+            (-47, -34, 166, 179), # New Zealand (both islands)
         ]
         for lat_min, lat_max, lon_min, lon_max in islands:
             for lat in range(lat_min, lat_max + 1):
                 for lon in range(lon_min, lon_max + 1):
                     land.add((lat, lon))
+
+        # Papua New Guinea - separate definition with clear gap from Australia
+        for lat in range(-10, 0):
+            if lat >= -5:
+                for lon in range(130, 145):
+                    land.add((lat, lon))
+            else:
+                for lon in range(135, 148):
+                    land.add((lat, lon))
+
+        # Australia - explicit definition with clear northern gap
+        for lat in range(-44, -15):  # Start at -15, not -12, to ensure gap
+            if lat >= -20:  # Northern Australia
+                for lon in range(118, 152):  # Start at 118, gap from Indonesia
+                    land.add((lat, lon))
+            elif lat >= -30:  # Central Australia
+                for lon in range(114, 154):
+                    land.add((lat, lon))
+            else:  # Southern Australia
+                for lon in range(116, 152):
+                    land.add((lat, lon))
+
+        # Tasmania (separate island)
+        for lat in range(-44, -40):
+            for lon in range(144, 149):
+                land.add((lat, lon))
+
+        # Antarctica - MINIMAL display: only Antarctic Peninsula
+        # The peninsula is the only recognizable feature at terminal resolution
+        # Keep it small and well-separated from South America
+        for lat in range(-68, -62):
+            # Narrow peninsula pointing toward South America
+            if lat >= -65:
+                for lon in range(-62, -56):
+                    land.add((lat, lon))
+            else:
+                for lon in range(-64, -54):
+                    land.add((lat, lon))
+
+        # =========================================
+        # OCEAN EXCLUSION ZONES - Critical for preventing continent merging
+        # These override any land definitions to ensure clear water gaps
+        # Wide gaps ensure visibility at any terminal resolution
+        # =========================================
+
+        # Atlantic Ocean - WIDE gap to ensure Americas and Europe/Africa never connect
+        # Extends from South America to Arctic
+        for lat in range(-60, 80):
+            # Wide Atlantic gap (lon -40 to -10)
+            for lon in range(-40, -10):
+                land.discard((lat, lon))
+
+        # Preserve Iceland (lat 63-66, centered around lon -20)
+        for lat in range(63, 67):
+            for lon in range(-25, -13):
+                land.add((lat, lon))
+
+        # Davis Strait / Baffin Bay - separate Greenland from North America
+        for lat in range(60, 80):
+            for lon in range(-65, -50):
+                land.discard((lat, lon))
+
+        # Greenland - detailed island shape (completely separate from North America)
+        for lat in range(59, 84):
+            if lat >= 81:  # Northern tip (narrow)
+                for lon in range(-38, -22):
+                    land.add((lat, lon))
+            elif lat >= 78:  # Northern Greenland
+                for lon in range(-45, -18):
+                    land.add((lat, lon))
+            elif lat >= 75:  # North-Central (widening)
+                for lon in range(-50, -18):
+                    land.add((lat, lon))
+            elif lat >= 70:  # Central Greenland (widest part)
+                for lon in range(-52, -20):
+                    land.add((lat, lon))
+            elif lat >= 65:  # Central-South Greenland
+                for lon in range(-50, -25):
+                    land.add((lat, lon))
+            elif lat >= 62:  # Southern Greenland (narrowing)
+                for lon in range(-48, -38):
+                    land.add((lat, lon))
+            else:  # Cape Farewell (southern tip)
+                for lon in range(-46, -42):
+                    land.add((lat, lon))
+
+        # Timor Sea / Arafura Sea - WIDE gap between Indonesia and Australia
+        # This is the critical gap that prevents Asia from connecting to Australia
+        for lat in range(-14, -6):
+            for lon in range(115, 145):
+                land.discard((lat, lon))
+
+        # Re-add Timor and nearby Indonesian islands (small, above the gap)
+        for lat in range(-10, -6):
+            for lon in range(120, 130):
+                land.add((lat, lon))
+
+        # Torres Strait - between PNG and Australia (wider gap)
+        for lat in range(-14, -10):
+            for lon in range(138, 148):
+                land.discard((lat, lon))
+
+        # Bering Strait - between Alaska and Russia
+        for lat in range(60, 70):
+            for lon in range(-175, -163):
+                land.discard((lat, lon))
+            for lon in range(165, 178):
+                land.discard((lat, lon))
+
+        # Caspian Sea exclusion (more precise - don't exclude Tehran)
+        # Caspian is roughly: lat 37-47, lon 47-54
+        # Tehran is at lat 36, lon 51 - should NOT be excluded
+        for lat in range(37, 48):
+            for lon in range(48, 55):
+                land.discard((lat, lon))
+
+        # English Channel - narrow water between Britain and France
+        for lat in range(49, 51):
+            for lon in range(-1, 2):
+                land.discard((lat, lon))
+
+        # Irish Sea - water between Ireland and Britain (narrow)
+        for lat in range(52, 55):
+            for lon in range(-6, -4):
+                land.discard((lat, lon))
+
+        # North Sea (narrow strip between Britain and continental Europe)
+        for lat in range(52, 58):
+            for lon in range(2, 4):
+                land.discard((lat, lon))
+
+        # Skagerrak/Kattegat - between Denmark and Norway/Sweden
+        for lat in range(56, 59):
+            for lon in range(8, 11):
+                land.discard((lat, lon))
+
+        # Adriatic Sea exclusion (shifted east to not hit Rome)
+        # Rome is at lat 42, lon 12 - should NOT be excluded
+        # Adriatic is roughly: lat 39-46, lon 14-20
+        for lat in range(39, 46):
+            for lon in range(14, 20):
+                land.discard((lat, lon))
+
+        # Mediterranean Sea - key straits
+        for lat in range(35, 38):
+            for lon in range(-6, 0):  # Strait of Gibraltar area
+                land.discard((lat, lon))
+
+        # Sea of Japan - separate Japan islands from Korean peninsula/Russia
+        for lat in range(34, 48):
+            for lon in range(128, 135):
+                land.discard((lat, lon))
+
+        # Re-add Japan islands after Sea of Japan exclusion
+        # Japan consists of: Hokkaido (north), Honshu (main), Shikoku, Kyushu (south)
+        for lat in range(30, 46):
+            if lat >= 42:  # Hokkaido
+                for lon in range(139, 146):
+                    land.add((lat, lon))
+            elif lat >= 36:  # Northern/Central Honshu
+                for lon in range(136, 142):
+                    land.add((lat, lon))
+            elif lat >= 34:  # Southern Honshu / Shikoku / Northern Kyushu (Fukuoka)
+                for lon in range(129, 141):  # Extended west for Kyushu
+                    land.add((lat, lon))
+            elif lat >= 31:  # Kyushu (Kagoshima, etc.)
+                for lon in range(129, 135):
+                    land.add((lat, lon))
+            else:  # Okinawa region
+                for lon in range(127, 130):
+                    land.add((lat, lon))
+
+        # Yellow Sea / East China Sea - separate Korea from China
+        # Yellow Sea: roughly lon 122-127 (don't include Chinese coast at 121)
+        for lat in range(30, 40):
+            for lon in range(122, 127):
+                land.discard((lat, lon))
+
+        # Re-add Korean Peninsula after Yellow Sea exclusion
+        for lat in range(33, 43):
+            if lat >= 38:  # North Korea
+                for lon in range(124, 128):
+                    land.add((lat, lon))
+            else:  # South Korea
+                for lon in range(126, 130):
+                    land.add((lat, lon))
+
+        # Re-add Taiwan
+        for lat in range(22, 26):
+            for lon in range(120, 123):
+                land.add((lat, lon))
+
+        # Re-add Chinese east coast (Shanghai, etc.)
+        for lat in range(25, 35):
+            for lon in range(120, 123):
+                land.add((lat, lon))
 
         return land
 

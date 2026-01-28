@@ -452,7 +452,6 @@ class EnhancedThreatGlobePanel(Static):
         height: 100%;
         width: 100%;
         padding: 0;
-        overflow: hidden;
     }
     """
 
@@ -478,26 +477,27 @@ class EnhancedThreatGlobePanel(Static):
         self.last_update_time = time.time()
         self._current_map_type = "flat"  # Track current map type
         self._unknown_ips: set = set()  # Track IPs with unknown (0,0) locations
+        self._last_size = (0, 0)  # Track size for resize detection
 
-        # Initialize all map types for cycling
-        self._init_all_maps()
+        # Maps will be initialized on first resize when we know the actual panel size
+        # Don't initialize with fixed dimensions here
 
-    def _init_all_maps(self) -> None:
-        """Initialize all available map implementations for cycling"""
+    def _init_all_maps(self, width: int = 80, height: int = 20) -> None:
+        """Initialize all available map implementations with specified dimensions"""
         # Initialize flat world map
         if FlatWorldMap:
             try:
-                self.world_map = FlatWorldMap(width=120, height=30)
-                logger.debug("Initialized FlatWorldMap")
+                self.world_map = FlatWorldMap(width=width, height=height)
+                logger.debug(f"Initialized FlatWorldMap at {width}x{height}")
             except Exception as e:
                 logger.warning(f"Failed to initialize FlatWorldMap: {e}")
                 self.world_map = None
 
-        # Initialize enhanced globe
+        # Initialize enhanced globe (rotating)
         if EnhancedGlobe:
             try:
-                self.enhanced_globe = EnhancedGlobe(width=70, height=15)
-                logger.debug("Initialized EnhancedGlobe")
+                self.enhanced_globe = EnhancedGlobe(width=width, height=height)
+                logger.debug(f"Initialized EnhancedGlobe at {width}x{height}")
             except Exception as e:
                 logger.warning(f"Failed to initialize EnhancedGlobe: {e}")
                 self.enhanced_globe = None
@@ -505,8 +505,8 @@ class EnhancedThreatGlobePanel(Static):
         # Initialize simple globe
         if SimpleGlobe:
             try:
-                self.simple_globe = SimpleGlobe(width=70, height=15)
-                logger.debug("Initialized SimpleGlobe")
+                self.simple_globe = SimpleGlobe(width=width, height=height)
+                logger.debug(f"Initialized SimpleGlobe at {width}x{height}")
             except Exception as e:
                 logger.warning(f"Failed to initialize SimpleGlobe: {e}")
                 self.simple_globe = None
@@ -671,17 +671,51 @@ class EnhancedThreatGlobePanel(Static):
         self.refresh()
 
     def on_resize(self, event) -> None:
-        """Resize world map to fill panel when size changes"""
+        """Resize all maps to fill panel when size changes"""
+        # Calculate map size to fit within widget:
+        # FlatWorldMap.render() returns a Rich Panel with padding=0:
+        #   - Panel borders: 2 width, 2 height
+        #   - Canvas: width x height (includes 1 legend row)
+        #   - Stats line: 1 height
+        # Total overhead: width +2, height +3
+        new_width = max(20, event.size.width - 3)
+        new_height = max(6, event.size.height - 4)
+
+        # Only act if size actually changed
+        if self._last_size == (new_width, new_height):
+            return
+
+        self._last_size = (new_width, new_height)
+
+        # Log for debugging
+        logger.info(f"Globe panel resize: widget={event.size.width}x{event.size.height} -> map={new_width}x{new_height}")
+
+        # Initialize maps on first resize (when we know actual panel dimensions)
+        if self.world_map is None and self.enhanced_globe is None and self.simple_globe is None:
+            self._init_all_maps(new_width, new_height)
+            self.refresh()
+            return
+
+        # Resize existing maps
         if self.world_map and hasattr(self.world_map, 'resize'):
-            # Account for panel border only (2 chars width, 2 lines height for border)
-            new_width = max(40, event.size.width - 2)
-            new_height = max(12, event.size.height - 2)
             self.world_map.resize(new_width, new_height)
-            logger.debug(f"Resized world map to {new_width}x{new_height}")
+
+        if self.enhanced_globe and hasattr(self.enhanced_globe, 'resize'):
+            self.enhanced_globe.resize(new_width, new_height)
+
+        if self.simple_globe and hasattr(self.simple_globe, 'resize'):
+            self.simple_globe.resize(new_width, new_height)
+
+        self.refresh()
 
     def render(self):
         """Render the currently selected intel map type"""
         dt = 0.05  # Animation delta time
+
+        # Initialize maps with small default size if not yet initialized (before on_resize)
+        # Will be resized properly once on_resize fires with actual panel dimensions
+        if self.world_map is None and self.enhanced_globe is None and self.simple_globe is None:
+            self._init_all_maps(40, 10)
 
         # Render based on current map type selection
         if self._current_map_type == "flat" and self.world_map:
