@@ -266,13 +266,15 @@ def _bootstrap_venv():
     venv_python = _find_venv_python()
     if venv_python:
         # Re-exec this script with venv Python
-        os.execv(venv_python, [venv_python] + sys.argv)
+        # -B flag: Don't write .pyc bytecode files (prevents root-owned cache when using sudo)
+        os.execv(venv_python, [venv_python, "-B"] + sys.argv)
 
     # No venv found - attempt auto-creation
     venv_python = _auto_create_venv()
     if venv_python and os.path.isfile(venv_python):
         # Re-exec with newly created venv
-        os.execv(venv_python, [venv_python] + sys.argv)
+        # -B flag: Don't write .pyc bytecode files (prevents root-owned cache when using sudo)
+        os.execv(venv_python, [venv_python, "-B"] + sys.argv)
 
     # Auto-creation failed - show manual instructions
     RED = '\033[0;31m'

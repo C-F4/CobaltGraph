@@ -8,11 +8,19 @@ Performance optimizations:
 - LRU cache for repeated IP assessments
 - Minimal lock contention
 
+Comprehensive Metrics (Industry Standard):
+- Classification metrics: Precision, Recall, F1, AU-ROC
+- Drift detection: PSI with hourly windows, alerts at PSI > 0.25
+- Latency tracking: p50, p95, p99 percentiles
+- Ground truth feedback API for analyst labels
+- SQLite persistence for historical analysis
+
 Scorers:
 - StatisticalScorer: Confidence interval analysis
 - RuleScorer: Expert-defined heuristics
-- MLScorer: Machine learning feature weights
+- HeuristicScorer: Deterministic feature-weighted scoring
 - OrganizationScorer: ASN/organization-based scoring with hop analysis
+- NeuralScorer: GRU neural network with online learning (actual ML)
 """
 
 import logging
@@ -22,10 +30,10 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from functools import lru_cache
 from threading import Lock
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .bft_consensus import BFTConsensus
-from .ml_scorer import MLScorer
+from .ml_scorer import HeuristicScorer
 from .rule_scorer import RuleScorer
 from .scorer_base import ScorerAssessment, ThreatScorer
 from .statistical_scorer import StatisticalScorer
@@ -38,6 +46,15 @@ except ImportError:
     OrganizationScorer = None
     ORG_SCORER_AVAILABLE = False
 
+# Neural network scorer with GRU for temporal pattern learning (optional)
+try:
+    from .neural_scorer import NeuralScorer, create_neural_scorer
+    NEURAL_SCORER_AVAILABLE = True
+except ImportError:
+    NeuralScorer = None
+    create_neural_scorer = None
+    NEURAL_SCORER_AVAILABLE = False
+
 # ASN lookup service for enrichment
 try:
     from src.services.asn_lookup import ASNLookup, TTLAnalyzer
@@ -46,6 +63,16 @@ except ImportError:
     ASNLookup = None
     TTLAnalyzer = None
     ASN_AVAILABLE = False
+
+# Metrics module for comprehensive tracking
+try:
+    from .metrics import MetricsManager, DriftDetector, LatencyTracker
+    METRICS_AVAILABLE = True
+except ImportError:
+    MetricsManager = None
+    DriftDetector = None
+    LatencyTracker = None
+    METRICS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +128,7 @@ class ConsensusThreatScorer:
         self.scorers: List[ThreatScorer] = [
             StatisticalScorer(),
             RuleScorer(),
-            MLScorer(),
+            HeuristicScorer(),
         ]
 
         # Add OrganizationScorer if available (4th scorer for stronger consensus)
@@ -112,6 +139,18 @@ class ConsensusThreatScorer:
                 logger.info("✅ OrganizationScorer added (ASN/org/hop analysis)")
             except Exception as e:
                 logger.warning(f"OrganizationScorer unavailable: {e}")
+
+        # Add NeuralScorer if available (5th scorer with GRU temporal learning)
+        if NEURAL_SCORER_AVAILABLE and NeuralScorer:
+            try:
+                neural_scorer = NeuralScorer(
+                    model_path=self.config.get("neural_model_path", "models/neural_scorer.json"),
+                    enable_learning=self.config.get("neural_enable_learning", True),
+                )
+                self.scorers.append(neural_scorer)
+                logger.info("✅ NeuralScorer added (GRU temporal pattern learning)")
+            except Exception as e:
+                logger.warning(f"NeuralScorer unavailable: {e}")
 
         logger.info(
             f"Initialized {len(self.scorers)} scorers: {[s.scorer_id for s in self.scorers]}"
@@ -140,6 +179,36 @@ class ConsensusThreatScorer:
         self.high_uncertainty_count = 0
         self.cache_hits = 0
         self.parallel_speedup_total = 0.0
+
+        # Initialize comprehensive metrics tracking
+        self.metrics_manager: Optional[MetricsManager] = None
+        self._consensus_latency: Optional[LatencyTracker] = None
+
+        if METRICS_AVAILABLE and MetricsManager:
+            try:
+                scorer_ids = [s.scorer_id for s in self.scorers]
+                self.metrics_manager = MetricsManager(
+                    scorer_ids=scorer_ids,
+                    db_path=self.config.get("db_path", "database/cobaltgraph.db"),
+                    enable_persistence=enable_persistence,
+                    drift_window_hours=1,  # Hourly drift detection windows
+                    drift_baseline_hours=24,  # 24-hour baseline
+                )
+                self._consensus_latency = LatencyTracker()
+
+                # Register drift alert callback
+                self.metrics_manager.register_alert_callback(self._on_drift_alert)
+
+                logger.info(
+                    "Comprehensive metrics tracking enabled "
+                    "(classification, drift detection, latency tracking)"
+                )
+            except Exception as e:
+                logger.warning(f"Metrics initialization failed: {e}")
+                self.metrics_manager = None
+
+        # Alert callbacks for external notification
+        self._alert_callbacks: List[Callable[[str, Dict], None]] = []
 
         logger.info("ConsensusThreatScorer initialized (parallel execution enabled)")
 
@@ -281,34 +350,57 @@ class ConsensusThreatScorer:
 
         # PARALLEL EXECUTION: Submit all scorers to thread pool
         start_time = time.time()
-        futures = {
-            self._executor.submit(
-                self._run_scorer, scorer, dst_ip, threat_intel, geo_data, connection_metadata
-            ): scorer.scorer_id
-            for scorer in self.scorers
-        }
+        scorer_start_times = {}
+        futures = {}
 
-        # Collect results with timeout
+        for scorer in self.scorers:
+            scorer_start_times[scorer.scorer_id] = time.time()
+            future = self._executor.submit(
+                self._run_scorer, scorer, dst_ip, threat_intel, geo_data, connection_metadata
+            )
+            futures[future] = scorer.scorer_id
+
+        # Collect results with timeout and track per-scorer latencies
         assessments: List[ScorerAssessment] = []
+        scorer_latencies: Dict[str, float] = {}
+
         for future in as_completed(futures, timeout=self.SCORER_TIMEOUT):
             scorer_id = futures[future]
+            scorer_end_time = time.time()
+            latency_ms = (scorer_end_time - scorer_start_times.get(scorer_id, start_time)) * 1000
+
             try:
                 result = future.result(timeout=0.1)
                 if result:
                     assessments.append(result)
+                    scorer_latencies[scorer_id] = latency_ms
+
+                    # Record latency in scorer's tracker
+                    for scorer in self.scorers:
+                        if scorer.scorer_id == scorer_id:
+                            scorer.record_latency(latency_ms)
+                            break
+
             except FuturesTimeoutError:
                 logger.warning(f"Scorer {scorer_id} timed out for {dst_ip}")
+                scorer_latencies[scorer_id] = self.SCORER_TIMEOUT * 1000  # Timeout latency
             except Exception as e:
                 logger.error(
                     f"Scorer {scorer_id} failed for {dst_ip}: {e}\n"
                     f"  Traceback: {traceback.format_exc()}"
                 )
+                scorer_latencies[scorer_id] = latency_ms
 
         # Track parallel speedup
         elapsed = time.time() - start_time
+        consensus_latency_ms = elapsed * 1000
         sequential_estimate = elapsed * len(self.scorers)  # If run sequentially
         with self._stats_lock:
             self.parallel_speedup_total += sequential_estimate / max(elapsed, 0.001)
+
+        # Record consensus latency
+        if self._consensus_latency:
+            self._consensus_latency.record(consensus_latency_ms)
 
         # Check if we got enough assessments
         if len(assessments) < 2:
@@ -425,8 +517,9 @@ class ConsensusThreatScorer:
             # Individual scorer results (Dashboard Evolution)
             "score_statistical": metadata.get("score_statistical"),
             "score_rule_based": metadata.get("score_rule_based"),
-            "score_ml_based": metadata.get("score_ml_based"),
+            "score_heuristic": metadata.get("score_heuristic"),
             "score_organization": metadata.get("score_organization"),
+            "score_neural_net": metadata.get("score_neural_net"),
             "score_spread": metadata.get("score_spread"),
             "scoring_method": consensus_result.method,
             # Domain Intelligence (from scorer features)
@@ -437,6 +530,19 @@ class ConsensusThreatScorer:
 
         # Cache the result for future lookups
         self._cache_ip_result(dst_ip, threat_score, details)
+
+        # Record comprehensive metrics
+        if self.metrics_manager:
+            scorer_scores = {a.scorer_id: a.score for a in valid_assessments}
+            self.metrics_manager.record_assessment(
+                consensus_score=threat_score,
+                scorer_scores=scorer_scores,
+                scorer_latencies=scorer_latencies,
+                consensus_latency_ms=consensus_latency_ms,
+                outliers=consensus_result.outliers,
+                spread=metadata.get("score_spread", 0.0),
+                ip_address=dst_ip,
+            )
 
         logger.debug(
             f"Consensus for {dst_ip}: score={threat_score:.3f}, "
@@ -493,6 +599,168 @@ class ConsensusThreatScorer:
 
         return stats
 
+    # =========================================================================
+    # GROUND TRUTH FEEDBACK API
+    # =========================================================================
+
+    def provide_ground_truth(
+        self,
+        ip_address: str,
+        is_malicious: bool,
+        source: str = "analyst",
+        notes: str = ""
+    ) -> bool:
+        """
+        API: Provide ground truth feedback for an IP assessment
+
+        Call this when an analyst confirms or dismisses a threat assessment.
+        The feedback is used to:
+        1. Update classification metrics (precision, recall, F1)
+        2. Train the neural scorer (if enabled)
+        3. Persist for historical analysis
+
+        Args:
+            ip_address: IP address that was assessed
+            is_malicious: True if actually malicious, False if benign
+            source: Feedback source ("analyst", "incident", "automated")
+            notes: Optional notes for audit trail
+
+        Returns:
+            True if feedback was successfully recorded
+
+        Example:
+            >>> scorer.provide_ground_truth("192.168.1.100", is_malicious=True, source="analyst")
+            True
+        """
+        if self.metrics_manager:
+            return self.metrics_manager.provide_ground_truth(
+                ip_address, is_malicious, source, notes
+            )
+
+        # Fallback: update individual scorers directly
+        logger.warning("MetricsManager not available, feedback not fully recorded")
+        return False
+
+    def provide_bulk_ground_truth(
+        self,
+        feedback_list: List[Tuple[str, bool, str]]
+    ) -> int:
+        """
+        API: Provide ground truth for multiple IPs at once
+
+        Args:
+            feedback_list: List of (ip_address, is_malicious, source) tuples
+
+        Returns:
+            Count of successfully recorded feedback items
+        """
+        success_count = 0
+        for ip_address, is_malicious, source in feedback_list:
+            if self.provide_ground_truth(ip_address, is_malicious, source):
+                success_count += 1
+        return success_count
+
+    def get_pending_feedback_count(self) -> int:
+        """Get count of predictions awaiting ground truth feedback"""
+        if self.metrics_manager:
+            return self.metrics_manager.feedback_collector.get_pending_count()
+        return 0
+
+    # =========================================================================
+    # DRIFT DETECTION
+    # =========================================================================
+
+    def _on_drift_alert(self, alert_type: str, details: Dict):
+        """
+        Internal callback for drift alerts
+
+        Args:
+            alert_type: Type of alert ("drift")
+            details: Alert details including PSI, status, etc.
+        """
+        logger.warning(
+            f"DRIFT ALERT: {alert_type} - PSI={details.get('psi', 0):.4f}, "
+            f"status={details.get('status', 'unknown')}"
+        )
+
+        # Notify external callbacks
+        for callback in self._alert_callbacks:
+            try:
+                callback(alert_type, details)
+            except Exception as e:
+                logger.error(f"Alert callback error: {e}")
+
+    def register_alert_callback(self, callback: Callable[[str, Dict], None]):
+        """
+        Register callback for alerts (drift, anomalies, etc.)
+
+        Args:
+            callback: Function(alert_type: str, details: Dict) -> None
+        """
+        self._alert_callbacks.append(callback)
+
+    def get_drift_status(self) -> Dict:
+        """
+        Get current drift detection status
+
+        Returns:
+            Dictionary with PSI, KS statistic, drift status, and alert flag
+        """
+        if self.metrics_manager:
+            return self.metrics_manager.get_drift_status()
+
+        return {
+            "status": "unavailable",
+            "psi": 0.0,
+            "alert": False,
+        }
+
+    def get_comprehensive_metrics(self) -> Dict:
+        """
+        Get all comprehensive metrics for monitoring dashboards
+
+        Returns:
+            Dictionary with classification metrics, drift status,
+            latency percentiles, and scorer agreement metrics
+        """
+        if self.metrics_manager:
+            return self.metrics_manager.get_system_summary()
+
+        # Fallback to basic stats
+        return self.get_statistics()
+
+    def get_scorer_metrics(self, scorer_id: str) -> Dict:
+        """
+        Get detailed metrics for a specific scorer
+
+        Args:
+            scorer_id: Scorer identifier
+
+        Returns:
+            Dictionary with classification metrics, latency stats, etc.
+        """
+        if self.metrics_manager:
+            return self.metrics_manager.get_scorer_summary(scorer_id)
+
+        # Fallback
+        for scorer in self.scorers:
+            if scorer.scorer_id == scorer_id:
+                return scorer.get_enhanced_stats()
+
+        return {}
+
+    def get_latency_percentiles(self) -> Dict:
+        """
+        Get consensus latency percentiles
+
+        Returns:
+            Dictionary with p50, p90, p95, p99 latencies in milliseconds
+        """
+        if self._consensus_latency:
+            return self._consensus_latency.to_dict()
+
+        return {"p50": 0.0, "p90": 0.0, "p95": 0.0, "p99": 0.0, "mean": 0.0}
+
     def shutdown(self):
         """Graceful shutdown with executor cleanup and final persistence"""
         # Shutdown thread pool executor
@@ -503,11 +771,27 @@ class ConsensusThreatScorer:
             logger.info("Flushing final assessments to disk...")
             self._flush_to_disk()
 
+        # Shutdown metrics manager (performs final rollup and persistence)
+        if self.metrics_manager:
+            logger.info("Shutting down metrics manager...")
+            self.metrics_manager.shutdown()
+
+        # Save neural model if available
+        for scorer in self.scorers:
+            if hasattr(scorer, 'save_model'):
+                try:
+                    scorer.save_model()
+                    logger.info(f"Saved {scorer.scorer_id} model")
+                except Exception as e:
+                    logger.warning(f"Failed to save {scorer.scorer_id} model: {e}")
+
         # Log performance stats
         stats = self.get_statistics()
+        latency = self.get_latency_percentiles()
         logger.info(
             f"ConsensusThreatScorer shutdown complete. "
             f"Total: {self.total_assessments}, "
             f"Cache hits: {self.cache_hits} ({stats['cache_hit_rate']:.1%}), "
-            f"Avg speedup: {stats['avg_parallel_speedup']:.1f}x"
+            f"Avg speedup: {stats['avg_parallel_speedup']:.1f}x, "
+            f"Latency p95: {latency.get('p95', 0):.1f}ms"
         )

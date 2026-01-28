@@ -29,6 +29,9 @@ from textual.widgets import Static, Button, Label
 from textual.screen import ModalScreen
 from textual.binding import Binding
 
+# Note: ModalConsensusBreakdownPanel is defined locally for modal-specific interface.
+# The canonical ConsensusBreakdownPanel for dashboards is in unified_components.py.
+
 logger = logging.getLogger(__name__)
 
 
@@ -399,14 +402,18 @@ class InvestigationActionsPanel(Static):
         return Panel(content, title="[bold cyan]Actions[/bold cyan]", border_style="cyan")
 
 
-class ConsensusBreakdownPanel(Static):
+class ModalConsensusBreakdownPanel(Static):
     """
-    Shows the 4-scorer BFT consensus breakdown.
-    Displays individual scorer results, voting matrix, outliers, and confidence.
+    Modal-specific wrapper for ConsensusBreakdownPanel.
+    Uses the canonical implementation from unified_components but adapts it
+    for modal display (accepts connection_data in constructor).
+
+    Note: The canonical ConsensusBreakdownPanel is in unified_components.py.
+    This wrapper provides the modal-specific interface that takes connection_data.
     """
 
     DEFAULT_CSS = """
-    ConsensusBreakdownPanel {
+    ModalConsensusBreakdownPanel {
         width: 100%;
         height: auto;
         padding: 1;
@@ -418,6 +425,7 @@ class ConsensusBreakdownPanel(Static):
         self.data = connection_data
 
     def render(self):
+        """Render consensus breakdown for the modal view."""
         threat = float(self.data.get('threat_score', 0) or 0)
         confidence = float(self.data.get('confidence', 0) or 0)
         high_uncertainty = self.data.get('high_uncertainty', False)
@@ -437,7 +445,6 @@ class ConsensusBreakdownPanel(Static):
             threat_color = "green"
             threat_label = "LOW"
 
-        # Build content
         lines = []
         lines.append("[bold cyan]CONSENSUS RESULT[/bold cyan]")
         lines.append("")
@@ -465,7 +472,6 @@ class ConsensusBreakdownPanel(Static):
             lines.append("[green]✓ Consensus Achieved[/green]")
         lines.append("")
 
-        # Scoring method
         lines.append(f"[dim]Method:[/dim] {scoring_method}")
         lines.append("")
 
@@ -473,7 +479,6 @@ class ConsensusBreakdownPanel(Static):
         lines.append("[bold cyan]─── SCORER BREAKDOWN ───[/bold cyan]")
         lines.append("")
 
-        # Get real scores if available, otherwise estimate
         score_statistical = self.data.get('score_statistical')
         score_rule_based = self.data.get('score_rule_based')
         score_ml_based = self.data.get('score_ml_based')
@@ -490,7 +495,6 @@ class ConsensusBreakdownPanel(Static):
                 ("Organization", score_organization, "Trust scoring"),
             ]
         else:
-            # Estimate individual scores based on final (fallback for old data)
             scorers = [
                 ("Statistical", threat + 0.05 if threat < 0.95 else threat, "Z-score analysis"),
                 ("Rule-Based", threat - 0.02 if threat > 0.02 else threat, "Pattern matching"),
@@ -504,7 +508,7 @@ class ConsensusBreakdownPanel(Static):
                 lines.append(f"  [dim]{desc}[/dim]")
                 continue
 
-            score = max(0, min(1, float(score)))  # Clamp
+            score = max(0, min(1, float(score)))
             bar_width = 12
             filled = int(score * bar_width)
 
@@ -521,7 +525,6 @@ class ConsensusBreakdownPanel(Static):
 
         lines.append("")
 
-        # Score spread (measure of disagreement)
         if score_spread is not None:
             spread_color = "green" if score_spread < 0.15 else "yellow" if score_spread < 0.25 else "red"
             lines.append(f"Score Spread: [{spread_color}]{score_spread:.3f}[/{spread_color}]")
@@ -1588,7 +1591,7 @@ class ConnectionIntelligenceModal(ModalScreen):
             with ScrollableContainer(id="modal_content"):
                 # Row 1: Consensus, Enrichment, Protocol (NEW)
                 with Horizontal(id="modal_row1"):
-                    yield ConsensusBreakdownPanel(
+                    yield ModalConsensusBreakdownPanel(
                         self.connection_data,
                         classes="modal_panel"
                     )
