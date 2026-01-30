@@ -317,30 +317,30 @@ class ThreatRadarGraph:
 
 class ThreatPostureQuickPanel(Static):
     """
-    Top-left (50%): Quick threat posture assessment
-    Current threat level, baseline, active threats, monitored IPs
-    Now includes radar graphs for top 3 highest threat connections
-    Plus: subtle pulse animation for active threat awareness
+    Top-left (50%): Compact SOC Operations Summary
+
+    Professional blue-team interface providing quick threat overview
+    with operational metrics and flagged connection alerts.
+
+    Design: Minimal professional aesthetic optimized for quick scanning.
     """
 
     DEFAULT_CSS = """
     ThreatPostureQuickPanel {
         height: 100%;
         width: 100%;
-        padding: 1;
+        padding: 0 1;
         overflow-y: auto;
     }
     """
 
     threat_data = reactive(dict)
 
-    # Pulse animation characters for "breathing" effect
-    PULSE_CHARS = ['◦', '○', '◎', '●', '◉', '●', '◎', '○']
-    ACTIVITY_CHARS = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    # Subtle activity indicator
+    ACTIVITY_CHARS = ['·', '∙', '•', '∙']
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._pulse_frame = 0
         self._activity_frame = 0
         self.threat_data = {
             'current_threat': 0.0,
@@ -348,7 +348,15 @@ class ThreatPostureQuickPanel(Static):
             'active_threats': 0,
             'monitored_ips': 0,
             'high_threat_count': 0,
-            'top_threats': [],  # Top 3 threat connections for radar graphs
+            'top_threats': [],
+            # Extended SOC metrics
+            'total_connections': 0,
+            'flagged_connections': 0,
+            'high_uncertainty': 0,
+            'consensus_agreement': 1.0,
+            'inbound_count': 0,
+            'outbound_count': 0,
+            'protocols': {},
         }
 
     def watch_threat_data(self, new_data: dict) -> None:
@@ -357,78 +365,91 @@ class ThreatPostureQuickPanel(Static):
         self.refresh()
 
     def pulse(self) -> None:
-        """Advance pulse animation frame"""
-        self._pulse_frame = (self._pulse_frame + 1) % len(self.PULSE_CHARS)
+        """Advance activity animation frame"""
+        self._activity_frame = (self._activity_frame + 1) % len(self.ACTIVITY_CHARS)
         self.refresh()
 
+    def _get_threat_indicator(self, score: float) -> tuple:
+        """Return (indicator, color, label) for threat level"""
+        if score >= 0.7:
+            return ("▲", "bold red", "CRIT")
+        elif score >= 0.5:
+            return ("▲", "yellow", "HIGH")
+        elif score >= 0.3:
+            return ("─", "dim yellow", "MED")
+        else:
+            return ("▼", "dim green", "LOW")
+
     def render(self):
-        """Render threat posture with radar graphs for top 3 threats"""
-        current = self.threat_data.get('current_threat', 0)
-        baseline = self.threat_data.get('baseline_threat', 0)
-        active = self.threat_data.get('active_threats', 0)
-        ips = self.threat_data.get('monitored_ips', 0)
-        high_threat = self.threat_data.get('high_threat_count', 0)
+        """Render compact SOC operations summary"""
+        # Extract metrics
+        current = float(self.threat_data.get('current_threat', 0) or 0)
+        baseline = float(self.threat_data.get('baseline_threat', 0) or 0)
+        active = int(self.threat_data.get('active_threats', 0) or 0)
+        ips = int(self.threat_data.get('monitored_ips', 0) or 0)
+        total_conn = int(self.threat_data.get('total_connections', 0) or 0)
+        flagged = int(self.threat_data.get('flagged_connections', 0) or 0)
+        uncertain = int(self.threat_data.get('high_uncertainty', 0) or 0)
+        agreement = float(self.threat_data.get('consensus_agreement', 1.0) or 1.0)
+        inbound = int(self.threat_data.get('inbound_count', 0) or 0)
+        outbound = int(self.threat_data.get('outbound_count', 0) or 0)
         top_threats = self.threat_data.get('top_threats', [])
 
-        # Pulse character for activity indication
-        pulse = self.PULSE_CHARS[self._pulse_frame]
+        # Activity indicator
         activity = self.ACTIVITY_CHARS[self._activity_frame]
 
-        # Color code threat level with pulse
-        if current >= 0.7:
-            threat_color = "[bold red]"
-            threat_level = "CRITICAL"
-            pulse_color = "[bold red]"
-        elif current >= 0.5:
-            threat_color = "[bold yellow]"
-            threat_level = "HIGH"
-            pulse_color = "[bold yellow]"
-        elif current >= 0.3:
-            threat_color = "[yellow]"
-            threat_level = "MEDIUM"
-            pulse_color = "[yellow]"
-        else:
-            threat_color = "[green]"
-            threat_level = "LOW"
-            pulse_color = "[green]"
+        # Threat indicator
+        indicator, threat_color, threat_label = self._get_threat_indicator(current)
 
-        # Build content with threat posture info
-        content_lines = []
-        content_lines.append(f"{pulse_color}{pulse}[/] {threat_color}Threat Level[/] {pulse_color}{pulse}[/]")
-        content_lines.append(f"  {threat_color}{current:.2f}[/] [{threat_level}]")
-        content_lines.append("")
-        content_lines.append(f"[dim]Baseline:[/dim] {baseline:.2f}")
-        content_lines.append(f"[red]High Threats:[/red] {high_threat}")
-        content_lines.append(f"[cyan]Active:[/cyan] {active}")
-        content_lines.append(f"[cyan]Monitored:[/cyan] {ips} IPs")
+        lines = []
 
-        # Add separator before radar graphs
-        content_lines.append("")
-        content_lines.append("[bold cyan]─── TOP THREAT RADAR ───[/bold cyan]")
-        content_lines.append("")
+        # ═══ Compact threat bar ═══
+        delta = current - baseline
+        delta_str = f"+{delta:.2f}" if delta >= 0 else f"{delta:.2f}"
+        delta_color = "red" if delta > 0.1 else ("green" if delta < -0.1 else "dim")
 
-        # Add radar graphs for top 3 threats
+        threat_bar_width = 16
+        filled = int(current * threat_bar_width)
+        bar = f"[{threat_color}]{'█' * filled}[/{threat_color}][dim]{'░' * (threat_bar_width - filled)}[/dim]"
+
+        lines.append(f"[dim]{activity}[/dim] [{threat_color}]{indicator}[/{threat_color}] {bar} [{threat_color}]{current:.2f}[/{threat_color}] [{delta_color}]({delta_str})[/{delta_color}]")
+        lines.append(f"[dim]   {threat_label} | baseline {baseline:.2f}[/dim]")
+
+        # ═══ Quick metrics ═══
+        lines.append("")
+        flag_color = "red" if flagged > 5 else ("yellow" if flagged > 0 else "dim")
+        lines.append(f"[dim]conn[/dim] {total_conn:>4}  [dim]flag[/dim] [{flag_color}]{flagged:>3}[/{flag_color}]  [dim]crit[/dim] [red]{active:>2}[/red]")
+        lines.append(f"[dim]in[/dim]   {inbound:>4}  [dim]out[/dim]  {outbound:>3}  [dim]ips[/dim]  {ips:>3}")
+
+        # ═══ Consensus status ═══
+        agree_pct = int(agreement * 100)
+        agree_color = "green" if agree_pct >= 80 else ("yellow" if agree_pct >= 60 else "red")
+        lines.append(f"[dim]consensus[/dim] [{agree_color}]{agree_pct}%[/{agree_color}]  [dim]uncertain[/dim] {uncertain}")
+
+        # ═══ Top flagged (compact) ═══
+        lines.append("")
+        lines.append("[dim]FLAGGED[/dim]")
+
         if top_threats:
-            radar_output = ThreatRadarGraph.render_comparison_radar(
-                top_threats,
-                width=50,
-                height=10
-            )
-            content_lines.append(radar_output)
+            for conn in top_threats[:3]:
+                threat_score = float(conn.get('threat_score', 0) or 0)
+                dst_ip = conn.get('dst_ip', '?.?.?.?')
+                dst_port = conn.get('dst_port', 0)
 
-            # Add legend
-            content_lines.append("")
-            content_lines.append("[dim]THR=Threat CNF=Confidence[/dim]")
-            content_lines.append("[dim]RIS=OrgRisk HOP=Distance GEO=GeoRisk[/dim]")
+                t_ind, t_col, _ = self._get_threat_indicator(threat_score)
+                ip_short = dst_ip[-12:] if len(dst_ip) > 12 else dst_ip
+
+                lines.append(f"  [{t_col}]{t_ind}[/{t_col}] {ip_short}:{dst_port} [{t_col}]{threat_score:.2f}[/{t_col}]")
         else:
-            content_lines.append("[dim]Scanning for threats...[/dim]")
+            lines.append("  [dim]none[/dim]")
 
-        content = "\n".join(content_lines)
+        content = "\n".join(lines)
 
         return Panel(
             content,
-            title="[bold cyan]Threat Posture[/bold cyan]",
-            border_style="cyan"
+            title="[bold bright_white]SOC SUMMARY[/bold bright_white]",
+            border_style="dim cyan",
+            padding=(0, 1)
         )
 
 
@@ -1121,18 +1142,26 @@ class SmartConnectionTable(Static):
 
 class NetworkDevicePanel(Static):
     """
-    Unified panel for both network and device modes.
-    Shows discovered devices with MAC addresses, IPs, vendors, and connection flows.
+    Network Intelligence Panel - Passive Network Reconnaissance
 
-    In network mode: Shows destination flows per device
-    In device mode: Shows device inventory with connection counts
+    Provides passive network intelligence gathered without active scanning.
+    Shows traffic flow analysis, MAC discovery, subnet intelligence, and
+    protocol distribution - all from observed traffic only.
+
+    Design: Professional SOC aesthetic emphasizing passive intelligence gathering.
+
+    PASSIVITY PRINCIPLE: CobaltGraph sees without being seen.
+    - All intelligence derived from observed packets only
+    - No ARP probes, no port scans, no active discovery
+    - MAC addresses learned from Ethernet frame headers
+    - IP associations learned from packet contents
     """
 
     DEFAULT_CSS = """
     NetworkDevicePanel {
         height: 100%;
         width: 100%;
-        padding: 1;
+        padding: 0 1;
         overflow: auto;
     }
     """
@@ -1149,6 +1178,14 @@ class NetworkDevicePanel(Static):
         self.devices = []
         self.network_info = {
             'ip_range': 'detecting...',
+            # Extended passive intelligence
+            'subnets_detected': set(),
+            'mac_sources': {},      # MAC -> {'direction': 'src'|'dst'|'both', 'ips': set(), 'count': int}
+            'protocol_stats': {},   # {'TCP': int, 'UDP': int}
+            'arp_activity': [],     # Recent ARP observations
+            'broadcast_count': 0,
+            'inbound_macs': set(),  # MACs seen as destination (receiving traffic)
+            'outbound_macs': set(), # MACs seen as source (sending traffic)
         }
 
     def watch_topology_data(self, new_data: dict) -> None:
@@ -1164,214 +1201,251 @@ class NetworkDevicePanel(Static):
         self.refresh()
 
     def _update_network_info(self):
-        """Extract network range from observed IPs in flows"""
+        """Extract network intelligence from observed traffic flows"""
         if not self.flows:
             return
 
         src_ips = set()
+        mac_sources = {}
+        protocol_stats = {'TCP': 0, 'UDP': 0, 'OTHER': 0}
+
         for src_mac, flow_data in self.flows.items():
+            # Track MAC as source (outbound traffic)
+            if src_mac not in mac_sources:
+                mac_sources[src_mac] = {
+                    'direction': 'outbound',
+                    'ips': set(),
+                    'count': 0,
+                    'vendor': flow_data.get('device_vendor'),
+                    'threat_avg': flow_data.get('threat_avg', 0)
+                }
+
             if 'src_ip' in flow_data:
                 src_ips.add(flow_data['src_ip'])
+                mac_sources[src_mac]['ips'].add(flow_data['src_ip'])
 
+            # Count flows per MAC
+            destinations = flow_data.get('destinations', {})
+            mac_sources[src_mac]['count'] += len(destinations)
+
+            # Protocol statistics
+            for dest_key, dest_data in destinations.items():
+                proto = dest_data.get('protocol', 'TCP').upper()
+                if proto in protocol_stats:
+                    protocol_stats[proto] += dest_data.get('count', 1)
+                else:
+                    protocol_stats['OTHER'] += dest_data.get('count', 1)
+
+        self.network_info['mac_sources'] = mac_sources
+        self.network_info['protocol_stats'] = protocol_stats
+        self.network_info['outbound_macs'] = set(mac_sources.keys())
         self._detect_network_range(src_ips)
 
     def _update_network_info_from_devices(self):
-        """Extract network range from device IPs"""
+        """Extract network intelligence from device inventory"""
         if not self.devices:
             return
 
         src_ips = set()
+        mac_sources = {}
+
         for device in self.devices:
+            mac = device.get('mac', '')
+            if not mac:
+                continue
+
             ip_addresses = device.get('ip_addresses', [])
-            # Handle JSON string that wasn't parsed
             if isinstance(ip_addresses, str):
                 try:
                     import json
                     ip_addresses = json.loads(ip_addresses)
                 except (json.JSONDecodeError, TypeError):
                     ip_addresses = []
+
+            mac_sources[mac] = {
+                'direction': 'observed',
+                'ips': set(ip_addresses) if ip_addresses else set(),
+                'count': device.get('connection_count', 0),
+                'vendor': device.get('vendor'),
+                'threat_avg': device.get('threat_score', 0)
+            }
+
             for ip in ip_addresses:
                 if isinstance(ip, str):
                     src_ips.add(ip)
 
+        self.network_info['mac_sources'] = mac_sources
         self._detect_network_range(src_ips)
 
     def _detect_network_range(self, src_ips: set):
-        """Determine network range from a set of IPs"""
+        """Passively detect network ranges from observed IPs"""
+        detected_subnets = set()
+
         for ip in src_ips:
             if ip.startswith('192.168.'):
                 parts = ip.split('.')
-                self.network_info['ip_range'] = f"192.168.{parts[2]}.0/24"
-                return
+                subnet = f"192.168.{parts[2]}.0/24"
+                detected_subnets.add(subnet)
+                if 'ip_range' not in self.network_info or self.network_info['ip_range'] == 'detecting...':
+                    self.network_info['ip_range'] = subnet
             elif ip.startswith('10.'):
                 parts = ip.split('.')
-                self.network_info['ip_range'] = f"10.{parts[1]}.{parts[2]}.0/24"
-                return
+                subnet = f"10.{parts[1]}.{parts[2]}.0/24"
+                detected_subnets.add(subnet)
+                if self.network_info.get('ip_range') == 'detecting...':
+                    self.network_info['ip_range'] = subnet
             elif ip.startswith('172.'):
                 parts = ip.split('.')
-                second = int(parts[1])
-                if 16 <= second <= 31:
-                    self.network_info['ip_range'] = f"172.{parts[1]}.{parts[2]}.0/24"
-                    return
+                try:
+                    second = int(parts[1])
+                    if 16 <= second <= 31:
+                        subnet = f"172.{parts[1]}.{parts[2]}.0/24"
+                        detected_subnets.add(subnet)
+                        if self.network_info.get('ip_range') == 'detecting...':
+                            self.network_info['ip_range'] = subnet
+                except (ValueError, IndexError):
+                    pass
+
+        self.network_info['subnets_detected'] = detected_subnets
 
     def render(self):
-        """Render unified device panel based on mode"""
-        # Check if we have data
+        """Render professional network intelligence panel"""
         has_flow_data = bool(self.flows)
         has_device_data = bool(self.devices)
+        mac_sources = self.network_info.get('mac_sources', {})
 
         if not has_flow_data and not has_device_data:
             return Panel(
-                "[dim]Scanning network...[/dim]\n\n"
-                "[cyan]Waiting for network traffic...[/cyan]\n"
-                "[dim]Devices will appear with:\n"
-                "- MAC address\n"
-                "- IP address\n"
-                "- Connection flows[/dim]",
-                title="[bold cyan]NETWORK DEVICES[/bold cyan]",
-                border_style="cyan"
+                "[dim]─────────────────────────────────────[/dim]\n"
+                "[dim]PASSIVE RECONNAISSANCE ACTIVE[/dim]\n"
+                "[dim]─────────────────────────────────────[/dim]\n\n"
+                "[dim]Awaiting network traffic...[/dim]\n\n"
+                "[dim]Intelligence sources:[/dim]\n"
+                "[dim]  ▫ Ethernet frame headers[/dim]\n"
+                "[dim]  ▫ ARP cache observations[/dim]\n"
+                "[dim]  ▫ IP packet analysis[/dim]\n"
+                "[dim]  ▫ Protocol fingerprinting[/dim]\n\n"
+                "[dim italic]No active probing performed[/dim italic]",
+                title="[bold bright_white]NET INTEL[/bold bright_white]",
+                border_style="dim cyan",
+                padding=(0, 1)
             )
 
         lines = []
 
-        # Header
-        lines.append("[bold cyan]┌─────────────────────────────────────────┐[/bold cyan]")
-        lines.append("[bold cyan]│           NETWORK DEVICES               │[/bold cyan]")
-        lines.append("[bold cyan]└─────────────────────────────────────────┘[/bold cyan]")
+        # ═══ HEADER: Subnet Intelligence ═══
+        lines.append(f"[dim]{'─' * 38}[/dim]")
+        ip_range = self.network_info.get('ip_range', 'unknown')
+        subnets = self.network_info.get('subnets_detected', set())
 
-        # Show monitored network range
-        ip_range = self.network_info.get('ip_range', 'detecting...')
-        lines.append(f"[bold]Network:[/bold] [cyan]{ip_range}[/cyan]")
+        lines.append(f"[bold dim]SUBNET[/bold dim] [bright_white]{ip_range}[/bright_white]")
+
+        if len(subnets) > 1:
+            other_subnets = [s for s in subnets if s != ip_range][:2]
+            if other_subnets:
+                lines.append(f"[dim]  also: {', '.join(other_subnets)}[/dim]")
+
+        # ═══ SECTION: Traffic Flow Summary ═══
         lines.append("")
+        lines.append("[bold dim]TRAFFIC FLOW[/bold dim]")
 
-        # Render based on available data
-        if has_flow_data:
-            self._render_with_flows(lines)
-        elif has_device_data:
-            self._render_devices_only(lines)
+        total_macs = len(mac_sources)
+        total_flows = sum(m.get('count', 0) for m in mac_sources.values())
+        protocol_stats = self.network_info.get('protocol_stats', {})
 
-        content = "\n".join(lines)
-        return Panel(
-            content,
-            title="[bold cyan]NETWORK DEVICES[/bold cyan]",
-            border_style="cyan"
-        )
+        tcp_count = protocol_stats.get('TCP', 0)
+        udp_count = protocol_stats.get('UDP', 0)
+        other_count = protocol_stats.get('OTHER', 0)
+        total_proto = tcp_count + udp_count + other_count
 
-    def _render_with_flows(self, lines: list):
-        """Render devices with their destination flows"""
-        device_count = len(self.flows)
-        total_flows = sum(len(f.get('destinations', {})) for f in self.flows.values())
+        # Traffic metrics
+        lines.append(f"  [dim]endpoints[/dim] {total_macs:>5}  [dim]│[/dim]  [dim]flows[/dim] {total_flows:>6}")
 
-        lines.append(f"[dim]Devices: {device_count} | Flows: {total_flows}[/dim]")
+        # Protocol bar visualization
+        if total_proto > 0:
+            bar_width = 20
+            tcp_bar = int((tcp_count / total_proto) * bar_width)
+            udp_bar = int((udp_count / total_proto) * bar_width)
+            other_bar = bar_width - tcp_bar - udp_bar
+
+            proto_bar = f"[cyan]{'▮' * tcp_bar}[/cyan][magenta]{'▮' * udp_bar}[/magenta][dim]{'▯' * other_bar}[/dim]"
+            lines.append(f"  {proto_bar}")
+            lines.append(f"  [cyan]TCP {tcp_count}[/cyan] [magenta]UDP {udp_count}[/magenta] [dim]other {other_count}[/dim]")
+
+        # ═══ SECTION: MAC Intelligence ═══
         lines.append("")
+        lines.append("[bold dim]MAC DISCOVERY[/bold dim]")
+        lines.append(f"  [dim]method: passive observation[/dim]")
 
-        device_list = list(self.flows.items())[:5]  # Top 5 devices
+        # Sort MACs by activity (flow count)
+        sorted_macs = sorted(
+            mac_sources.items(),
+            key=lambda x: (x[1].get('threat_avg', 0), x[1].get('count', 0)),
+            reverse=True
+        )[:5]
 
-        for idx, (src_mac, flow_data) in enumerate(device_list):
-            vendor = (flow_data.get('device_vendor') or 'Unknown')[:12]
-            src_ip = flow_data.get('src_ip', '')
-            threat_score = float(flow_data.get('threat_avg', 0) or 0)
+        for idx, (mac, mac_data) in enumerate(sorted_macs):
+            vendor = (mac_data.get('vendor') or 'Unknown')[:10]
+            ips = mac_data.get('ips', set())
+            flow_count = mac_data.get('count', 0)
+            threat_avg = float(mac_data.get('threat_avg', 0) or 0)
+            direction = mac_data.get('direction', 'observed')
 
-            is_last = idx == len(device_list) - 1
-            prefix = "[cyan]└[/cyan]" if is_last else "[cyan]├[/cyan]"
+            # Direction indicator
+            if direction == 'outbound':
+                dir_icon = "[cyan]→[/cyan]"  # Sending traffic
+                dir_label = "OUT"
+            elif direction == 'inbound':
+                dir_icon = "[magenta]←[/magenta]"  # Receiving traffic
+                dir_label = "IN"
+            else:
+                dir_icon = "[dim]◆[/dim]"  # Observed
+                dir_label = "OBS"
 
             # Threat indicator
-            threat_icon, threat_color = self._get_threat_style(threat_score)
+            if threat_avg >= 0.5:
+                threat_ind = f"[bold red]▲[/bold red]"
+            elif threat_avg >= 0.3:
+                threat_ind = f"[yellow]─[/yellow]"
+            else:
+                threat_ind = f"[dim green]▼[/dim green]"
 
-            # Device line
-            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:12s}[/{threat_color}]")
-            lines.append(f"[dim]│  MAC: {src_mac}[/dim]")
-            if src_ip:
-                lines.append(f"[dim]│  IP:  [/dim][cyan]{src_ip}[/cyan]")
+            # MAC line (truncated for display)
+            mac_short = mac[:8] + "..." + mac[-5:] if len(mac) > 17 else mac
 
-            # Show top 2 destination flows
-            destinations = sorted(
-                flow_data.get('destinations', {}).items(),
-                key=lambda x: float(x[1].get('threat', 0) or 0),
-                reverse=True
-            )[:2]
+            is_last = idx == len(sorted_macs) - 1
+            prefix = "└" if is_last else "├"
 
-            for dest_idx, (dest_key, data) in enumerate(destinations):
-                threat = float(data.get('threat', 0) or 0)
-                count = data.get('count', 0)
-                protocol = data.get('protocol', 'TCP')
+            lines.append(f"  [dim]{prefix}[/dim] {dir_icon} {threat_ind} [dim]{mac_short}[/dim]")
 
-                # Parse IP:port
-                if ':' in dest_key:
-                    parts = dest_key.rsplit(':', 1)
-                    dst_ip = parts[0][:15]
-                    dst_port = parts[1]
-                else:
-                    dst_ip = dest_key[:15]
-                    dst_port = '?'
+            # Show primary IP and vendor
+            primary_ip = list(ips)[0] if ips else "—"
+            lines.append(f"  [dim]{'│' if not is_last else ' '}[/dim]   [dim]{vendor:<10}[/dim] {primary_ip}")
 
-                # Protocol indicator
-                proto = "U" if protocol == "UDP" else "T"
-                proto_color = "magenta" if protocol == "UDP" else "cyan"
-
-                _, dest_color = self._get_threat_style(threat)
-
-                is_dest_last = dest_idx == len(destinations) - 1
-                flow_prefix = "│  └─" if is_dest_last else "│  ├─"
-
-                lines.append(f"[dim]{flow_prefix}[/dim][cyan]→[/cyan] [{proto_color}]{proto}[/{proto_color}] [{dest_color}]{dst_ip}:{dst_port}[/{dest_color}] x{count}")
-
+        # ═══ SECTION: Intelligence Notes ═══
         lines.append("")
-        lines.append("[dim]→=Out T=TCP U=UDP | !=Crit ~=Med .=Low[/dim]")
+        lines.append(f"[dim]{'─' * 38}[/dim]")
+        lines.append("[dim italic]→=outbound ←=inbound ▲=risk ▼=safe[/dim italic]")
 
-    def _render_devices_only(self, lines: list):
-        """Render device inventory without flow details"""
-        total_flows = sum(d.get('connection_count', 0) for d in self.devices)
-        high_risk = len([d for d in self.devices if float(d.get('threat_score', 0) or 0) >= 0.5])
+        content = "\n".join(lines)
 
-        lines.append(f"[dim]Devices: {len(self.devices)} | Flows: {total_flows} | High Risk: {high_risk}[/dim]")
-        lines.append("")
-
-        sorted_devices = sorted(
-            self.devices,
-            key=lambda d: float(d.get('threat_score', 0) or 0),
-            reverse=True
-        )[:6]
-
-        for idx, device in enumerate(sorted_devices):
-            mac = device.get('mac', 'Unknown')
-            vendor = (device.get('vendor') or 'Unknown')[:12]
-            threat = float(device.get('threat_score', 0) or 0)
-            conn_count = device.get('connection_count', 0)
-
-            ip_addresses = device.get('ip_addresses', [])
-            # Handle JSON string that wasn't parsed
-            if isinstance(ip_addresses, str):
-                try:
-                    import json
-                    ip_addresses = json.loads(ip_addresses)
-                except (json.JSONDecodeError, TypeError):
-                    ip_addresses = []
-            primary_ip = ip_addresses[0] if ip_addresses and isinstance(ip_addresses[0], str) else ''
-
-            is_last = idx == len(sorted_devices) - 1
-            prefix = "[cyan]└[/cyan]" if is_last else "[cyan]├[/cyan]"
-
-            threat_icon, threat_color = self._get_threat_style(threat)
-
-            lines.append(f"{prefix} {threat_icon} [{threat_color}]{vendor:12s}[/{threat_color}] {conn_count} flows")
-            lines.append(f"[dim]│  MAC: {mac}[/dim]")
-            if primary_ip:
-                lines.append(f"[dim]│  IP:  [/dim][cyan]{primary_ip}[/cyan]")
-
-        lines.append("")
-        lines.append("[dim]!=Crit ~=Med .=Low threat[/dim]")
+        return Panel(
+            content,
+            title="[bold bright_white]NET INTEL[/bold bright_white]",
+            border_style="dim cyan",
+            padding=(0, 1)
+        )
 
     def _get_threat_style(self, threat_score: float) -> tuple:
         """Return (icon, color) based on threat score"""
         if threat_score >= 0.7:
-            return "[bold red]![/bold red]", "bold red"
+            return "[bold red]▲[/bold red]", "bold red"
         elif threat_score >= 0.5:
-            return "[bold yellow]![/bold yellow]", "bold yellow"
+            return "[bold yellow]▲[/bold yellow]", "bold yellow"
         elif threat_score >= 0.3:
-            return "[yellow]~[/yellow]", "yellow"
+            return "[yellow]─[/yellow]", "yellow"
         else:
-            return "[green].[/green]", "green"
+            return "[dim green]▼[/dim green]", "dim green"
 
 
 # Keep aliases for backwards compatibility
@@ -2103,15 +2177,60 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 reverse=True
             )[:3]
 
-            # Update threat posture panel
+            # Update threat posture panel (SOC Summary)
             if self.threat_posture_panel:
+                # Calculate extended metrics for SOC Summary
+                total_conn = len(connections)
+                flagged = sum(1 for c in connections if float(c.get('threat_score', 0) or 0) >= 0.3)
+                high_uncertainty = sum(1 for c in connections if c.get('high_uncertainty', False))
+
+                # Calculate consensus agreement from score spread
+                spreads = [float(c.get('score_spread', 0) or 0) for c in connections if c.get('score_spread') is not None]
+                avg_spread = sum(spreads) / len(spreads) if spreads else 0
+                consensus_agreement = max(0, 1.0 - avg_spread)  # Lower spread = higher agreement
+
+                # Traffic direction counts
+                inbound_count = 0
+                outbound_count = 0
+                for c in connections:
+                    src_ip = c.get('src_ip', '')
+                    dst_ip = c.get('dst_ip', '')
+                    # Simple private IP check
+                    src_is_private = src_ip.startswith(('10.', '192.168.', '172.16.', '172.17.', '172.18.', '172.19.',
+                                                        '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
+                                                        '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.'))
+                    dst_is_private = dst_ip.startswith(('10.', '192.168.', '172.16.', '172.17.', '172.18.', '172.19.',
+                                                        '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
+                                                        '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.'))
+                    if src_is_private and not dst_is_private:
+                        outbound_count += 1
+                    elif not src_is_private and dst_is_private:
+                        inbound_count += 1
+
+                # Protocol distribution
+                protocols = {}
+                for c in connections:
+                    proto = c.get('protocol', 'TCP')
+                    protocols[proto] = protocols.get(proto, 0) + 1
+
+                # Calculate baseline from oldest third of connections
+                baseline_threats = threat_scores[:len(threat_scores)//3] if threat_scores else []
+                baseline = sum(baseline_threats) / len(baseline_threats) if baseline_threats else 0.15
+
                 self.threat_posture_panel.threat_data = {
                     'current_threat': current_threat,
-                    'baseline_threat': 0.2,  # Default baseline
+                    'baseline_threat': baseline,
                     'active_threats': high_threat_count,
                     'monitored_ips': len(set(c.get('dst_ip') for c in connections)),
-                    'high_threat_count': high_threat_count,
-                    'top_threats': top_threats,  # Add top 3 for radar graphs
+                    'top_threats': top_threats,
+                    # Extended SOC metrics
+                    'total_connections': total_conn,
+                    'flagged_connections': flagged,
+                    'high_uncertainty': high_uncertainty,
+                    'consensus_agreement': consensus_agreement,
+                    'inbound_count': inbound_count,
+                    'outbound_count': outbound_count,
+                    'protocols': protocols,
                 }
 
             # Update connection table

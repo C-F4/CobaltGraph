@@ -790,12 +790,49 @@ class UnifiedDashboard(App):
                 reverse=True
             )[:3]
 
+            # Calculate extended SOC metrics
+            total_conn = len(connections)
+            flagged = sum(1 for c in connections if float(c.get('threat_score', 0) or 0) >= 0.3)
+            high_uncertainty = sum(1 for c in connections if c.get('high_uncertainty', False))
+
+            # Calculate consensus agreement from score spread
+            spreads = [float(c.get('score_spread', 0) or 0) for c in connections if c.get('score_spread') is not None]
+            avg_spread = sum(spreads) / len(spreads) if spreads else 0
+            consensus_agreement = max(0, 1.0 - avg_spread)
+
+            # Traffic direction counts
+            inbound_count = 0
+            outbound_count = 0
+            for c in connections:
+                src_ip = c.get('src_ip', '')
+                dst_ip = c.get('dst_ip', '')
+                src_is_private = src_ip.startswith(('10.', '192.168.', '172.'))
+                dst_is_private = dst_ip.startswith(('10.', '192.168.', '172.'))
+                if src_is_private and not dst_is_private:
+                    outbound_count += 1
+                elif not src_is_private and dst_is_private:
+                    inbound_count += 1
+
+            # Protocol distribution
+            protocols = {}
+            for c in connections:
+                proto = c.get('protocol', 'TCP')
+                protocols[proto] = protocols.get(proto, 0) + 1
+
             self.threat_posture_panel.threat_data = {
                 'current_threat': current_threat,
                 'baseline_threat': sum(threats[:len(threats)//3]) / max(len(threats)//3, 1) if threats else 0,
                 'active_threats': high_count,
                 'monitored_ips': len(set(c.get('dst_ip') for c in connections)),
-                'top_threats': top_threats,  # Add top 3 for radar graphs
+                'top_threats': top_threats,
+                # Extended SOC metrics
+                'total_connections': total_conn,
+                'flagged_connections': flagged,
+                'high_uncertainty': high_uncertainty,
+                'consensus_agreement': consensus_agreement,
+                'inbound_count': inbound_count,
+                'outbound_count': outbound_count,
+                'protocols': protocols,
             }
 
         # Consensus Breakdown Panel (Top-Center) - update with latest scorer data
@@ -1036,6 +1073,14 @@ class UnifiedDashboard(App):
                 'active_threats': 0,
                 'monitored_ips': 0,
                 'top_threats': [],
+                # Extended SOC metrics
+                'total_connections': 0,
+                'flagged_connections': 0,
+                'high_uncertainty': 0,
+                'consensus_agreement': 1.0,
+                'inbound_count': 0,
+                'outbound_count': 0,
+                'protocols': {},
             }
 
         if self.geographic_alerts_panel:
