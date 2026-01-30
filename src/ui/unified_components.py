@@ -276,31 +276,32 @@ class ThreatRadarGraph:
 
 class ThreatPosturePanel(Static):
     """
-    Top-left panel: Threat posture assessment with radar graphs and system status gumballs
-    Shows current threat level, baseline, active threats, radar graphs for top 3 threats,
-    and real-time component health indicators.
+    Top-left panel: SOC Operations Summary
+    Professional blue-team interface showing operational metrics, flagged connections,
+    consensus scoring summary, and system health indicators.
+
+    Design: Muted professional aesthetic with strategic color use for alerts only.
     """
 
     DEFAULT_CSS = """
     ThreatPosturePanel {
         height: 100%;
         width: 100%;
-        padding: 1;
+        padding: 0 1;
         overflow-y: auto;
     }
     """
 
-    # Component definitions for system status gumballs
-    # These must match the keys in heartbeat.COBALTGRAPH_COMPONENTS
+    # Minimal component tracking for system health bar
     SYSTEM_COMPONENTS = [
-        ("database", "Database"),
-        ("capture", "Capture"),
-        ("pipeline", "Pipeline"),
-        ("consensus", "Consensus"),
-        ("geo_engine", "GeoIP"),
+        ("database", "DB"),
+        ("capture", "CAP"),
+        ("pipeline", "PL"),
+        ("consensus", "CON"),
+        ("geo_engine", "GEO"),
         ("asn_lookup", "ASN"),
-        ("reputation", "Reputation"),
-        ("dashboard", "Dashboard"),
+        ("reputation", "REP"),
+        ("dashboard", "UI"),
     ]
 
     threat_data = reactive(dict)
@@ -313,19 +314,37 @@ class ThreatPosturePanel(Static):
             'baseline_threat': 0.0,
             'active_threats': 0,
             'monitored_ips': 0,
-            'top_threats': [],  # Top 3 threat connections for radar graphs
+            'top_threats': [],
+            # Extended SOC metrics
+            'total_connections': 0,
+            'flagged_connections': 0,
+            'high_uncertainty': 0,
+            'consensus_agreement': 1.0,
+            'inbound_count': 0,
+            'outbound_count': 0,
+            'protocols': {},  # {'TCP': count, 'UDP': count}
         }
-        # Initialize with empty status - will be populated by heartbeat
         self.system_status = {}
 
-    def _get_gumball(self, status: str) -> str:
-        """Return colored gumball indicator based on status"""
+    def _get_health_char(self, status: str) -> str:
+        """Return minimal health indicator"""
         if status == "ACTIVE":
-            return "[bold bright_green]●[/bold bright_green]"
+            return "[green]▪[/green]"
         elif status == "DEGRADED":
-            return "[bold yellow]●[/bold yellow]"
-        else:  # DEAD
-            return "[bold red]●[/bold red]"
+            return "[yellow]▪[/yellow]"
+        else:
+            return "[red]▪[/red]"
+
+    def _get_threat_indicator(self, score: float) -> tuple:
+        """Return (indicator, color, label) for threat level"""
+        if score >= 0.7:
+            return ("▲", "bold red", "CRIT")
+        elif score >= 0.5:
+            return ("▲", "yellow", "HIGH")
+        elif score >= 0.3:
+            return ("─", "dim yellow", "MED")
+        else:
+            return ("▼", "dim green", "LOW")
 
     def watch_threat_data(self, new_data: dict) -> None:
         """Trigger re-render when threat data changes"""
@@ -336,100 +355,125 @@ class ThreatPosturePanel(Static):
         self.refresh()
 
     def render(self):
-        """Render threat posture with system status gumballs and radar graphs"""
-        current = self.threat_data.get('current_threat', 0)
-        baseline = self.threat_data.get('baseline_threat', 0)
-        active = self.threat_data.get('active_threats', 0)
-        ips = self.threat_data.get('monitored_ips', 0)
+        """Render professional SOC operations summary"""
+        # Extract metrics
+        current = float(self.threat_data.get('current_threat', 0) or 0)
+        baseline = float(self.threat_data.get('baseline_threat', 0) or 0)
+        active = int(self.threat_data.get('active_threats', 0) or 0)
+        ips = int(self.threat_data.get('monitored_ips', 0) or 0)
+        total_conn = int(self.threat_data.get('total_connections', 0) or 0)
+        flagged = int(self.threat_data.get('flagged_connections', 0) or 0)
+        uncertain = int(self.threat_data.get('high_uncertainty', 0) or 0)
+        agreement = float(self.threat_data.get('consensus_agreement', 1.0) or 1.0)
+        inbound = int(self.threat_data.get('inbound_count', 0) or 0)
+        outbound = int(self.threat_data.get('outbound_count', 0) or 0)
+        protocols = self.threat_data.get('protocols', {})
         top_threats = self.threat_data.get('top_threats', [])
 
-        # Color code threat level
-        if current >= 0.7:
-            threat_color = "[bold red]"
-            threat_level = "CRITICAL"
-        elif current >= 0.5:
-            threat_color = "[bold yellow]"
-            threat_level = "HIGH"
-        elif current >= 0.3:
-            threat_color = "[yellow]"
-            threat_level = "MEDIUM"
+        # Calculate system health
+        online_count = sum(1 for c in self.system_status.values() if c.get("status") == "ACTIVE")
+        total_components = len(self.SYSTEM_COMPONENTS)
+
+        # Threat indicator
+        indicator, threat_color, threat_label = self._get_threat_indicator(current)
+
+        lines = []
+
+        # ═══ HEADER: Threat Level Bar ═══
+        lines.append(f"[dim]{'─' * 42}[/dim]")
+
+        # Compact threat level display
+        delta = current - baseline
+        delta_str = f"+{delta:.2f}" if delta >= 0 else f"{delta:.2f}"
+        delta_color = "red" if delta > 0.1 else ("green" if delta < -0.1 else "dim")
+
+        threat_bar_width = 20
+        filled = int(current * threat_bar_width)
+        bar = f"[{threat_color}]{'█' * filled}[/{threat_color}][dim]{'░' * (threat_bar_width - filled)}[/dim]"
+
+        lines.append(f"[{threat_color}]{indicator}[/{threat_color}] {bar} [{threat_color}]{current:.2f}[/{threat_color}] [{delta_color}]({delta_str})[/{delta_color}]")
+        lines.append(f"[dim]  THREAT LEVEL: {threat_label}    baseline {baseline:.2f}[/dim]")
+
+        # ═══ SECTION: Connection Metrics ═══
+        lines.append("")
+        lines.append("[bold dim]CONNECTIONS[/bold dim]")
+
+        # Flagged/Total ratio with visual indicator
+        flag_ratio = flagged / max(total_conn, 1)
+        flag_color = "red" if flag_ratio > 0.3 else ("yellow" if flag_ratio > 0.1 else "dim")
+
+        lines.append(f"  [dim]total[/dim]    {total_conn:>6}  [dim]│[/dim]  [dim]flagged[/dim] [{flag_color}]{flagged:>4}[/{flag_color}]")
+        lines.append(f"  [dim]inbound[/dim]  {inbound:>6}  [dim]│[/dim]  [dim]outbound[/dim] {outbound:>4}")
+
+        # High-threat and uncertain connections
+        if active > 0 or uncertain > 0:
+            threat_str = f"[bold red]{active}[/bold red]" if active > 0 else "[dim]0[/dim]"
+            uncertain_str = f"[yellow]{uncertain}[/yellow]" if uncertain > 0 else "[dim]0[/dim]"
+            lines.append(f"  [dim]critical[/dim] {threat_str:>6}  [dim]│[/dim]  [dim]uncertain[/dim] {uncertain_str}")
+
+        # ═══ SECTION: Consensus Metrics ═══
+        lines.append("")
+        lines.append("[bold dim]SCORING CONSENSUS[/bold dim]")
+
+        # Agreement indicator
+        agree_pct = int(agreement * 100)
+        if agree_pct >= 80:
+            agree_color = "green"
+            agree_status = "ALIGNED"
+        elif agree_pct >= 60:
+            agree_color = "yellow"
+            agree_status = "PARTIAL"
         else:
-            threat_color = "[green]"
-            threat_level = "LOW"
+            agree_color = "red"
+            agree_status = "DIVERGENT"
 
-        # Build content with system status gumballs first
-        content_lines = []
-        content_lines.append("[bold cyan]─── SYSTEM STATUS ───[/bold cyan]")
+        agree_bar_width = 12
+        agree_filled = int(agreement * agree_bar_width)
+        agree_bar = f"[{agree_color}]{'▮' * agree_filled}[/{agree_color}][dim]{'▯' * (agree_bar_width - agree_filled)}[/dim]"
 
-        # Render system status gumballs in a compact 2-column layout
-        for i in range(0, len(self.SYSTEM_COMPONENTS), 2):
-            left_comp = self.SYSTEM_COMPONENTS[i]
-            left_info = self.system_status.get(left_comp[0], {})
-            left_status = left_info.get("status", "DEAD")
-            left_gumball = self._get_gumball(left_status)
-            left_text = f"{left_gumball} {left_comp[1]:<9}"
+        lines.append(f"  {agree_bar} [{agree_color}]{agree_pct}%[/{agree_color}] {agree_status}")
+        lines.append(f"  [dim]monitored endpoints: {ips}[/dim]")
 
-            if i + 1 < len(self.SYSTEM_COMPONENTS):
-                right_comp = self.SYSTEM_COMPONENTS[i + 1]
-                right_info = self.system_status.get(right_comp[0], {})
-                right_status = right_info.get("status", "DEAD")
-                right_gumball = self._get_gumball(right_status)
-                right_text = f"{right_gumball} {right_comp[1]}"
-            else:
-                right_text = ""
+        # ═══ SECTION: Flagged Connections ═══
+        lines.append("")
+        lines.append("[bold dim]FLAGGED CONNECTIONS[/bold dim]")
 
-            content_lines.append(f"{left_text} {right_text}")
-
-        # Calculate overall system health from actual status data
-        online_count = 0
-        total_health = 0
-        component_count = len(self.system_status) if self.system_status else len(self.SYSTEM_COMPONENTS)
-
-        for comp_id, comp_info in self.system_status.items():
-            if comp_info.get("status") == "ACTIVE":
-                online_count += 1
-            total_health += comp_info.get("health_percentage", 0)
-
-        avg_health = total_health / component_count if component_count > 0 else 0
-        content_lines.append(f"[dim]{online_count}/{component_count} online | {avg_health:.0f}% health[/dim]")
-
-        # Add separator and threat posture info
-        content_lines.append("")
-        content_lines.append("[bold cyan]─── THREAT POSTURE ───[/bold cyan]")
-        content_lines.append(f"{threat_color}Current Threat[/]")
-        content_lines.append(f"{current:.2f} [{threat_level}]")
-        content_lines.append("")
-        content_lines.append(f"[dim]Baseline:[/dim] {baseline:.2f}")
-        content_lines.append(f"[red]High Threats:[/red] {active}")
-        content_lines.append(f"[cyan]Monitored:[/cyan] {ips} IPs")
-
-        # Add separator before radar graphs
-        content_lines.append("")
-        content_lines.append("[bold cyan]─── TOP THREAT RADAR ───[/bold cyan]")
-        content_lines.append("")
-
-        # Add radar graphs for top 3 threats
         if top_threats:
-            radar_output = ThreatRadarGraph.render_comparison_radar(
-                top_threats,
-                width=50,
-                height=10
-            )
-            content_lines.append(radar_output)
+            for idx, conn in enumerate(top_threats[:4]):
+                threat_score = float(conn.get('threat_score', 0) or 0)
+                dst_ip = conn.get('dst_ip', '?.?.?.?')
+                dst_port = conn.get('dst_port', 0)
+                dst_org = (conn.get('dst_org') or 'Unknown')[:10]
+                confidence = float(conn.get('confidence', 0) or 0)
 
-            # Add legend
-            content_lines.append("")
-            content_lines.append("[dim]THR=Threat CNF=Confidence[/dim]")
-            content_lines.append("[dim]RIS=OrgRisk HOP=Distance GEO=GeoRisk[/dim]")
+                # Compact threat indicator
+                t_ind, t_col, _ = self._get_threat_indicator(threat_score)
+
+                # Format: indicator IP:port org score
+                ip_display = dst_ip[:15] if len(dst_ip) > 15 else dst_ip
+                lines.append(f"  [{t_col}]{t_ind}[/{t_col}] {ip_display}:{dst_port:<5} [dim]{dst_org:<10}[/dim] [{t_col}]{threat_score:.2f}[/{t_col}]")
         else:
-            content_lines.append("[dim]Scanning for threats...[/dim]")
+            lines.append("  [dim]No flagged connections[/dim]")
 
-        content = "\n".join(content_lines)
+        # ═══ SECTION: System Health (minimal) ═══
+        lines.append("")
 
+        # Compact health bar
+        health_chars = ""
+        for comp_id, comp_name in self.SYSTEM_COMPONENTS:
+            status = self.system_status.get(comp_id, {}).get("status", "DEAD")
+            health_chars += self._get_health_char(status)
+
+        lines.append(f"[dim]SYS[/dim] {health_chars} [dim]{online_count}/{total_components}[/dim]")
+
+        content = "\n".join(lines)
+
+        # Professional border style - dim cyan for subtle emphasis
         return Panel(
             content,
-            title="[bold cyan]Threat Posture[/bold cyan]",
-            border_style="cyan"
+            title="[bold bright_white]SOC SUMMARY[/bold bright_white]",
+            border_style="dim cyan",
+            padding=(0, 1)
         )
 
 
