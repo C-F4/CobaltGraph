@@ -87,6 +87,19 @@ try:
 except ImportError:
     from unified_dashboard import UnifiedDashboard, DataManager, VisualizationManager
 
+# Import graph analytics widgets
+try:
+    from src.ui.graphs import (
+        ThreatTimelineGraph,
+        ConnectionVolumeGraph,
+        PortDistributionGraph,
+        GeoThreatGraph,
+        ThreatDistributionGraph,
+    )
+    GRAPHS_AVAILABLE = True
+except ImportError:
+    GRAPHS_AVAILABLE = False
+
 # Import consolidated maps module
 try:
     from src.ui.maps import FlatWorldMap, RotatingGlobe, SimpleGlobe, is_unknown_location, int_to_roman
@@ -1883,6 +1896,153 @@ class AnomalyAlertPanel(Static):
         )
 
 
+class GraphAnalyticsPanel(Static):
+    """
+    Toggleable panel displaying analytical graphs.
+
+    Cycles through five graph views:
+        1. Threat Timeline - threat scores over time (line chart)
+        2. Connection Volume - connection counts per time bucket (bar chart)
+        3. Port Distribution - traffic by destination port (horizontal bars)
+        4. Geographic Threat - threat by country (horizontal bars)
+        5. Threat Distribution - histogram of threat scores
+
+    The active graph is cycled with repeated 'c' presses.
+    Data is updated reactively from the dashboard refresh loop.
+    """
+
+    GRAPH_MODES = [
+        "timeline",
+        "volume",
+        "ports",
+        "geo",
+        "distribution",
+    ]
+
+    GRAPH_LABELS = {
+        "timeline": "Threat Timeline",
+        "volume": "Connection Volume",
+        "ports": "Port Distribution",
+        "geo": "Geographic Threats",
+        "distribution": "Score Distribution",
+    }
+
+    DEFAULT_CSS = """
+    GraphAnalyticsPanel {
+        height: 100%;
+        width: 100%;
+        padding: 0;
+    }
+    """
+
+    graph_mode = reactive("timeline")
+    connections_data = reactive(list)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._graph_width = 60
+        self._graph_height = 18
+        self.connections_data = []
+        self.graph_mode = "timeline"
+
+    def cycle_graph(self) -> str:
+        """Cycle to the next graph view. Returns the new mode name."""
+        try:
+            idx = self.GRAPH_MODES.index(self.graph_mode)
+        except ValueError:
+            idx = 0
+        self.graph_mode = self.GRAPH_MODES[(idx + 1) % len(self.GRAPH_MODES)]
+        return self.GRAPH_LABELS.get(self.graph_mode, self.graph_mode)
+
+    def on_resize(self, event) -> None:
+        new_w = max(30, event.size.width - 4)
+        new_h = max(8, event.size.height - 4)
+        if (new_w, new_h) != (self._graph_width, self._graph_height):
+            self._graph_width = new_w
+            self._graph_height = new_h
+            self.refresh()
+
+    def watch_graph_mode(self, new_mode: str) -> None:
+        self.refresh()
+
+    def watch_connections_data(self, new_data: list) -> None:
+        self.refresh()
+
+    def render(self) -> Panel:
+        if not GRAPHS_AVAILABLE:
+            return Panel(
+                "[dim]Graph libraries not available.\n"
+                "Install with: pip install plotext plotille textual-plotext[/dim]",
+                title="[bold cyan]Analytics[/bold cyan]",
+                border_style="dim red",
+            )
+
+        connections = list(self.connections_data) if self.connections_data else []
+        mode = self.graph_mode
+        w, h = self._graph_width, self._graph_height
+
+        mode_idx = self.GRAPH_MODES.index(mode) if mode in self.GRAPH_MODES else 0
+        mode_label = self.GRAPH_LABELS.get(mode, mode)
+        nav_hint = f"[dim]({mode_idx + 1}/{len(self.GRAPH_MODES)}) press 'c' to cycle[/dim]"
+
+        try:
+            chart_str = self._render_current_graph(connections, mode, w, h)
+        except Exception as e:
+            chart_str = f"[dim]Graph render error: {e}[/dim]"
+
+        return Panel(
+            f"{chart_str}\n{nav_hint}",
+            title=f"[bold cyan]{mode_label}[/bold cyan]",
+            border_style="dim cyan",
+            padding=(0, 0),
+        )
+
+    def _render_current_graph(self, connections, mode, w, h):
+        """Dispatch to the correct graph renderer."""
+        from src.ui.graphs.threat_timeline import render_threat_timeline
+        from src.ui.graphs.connection_volume import render_connection_volume
+        from src.ui.graphs.port_chart import render_port_distribution
+        from src.ui.graphs.geo_threat_chart import render_geo_volume
+        from src.ui.graphs.threat_distribution import render_threat_distribution
+
+        timestamps = [c.get('timestamp', 0) for c in connections]
+        scores = [float(c.get('threat_score', 0) or 0) for c in connections]
+
+        if mode == "timeline":
+            return render_threat_timeline(timestamps, scores, width=w, height=h)
+
+        elif mode == "volume":
+            return render_connection_volume(timestamps, bucket_minutes=5, width=w, height=h)
+
+        elif mode == "ports":
+            ports = [int(c.get('dst_port', 0) or 0) for c in connections]
+            return render_port_distribution(ports, width=w, height=h)
+
+        elif mode == "geo":
+            # Aggregate by country
+            country_agg = {}
+            for c in connections:
+                cc = c.get('dst_country') or c.get('country')
+                if not cc:
+                    continue
+                cc = str(cc)[:2].upper()
+                if cc not in country_agg:
+                    country_agg[cc] = {"total_threat": 0.0, "count": 0}
+                country_agg[cc]["total_threat"] += float(c.get('threat_score', 0) or 0)
+                country_agg[cc]["count"] += 1
+
+            country_data = [
+                (cc, d["total_threat"] / d["count"], d["count"])
+                for cc, d in country_agg.items()
+            ]
+            return render_geo_volume(country_data, width=w, height=h)
+
+        elif mode == "distribution":
+            return render_threat_distribution(scores, width=w, height=h)
+
+        return "[dim]Unknown graph mode[/dim]"
+
+
 class CobaltGraphDashboardEnhanced(UnifiedDashboard):
     """
     Enhanced unified dashboard with mode support (device/network)
@@ -1912,6 +2072,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         ("g", "toggle_globe", "Pause/Resume Globe Animation"),
         ("i", "cycle_intel_map", "Cycle Intel Map Type"),
         ("m", "toggle_mode_panel", "Toggle Mode Panel"),
+        ("c", "toggle_graphs", "Toggle Graph Analytics"),
         ("k", "show_metric_key", "Show Full Metric Key"),
         ("v", "cycle_verification_filter", "Cycle Verification Filter"),
         ("escape", "close_modal", "Close Modal"),
@@ -1989,6 +2150,16 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         display: block;
     }
 
+    #graph_analytics_panel {
+        width: 50%;
+        padding: 1 0 0 1;
+        display: none;
+    }
+
+    #graph_analytics_panel.visible {
+        display: block;
+    }
+
     #detail_modal {
         display: none;
         layer: modal;
@@ -2031,6 +2202,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.mode_specific_panel = None
         self.anomaly_panel = None
         self.org_intel_panel = None
+        self.graph_panel = None
         self.detail_modal = None
         self.modal_backdrop = None
 
@@ -2069,6 +2241,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 # Organization Intel panel (hidden by default, toggle with 'o')
                 self.org_intel_panel = OrganizationIntelPanel(id="org_intel_panel")
                 yield self.org_intel_panel
+
+                # Graph Analytics panel (hidden by default, toggle with 'c')
+                self.graph_panel = GraphAnalyticsPanel(id="graph_analytics_panel")
+                yield self.graph_panel
 
         # Detail modal (hidden by default, shown on row click)
         self.modal_backdrop = Static(id="modal_backdrop")
@@ -2269,6 +2445,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             if self.org_intel_panel:
                 org_intel_data = self._calculate_org_intel(connections)
                 self.org_intel_panel.org_data = org_intel_data
+
+            # Update graph analytics panel
+            if self.graph_panel:
+                self.graph_panel.connections_data = connections
 
             # Update stats with activity spinner
             stats = self.data_manager.get_stats()
@@ -2521,7 +2701,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def action_help(self) -> None:
         """Show keybindings help in subtitle"""
-        help_text = "Q=Quit R=Refresh A=Anom O=Org M=Dev G=Globe I=Map K=Key V=Filter Enter=Details ?=Help ESC=Close"
+        help_text = "Q=Quit R=Refresh A=Anom O=Org C=Graphs M=Dev G=Globe I=Map K=Key V=Filter Enter=Details ?=Help ESC=Close"
         self.sub_title = help_text
 
     def _show_connection_detail(self, connection: dict) -> None:
@@ -2588,6 +2768,28 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.org_intel_panel.add_class("visible")
         self.org_intel_panel.styles.display = "block"
         self.sub_title = "Showing Organization Intel (press 'm' for devices, 'a' for anomalies)"
+
+    def action_toggle_graphs(self) -> None:
+        """Toggle Graph Analytics panel, cycling through graph views on repeat presses"""
+        if not self.graph_panel:
+            return
+
+        # If already visible, cycle to next graph
+        if self.graph_panel.has_class("visible"):
+            graph_name = self.graph_panel.cycle_graph()
+            self.sub_title = f"Graph: {graph_name} (press 'c' to cycle, 'm' for devices)"
+            return
+
+        # Hide all bottom-right panels first
+        self._hide_all_bottom_right_panels()
+
+        # Show graph panel
+        self.graph_panel.add_class("visible")
+        self.graph_panel.styles.display = "block"
+        graph_name = GraphAnalyticsPanel.GRAPH_LABELS.get(
+            self.graph_panel.graph_mode, "Timeline"
+        )
+        self.sub_title = f"Graph: {graph_name} (press 'c' to cycle, 'm' for devices)"
 
     def action_toggle_mode_panel(self) -> None:
         """Toggle to mode-specific panel (Network Devices)"""
@@ -2670,6 +2872,9 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         if self.org_intel_panel:
             self.org_intel_panel.remove_class("visible")
             self.org_intel_panel.styles.display = "none"
+        if self.graph_panel:
+            self.graph_panel.remove_class("visible")
+            self.graph_panel.styles.display = "none"
 
 
 if __name__ == '__main__':
