@@ -27,7 +27,6 @@ from .utils import (
     int_to_roman,
     is_unknown_location,
 )
-import math
 
 try:
     from src.ui.geo_data import GeoData
@@ -428,7 +427,12 @@ class FlatWorldMap(BaseMap):
         """Render IP labels for top threats."""
         sorted_threats = sorted(self.threats, key=lambda t: t.threat_score, reverse=True)[:10]
 
+        # Pre-populate occupied set with marker positions to prevent label overwrites
         occupied = set()
+        for marker, _ in self._cluster_markers():
+            pos = self.latlon_to_screen(marker.lat, marker.lon)
+            if pos:
+                occupied.add(pos)
 
         for threat in sorted_threats:
             if threat.threat_score < 0.5:
