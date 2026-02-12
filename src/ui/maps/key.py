@@ -157,7 +157,8 @@ def render_key_box(width: int = 18, include_verification: bool = False) -> List[
         ("▪ Coast • Water", "bold green"),
         ("", None),
         ("CONNECTION PING", "dim bold"),
-        ("● Crit ◉ High", "bold red"),
+        ("● Crit", "bold red"),
+        ("◉ High", "bold yellow"),
         ("◯ Med  ○ Low", "yellow"),
         ("· Info", "green"),
     ]
