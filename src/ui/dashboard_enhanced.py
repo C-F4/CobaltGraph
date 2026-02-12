@@ -640,6 +640,8 @@ class EnhancedThreatGlobePanel(Static):
                         ip = conn.get('dst_ip', 'Unknown')
                         dst_lat = float(conn.get('dst_lat', 0) or 0)
                         dst_lon = float(conn.get('dst_lon', 0) or 0)
+                        src_lat = float(conn.get('src_lat', 0) or 0)
+                        src_lon = float(conn.get('src_lon', 0) or 0)
 
                         # Filter out (0,0) unknown locations
                         if dst_lat == 0.0 and dst_lon == 0.0:
@@ -647,7 +649,7 @@ class EnhancedThreatGlobePanel(Static):
                             continue
 
                         self.enhanced_globe.add_connection(
-                            0.0, 0.0, dst_lat, dst_lon,
+                            src_lat, src_lon, dst_lat, dst_lon,
                             threat, org_type, ip
                         )
                     except Exception as e:
@@ -968,10 +970,12 @@ class SmartConnectionTable(Static):
         key.append(" │ ", style="dim")
         key.append("Risk:", style="dim bold")
         key.append(" ●", style="bold red")
+        key.append("C", style="dim")
+        key.append(" ◉", style="bold yellow")
         key.append("H", style="dim")
-        key.append(" ●", style="bold yellow")
+        key.append(" ●", style="yellow")
         key.append("M", style="dim")
-        key.append(" ●", style="green")
+        key.append(" ●", style="cyan")
         key.append("L", style="dim")
         key.append(" │ ", style="dim")
         key.append("Anom", style="dim bold")
@@ -999,7 +1003,7 @@ class SmartConnectionTable(Static):
         logger.debug(f"Updating connection table with {len(new_connections)} connections")
 
         # Add rows with text color coding by threat and type
-        for conn in self.connections[:50]:  # Limit to 50 for performance
+        for conn in self.connections[-50:]:  # Most recent 50 (matches globe slice direction)
             try:
                 # Handle both float timestamps and ISO string timestamps
                 ts = conn.get('timestamp', 0)
@@ -1017,19 +1021,22 @@ class SmartConnectionTable(Static):
                 confidence = float(conn.get('confidence', 0) or 0)
                 high_uncertainty = conn.get('high_uncertainty', False)
 
-                # Threat color mapping (text only)
-                if threat >= 0.7:
+                # Threat color mapping (text only) - 5 tiers matching globe THREAT_LEVELS
+                if threat >= 0.8:
                     threat_color = "bold red"
-                    threat_indicator = "●●●"
-                elif threat >= 0.5:
+                    threat_indicator = "●●●"     # Critical
+                elif threat >= 0.7:
                     threat_color = "bold yellow"
-                    threat_indicator = "●●○"
-                elif threat >= 0.3:
+                    threat_indicator = "●●◉"     # High
+                elif threat >= 0.5:
                     threat_color = "yellow"
-                    threat_indicator = "●○○"
+                    threat_indicator = "●●○"     # Medium
+                elif threat >= 0.3:
+                    threat_color = "cyan"
+                    threat_indicator = "●○○"     # Low
                 else:
                     threat_color = "green"
-                    threat_indicator = "○○○"
+                    threat_indicator = "○○○"     # Info
 
                 # Type color mapping (text only) - based on organization type
                 type_colors = {
@@ -1116,7 +1123,7 @@ class SmartConnectionTable(Static):
                     f"[white]{org}[/]",
                     f"[{type_color}]{org_type:>7}[/]",
                     f"[{threat_color}]{threat_indicator}[/]",
-                    f"[{threat_color}]{threat:.2f}[/]",
+                    f"[{threat_color}]{score_display}[/]",
                     f"[{anomaly_color}]{anomaly_display}[/]",
                     f"[{spread_color}]{spread_display}[/]",
                     f"[cyan]{hops}[/]",
@@ -2282,17 +2289,17 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def _update_display(self) -> None:
         """Quick display updates (animations, etc) - optimized for 200ms intervals"""
-        # Update globe animation (single refresh per cycle)
+        # Update globe animation for the currently displayed map type
         if self.globe_panel:
             try:
-                globe_component = (
-                    self.globe_panel.world_map or
-                    self.globe_panel.enhanced_globe or
-                    self.globe_panel.simple_globe
-                )
-                if globe_component:
-                    globe_component.update(0.2)  # Match interval timing
-                    self.globe_panel.refresh()
+                map_type = self.globe_panel._current_map_type
+                if map_type == "flat" and self.globe_panel.world_map:
+                    self.globe_panel.world_map.update(0.2)
+                elif map_type == "rotating" and self.globe_panel.enhanced_globe:
+                    self.globe_panel.enhanced_globe.update(0.2)
+                elif map_type == "simple" and self.globe_panel.simple_globe:
+                    self.globe_panel.simple_globe.update(0.2)
+                self.globe_panel.refresh()
             except Exception as e:
                 logger.debug(f"Globe update failed: {e}")
 

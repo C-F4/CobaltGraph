@@ -166,7 +166,8 @@ class FlatWorldMap(BaseMap):
             return False
 
         marker = self.threats[-1]
-        screen_pos = self.latlon_to_screen(lat, lon)
+        # Use normalized marker coords (not original) to match _render_markers
+        screen_pos = self.latlon_to_screen(marker.lat, marker.lon)
         self._clusters[screen_pos].append(marker)
 
         return True
@@ -182,7 +183,15 @@ class FlatWorldMap(BaseMap):
         self.height = max(self.MIN_HEIGHT, height)
         self._base_cache = None
         self._cache_size = None
+        # Rebuild clusters with new screen positions after resize
+        self._rebuild_clusters()
+
+    def _rebuild_clusters(self) -> None:
+        """Rebuild cluster dict from existing threats (needed after resize)."""
         self._clusters.clear()
+        for marker in self.threats:
+            screen_pos = self.latlon_to_screen(marker.lat, marker.lon)
+            self._clusters[screen_pos].append(marker)
 
     def _on_resize(self) -> None:
         """Invalidate cache on resize."""
