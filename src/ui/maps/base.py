@@ -348,7 +348,7 @@ class BaseMap(ABC):
         """
         threat_count = len(self.threats)
         critical = sum(1 for t in self.threats if t.threat_score >= 0.8)
-        high = sum(1 for t in self.threats if t.threat_score >= 0.7)
+        high = sum(1 for t in self.threats if 0.7 <= t.threat_score < 0.8)
 
         return {
             'total': threat_count,

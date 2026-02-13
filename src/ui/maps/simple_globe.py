@@ -17,7 +17,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from .base import BaseMap
-from .utils import int_to_roman
+from .utils import int_to_roman, get_threat_char, get_threat_color
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ class SimpleGlobe(BaseMap):
 
         # Stats footer - note this is static
         threat_count = len(self._simple_threats)
-        critical = sum(1 for t in self._simple_threats if t.level >= 0.7)
+        critical = sum(1 for t in self._simple_threats if t.level >= 0.8)
         unknown_part = f" | Unk:{int_to_roman(self._unknown_count)}" if self._unknown_count > 0 else ""
 
         footer = f"\n[dim]Static view | Threats: {threat_count} | Critical: {critical}{unknown_part}[/dim]"
@@ -255,14 +255,8 @@ class SimpleGlobe(BaseMap):
 
             x, y = pos
 
-            # Simple threat level coloring
-            if threat.level >= 0.8:
-                char, style = '●', 'bold red'
-            elif threat.level >= 0.6:
-                char, style = '◉', 'bold yellow'
-            elif threat.level >= 0.4:
-                char, style = '○', 'yellow'
-            else:
-                char, style = '·', 'green'
+            # Use shared threat level indicators (matches THREAT_LEVELS)
+            char = get_threat_char(threat.level)
+            style = get_threat_color(threat.level)
 
             canvas[y][x] = Text(char, style=style)

@@ -465,13 +465,14 @@ class RotatingGlobe(BaseMap):
                 canvas[y][x] = Text(char, style=style)
 
     def _render_legend(self, canvas: List[List]) -> None:
-        """Render compact legend."""
+        """Render compact legend (matches THREAT_LEVELS from utils)."""
         legend = [
             ("Threat:", "dim"),
             ("● Crit", "bold red"),
-            ("◉ High", "yellow"),
-            ("○ Med", "cyan"),
-            ("· Low", "green"),
+            ("◉ High", "bold yellow"),
+            ("◯ Med", "yellow"),
+            ("○ Low", "cyan"),
+            ("· Info", "green"),
         ]
 
         start_x = self.width - 12

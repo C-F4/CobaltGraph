@@ -27,7 +27,6 @@ from .utils import (
     int_to_roman,
     is_unknown_location,
 )
-import math
 
 try:
     from src.ui.geo_data import GeoData
@@ -166,7 +165,8 @@ class FlatWorldMap(BaseMap):
             return False
 
         marker = self.threats[-1]
-        screen_pos = self.latlon_to_screen(lat, lon)
+        # Use normalized marker coords (not original) to match _render_markers
+        screen_pos = self.latlon_to_screen(marker.lat, marker.lon)
         self._clusters[screen_pos].append(marker)
 
         return True
@@ -182,7 +182,15 @@ class FlatWorldMap(BaseMap):
         self.height = max(self.MIN_HEIGHT, height)
         self._base_cache = None
         self._cache_size = None
+        # Rebuild clusters with new screen positions after resize
+        self._rebuild_clusters()
+
+    def _rebuild_clusters(self) -> None:
+        """Rebuild cluster dict from existing threats (needed after resize)."""
         self._clusters.clear()
+        for marker in self.threats:
+            screen_pos = self.latlon_to_screen(marker.lat, marker.lon)
+            self._clusters[screen_pos].append(marker)
 
     def _on_resize(self) -> None:
         """Invalidate cache on resize."""
@@ -419,7 +427,12 @@ class FlatWorldMap(BaseMap):
         """Render IP labels for top threats."""
         sorted_threats = sorted(self.threats, key=lambda t: t.threat_score, reverse=True)[:10]
 
+        # Pre-populate occupied set with marker positions to prevent label overwrites
         occupied = set()
+        for marker, _ in self._cluster_markers():
+            pos = self.latlon_to_screen(marker.lat, marker.lon)
+            if pos:
+                occupied.add(pos)
 
         for threat in sorted_threats:
             if threat.threat_score < 0.5:
