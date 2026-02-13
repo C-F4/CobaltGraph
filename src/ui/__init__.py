@@ -58,6 +58,24 @@ try:
 except ImportError:
     IntelMapPanel = None
 
+# Import graphs module (analytical charting)
+try:
+    from .graphs import (
+        ThreatTimelineGraph,
+        ConnectionVolumeGraph,
+        PortDistributionGraph,
+        GeoThreatGraph,
+        ThreatDistributionGraph,
+    )
+    GRAPHS_AVAILABLE = True
+except ImportError:
+    ThreatTimelineGraph = None
+    ConnectionVolumeGraph = None
+    PortDistributionGraph = None
+    GeoThreatGraph = None
+    ThreatDistributionGraph = None
+    GRAPHS_AVAILABLE = False
+
 __all__ = [
     'CobaltGraphDashboardEnhanced',
     'DASHBOARD_AVAILABLE',
@@ -70,4 +88,11 @@ __all__ = [
     'RotatingGlobe',
     'SimpleGlobe',
     'INTEL_MAP_AVAILABLE',
+    # Graphs
+    'ThreatTimelineGraph',
+    'ConnectionVolumeGraph',
+    'PortDistributionGraph',
+    'GeoThreatGraph',
+    'ThreatDistributionGraph',
+    'GRAPHS_AVAILABLE',
 ]
