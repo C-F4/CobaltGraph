@@ -204,62 +204,263 @@ class GeoData:
         coastlines = []
 
         # North America - detailed outline with major features
-        coastlines.append(Polygon('North America', [
-            # Alaska
-            Point(71, -156), Point(70, -162), Point(66, -164), Point(64, -166),
-            Point(61, -166), Point(58, -162), Point(56, -160), Point(55, -163),
-            Point(52, -172), Point(52, -178), Point(55, 180), Point(60, 175),
-            Point(65, 170), Point(70, -168), Point(71, -156),
+
+        # Alaska - comprehensive coastline with all major features
+        coastlines.append(Polygon('Alaska', [
+            # Arctic coast (Point Barrow to Canadian border)
+            Point(71.3, -156.5), Point(71.2, -153), Point(70.8, -149),
+            Point(70.5, -145), Point(70.2, -141),  # US-Canada border at Arctic
+            # Northern Alaska coast
+            Point(70, -146), Point(70.5, -150), Point(71, -155),
+            Point(71.3, -157.5),  # Point Barrow area
+            # Northwest Alaska coast
+            Point(70, -161), Point(68.5, -164), Point(67, -164),
+            Point(66.5, -164),  # Kotzebue Sound area
+            # Seward Peninsula (Nome area)
+            Point(66, -165.5), Point(65.5, -168), Point(65, -166),
+            Point(64.5, -163), Point(64, -162),
+            # Western Alaska coast
+            Point(63.5, -162), Point(63, -163), Point(62.5, -165),
+            Point(62, -166), Point(61.5, -166),
+            # Yukon Delta
+            Point(61, -165), Point(60.5, -165), Point(60, -164),
+            Point(59.5, -162), Point(59, -161.5),
+            # Bristol Bay
+            Point(58.5, -158), Point(58, -157), Point(57.5, -157),
+            Point(57, -158.5), Point(56.5, -160),
+            # Alaska Peninsula
+            Point(56, -160.5), Point(55.5, -161), Point(55, -162),
+            Point(54.5, -163), Point(54, -165), Point(53.5, -167),
+            # Aleutian Islands arc (simplified)
+            Point(53, -169), Point(52.5, -172), Point(52, -176),
+            Point(51.5, 180), Point(52, 178), Point(52.5, 175),
+            Point(53, 172), Point(54, 168),
+            # Back to Alaska Peninsula south side
+            Point(55, -162), Point(55.5, -159), Point(56, -157),
+            Point(56.5, -155), Point(57, -154),
+            # Kodiak Island area
+            Point(57.5, -153), Point(58, -152), Point(58.5, -152),
+            # Cook Inlet / Kenai Peninsula
+            Point(59, -152), Point(59.5, -151.5), Point(60, -151),
+            Point(60.5, -150), Point(61, -150), Point(61.5, -150),
+            # Anchorage area / Prince William Sound
+            Point(61.2, -149.5), Point(61, -147), Point(60.5, -146),
+            Point(60, -145), Point(60.2, -144), Point(60.5, -144.5),
+            # Gulf of Alaska coast
+            Point(60, -143), Point(59.5, -141), Point(59, -139),
+            # Southeast Alaska panhandle starts
+            Point(59, -138), Point(58, -134),
+            Point(71.3, -156.5),  # Close polygon
+        ]))
+
+        # Alaska Panhandle (Southeast Alaska) - separate detailed polygon
+        coastlines.append(Polygon('Alaska Panhandle', [
+            Point(60, -141),  # Yakutat
+            Point(59.5, -139.5), Point(59, -138),
+            Point(58.5, -135), Point(58, -134),  # Juneau area
+            Point(57.5, -133.5), Point(57, -133),  # Admiralty Island
+            Point(56.5, -132.5), Point(56, -132),  # Ketchikan approach
+            Point(55.5, -131), Point(55, -130),  # Southern tip
+            Point(54.5, -130.5),  # Dixon Entrance
+            # East side (along Canada border)
+            Point(55, -131.5), Point(55.5, -132),
+            Point(56, -133), Point(56.5, -134),
+            Point(57, -134.5), Point(57.5, -135),
+            Point(58, -136), Point(58.5, -137),
+            Point(59, -139), Point(59.5, -140),
+            Point(60, -141),
         ]))
 
         coastlines.append(Polygon('North America Main', [
-            # Alaska panhandle to BC
-            Point(60, -141), Point(59, -138), Point(58, -134), Point(56, -132),
-            Point(55, -130), Point(54, -131), Point(52, -128), Point(50, -127),
-            # Pacific Northwest
-            Point(49, -124), Point(48, -124), Point(47, -124), Point(46, -124),
-            Point(45, -124), Point(44, -124), Point(43, -124), Point(42, -124),
-            Point(41, -124), Point(40, -124), Point(39, -123), Point(38, -123),
-            Point(37, -122), Point(36, -122), Point(35, -121), Point(34, -120),
-            # Southern California / Baja
-            Point(33, -118), Point(32, -117), Point(31, -116), Point(29, -114),
-            Point(28, -113), Point(26, -112), Point(24, -110), Point(23, -110),
-            # Mexico Pacific
-            Point(22, -106), Point(20, -105), Point(19, -105), Point(18, -103),
-            Point(17, -101), Point(16, -98), Point(16, -95), Point(17, -92),
-            # Central America
-            Point(18, -88), Point(17, -88), Point(16, -88), Point(15, -87),
-            Point(14, -87), Point(13, -87), Point(12, -87), Point(11, -84),
-            Point(10, -83), Point(9, -80), Point(8, -77),
+            # British Columbia coast (detailed fjords and islands)
+            Point(54.5, -130.5),  # Dixon Entrance / BC-Alaska border
+            Point(54, -131), Point(53.5, -130),  # Prince Rupert area
+            Point(53, -129), Point(52.5, -128.5),  # Haida Gwaii approach
+            Point(52, -128), Point(51.5, -128),  # Central BC coast
+            Point(51, -127.5), Point(50.5, -128),  # Queen Charlotte Sound
+            Point(50, -127.5),  # Vancouver Island north
+            # Vancouver Island west coast
+            Point(49.5, -127), Point(49, -126), Point(48.5, -125),
+            Point(48.3, -124),  # Pacific Rim
+            # Juan de Fuca Strait approach
+            Point(48.5, -124.5), Point(48.4, -123.5),
+            # Pacific Northwest US coast
+            Point(48, -124.7),  # Cape Flattery
+            Point(47.5, -124.5), Point(47, -124.2),  # Olympic Peninsula
+            Point(46.5, -124), Point(46, -124),  # Washington coast
+            Point(45.5, -124), Point(45, -124),  # Oregon border
+            Point(44.5, -124), Point(44, -124.1),  # Oregon coast
+            Point(43.5, -124.2), Point(43, -124.4),
+            Point(42.5, -124.4), Point(42, -124.3),  # Coos Bay area
+            Point(41.5, -124.2), Point(41, -124.1),  # California border
+            # Northern California
+            Point(40.5, -124.3), Point(40, -124.1),  # Eureka
+            Point(39.5, -123.8), Point(39, -123.7),
+            Point(38.5, -123.4), Point(38, -123),  # Point Reyes
+            # San Francisco Bay area
+            Point(37.8, -122.5), Point(37.5, -122.5),  # Golden Gate
+            Point(37, -122.4), Point(36.5, -122),  # Monterey Bay
+            # Central California
+            Point(36, -121.9), Point(35.5, -121.5),
+            Point(35, -121), Point(34.7, -120.6),  # Point Conception
+            # Southern California
+            Point(34.5, -120.5), Point(34, -119),  # Santa Barbara
+            Point(33.8, -118.5), Point(33.5, -118),  # Los Angeles
+            Point(33, -117.5), Point(32.7, -117.2),  # San Diego
+            # US-Mexico border at coast
+            Point(32.5, -117.1),
+            # Baja California
+            Point(32, -117), Point(31, -116.5), Point(30, -116),
+            Point(29, -114.5), Point(28, -114), Point(27, -113),
+            Point(26, -112), Point(25, -111), Point(24, -110.5),
+            Point(23, -110), Point(22.5, -109.5),
+            # Mexico Pacific coast
+            Point(22, -106), Point(21, -105.5), Point(20, -105.5),
+            Point(19, -105), Point(18, -103),
+            Point(17, -101), Point(16.5, -99), Point(16, -96),
+            Point(15.5, -94), Point(16, -92),
+            # Tehuantepec to Central America
+            Point(16.5, -91), Point(17, -90), Point(16.5, -89),
+            Point(16, -88), Point(15.5, -87.5),
+            Point(15, -87), Point(14.5, -87.5), Point(14, -87.5),
+            Point(13.5, -87), Point(13, -87.5), Point(12.5, -87),
+            Point(12, -86.5), Point(11.5, -85.5), Point(11, -84),
+            Point(10.5, -83), Point(10, -82.5), Point(9.5, -81),
+            Point(9, -79.5), Point(8.5, -78), Point(8, -77),
         ]))
 
         coastlines.append(Polygon('North America East', [
-            # Yucatan
-            Point(21, -87), Point(21, -90), Point(20, -91), Point(19, -91),
-            # Gulf of Mexico
-            Point(19, -96), Point(26, -97), Point(28, -97), Point(29, -95),
-            Point(30, -93), Point(29, -90), Point(30, -88), Point(30, -86),
-            # Florida
-            Point(30, -84), Point(29, -83), Point(28, -82), Point(27, -80),
-            Point(26, -80), Point(25, -80), Point(24, -81), Point(25, -81),
-            Point(26, -82), Point(28, -82), Point(30, -81), Point(31, -81),
-            # US East Coast
-            Point(32, -80), Point(33, -79), Point(34, -78), Point(35, -76),
-            Point(36, -76), Point(37, -76), Point(38, -75), Point(39, -74),
-            Point(40, -74), Point(41, -72), Point(42, -71), Point(43, -70),
-            Point(44, -68), Point(45, -67), Point(46, -67),
-            # Maritime Canada
-            Point(47, -64), Point(46, -61), Point(45, -61), Point(44, -64),
-            Point(44, -66), Point(45, -67), Point(47, -65), Point(48, -64),
-            Point(49, -64), Point(50, -57), Point(52, -56), Point(53, -56),
-            # Labrador
-            Point(54, -58), Point(55, -59), Point(56, -60), Point(58, -62),
-            Point(60, -64), Point(62, -66), Point(64, -68),
-            # Baffin
-            Point(66, -62), Point(67, -61), Point(69, -67), Point(70, -70),
-            Point(72, -78), Point(73, -82), Point(74, -90), Point(74, -95),
-            Point(72, -105), Point(70, -120), Point(69, -130), Point(70, -138),
-            Point(69, -141), Point(60, -141),
+            # Yucatan Peninsula (detailed)
+            Point(21.5, -87), Point(21.3, -87.5), Point(21, -88),
+            Point(21.2, -89), Point(21.5, -90), Point(21, -91),
+            Point(20.5, -91.5), Point(20, -91.5), Point(19.5, -91),
+            # Gulf coast of Mexico
+            Point(19, -94), Point(20, -96), Point(22, -97.5),
+            Point(24, -97.5), Point(26, -97), Point(27.5, -97.5),
+            # Texas coast
+            Point(28, -97), Point(28.5, -96), Point(29, -95),
+            Point(29.5, -94), Point(29.8, -93.5),
+            # Louisiana / Mississippi Delta
+            Point(29.5, -92), Point(29.2, -91), Point(29, -90),
+            Point(29.5, -89), Point(30, -88.5),
+            # Alabama / Florida panhandle
+            Point(30.2, -87.5), Point(30.3, -86.5), Point(30, -85.5),
+            Point(29.8, -84.5),
+            # Florida Gulf coast
+            Point(29.5, -83.5), Point(29, -83), Point(28.5, -82.8),
+            Point(28, -82.7), Point(27.5, -82.6), Point(27, -82.5),
+            # Tampa Bay area
+            Point(27.5, -82.6), Point(27.8, -82.8),
+            # Southwest Florida
+            Point(26.5, -82), Point(26, -81.8), Point(25.5, -81.3),
+            # Florida Keys approach
+            Point(25, -81), Point(24.7, -81.5), Point(24.5, -82),
+            # Florida Keys
+            Point(24.6, -81.8), Point(24.8, -80.8),
+            # Southeast Florida / Miami
+            Point(25.5, -80.2), Point(26, -80.1), Point(26.5, -80),
+            Point(27, -80.1), Point(27.5, -80.3),
+            # East Florida coast
+            Point(28, -80.5), Point(28.5, -80.6), Point(29, -81),
+            Point(29.5, -81.2), Point(30, -81.3), Point(30.5, -81.4),
+            # Georgia coast
+            Point(31, -81.4), Point(31.5, -81.2), Point(32, -80.9),
+            Point(32.5, -80.5),
+            # South Carolina coast
+            Point(33, -79.5), Point(33.5, -79), Point(34, -78),
+            # North Carolina - Outer Banks
+            Point(34.5, -77.5), Point(35, -76), Point(35.5, -75.5),
+            Point(36, -75.7), Point(36.2, -76),
+            # Chesapeake Bay entrance
+            Point(37, -76), Point(37.5, -76.2), Point(38, -75.5),
+            # Delaware Bay / New Jersey
+            Point(38.5, -75), Point(39, -74.8), Point(39.5, -74.2),
+            Point(40, -74),
+            # New York / Long Island
+            Point(40.5, -74), Point(40.7, -73.5), Point(41, -72.5),
+            Point(41.2, -72),
+            # Connecticut / Rhode Island
+            Point(41.3, -71.5), Point(41.5, -71),
+            # Cape Cod
+            Point(42, -70.5), Point(42.3, -70), Point(42, -69.8),
+            # Massachusetts / New Hampshire
+            Point(42.5, -70.5), Point(43, -70.5), Point(43.3, -70.5),
+            # Maine coast
+            Point(43.5, -70), Point(44, -69), Point(44.3, -68.5),
+            Point(44.5, -68), Point(44.8, -67),
+            # US-Canada border at coast
+            Point(45, -67), Point(45.2, -66.5),
+            # New Brunswick / Bay of Fundy
+            Point(45, -66), Point(45.5, -65), Point(46, -64.5),
+            Point(46.5, -64), Point(47, -64.5),
+            # Nova Scotia
+            Point(46.5, -63), Point(46, -61.5), Point(45.5, -61),
+            Point(45, -61.5), Point(44.5, -63), Point(44, -64),
+            Point(43.5, -65.5), Point(44, -66),
+            # Nova Scotia - Cape Breton
+            Point(45.5, -61), Point(46, -60.5), Point(46.5, -60.5),
+            Point(47, -60.5),
+            # Gulf of St. Lawrence / Cape Breton
+            Point(47.5, -59), Point(48, -58.5), Point(48.5, -58.5),
+            # Newfoundland - Avalon Peninsula
+            Point(47, -53), Point(47.5, -53), Point(48, -53.5),
+            Point(48.5, -54), Point(49, -54.5),
+            # Newfoundland east coast
+            Point(49.5, -55.5), Point(50, -56), Point(50.5, -56.5),
+            Point(51, -56), Point(51.5, -55.5),
+            # Newfoundland north
+            Point(51.5, -55), Point(51, -56.5),
+            # Labrador coast
+            Point(52, -56), Point(53, -56.5), Point(54, -57),
+            Point(55, -58), Point(56, -59), Point(57, -60),
+            Point(58, -61), Point(59, -62), Point(60, -63.5),
+            # Northern Labrador
+            Point(61, -64.5), Point(62, -65), Point(63, -65),
+            Point(64, -64.5),
+            # Hudson Strait / Baffin Island approach
+            Point(65, -64), Point(66, -63.5), Point(67, -62),
+            Point(68, -61),
+            # Baffin Island east coast
+            Point(69, -63), Point(70, -66), Point(71, -70),
+            Point(72, -74), Point(73, -78),
+            # Canadian Arctic Archipelago
+            Point(74, -82), Point(75, -86), Point(76, -90),
+            Point(77, -95), Point(76, -100), Point(75, -105),
+            # Victoria Island / Banks Island area
+            Point(74, -110), Point(73, -115), Point(72, -118),
+            Point(71, -120), Point(70, -125), Point(69, -130),
+            Point(70, -135), Point(70, -138),
+            # Beaufort Sea coast (return to Alaska border)
+            Point(69.5, -140), Point(69, -141), Point(60, -141),
+        ]))
+
+        # Canadian Arctic Islands - detailed (separate polygons for major islands)
+        coastlines.append(Polygon('Baffin Island', [
+            Point(73, -78), Point(73.5, -80), Point(74, -82),
+            Point(74.5, -84), Point(75, -88), Point(74, -92),
+            Point(73, -94), Point(72, -93), Point(71, -90),
+            Point(70, -86), Point(69, -81), Point(68, -76),
+            Point(67, -72), Point(66, -68), Point(65, -65),
+            Point(64, -64), Point(63, -65), Point(62, -67),
+            Point(63, -70), Point(64, -74), Point(65, -78),
+            Point(66, -80), Point(67, -79), Point(68, -78),
+            Point(69, -76), Point(70, -74), Point(71, -75),
+            Point(72, -76), Point(73, -78),
+        ]))
+
+        coastlines.append(Polygon('Ellesmere Island', [
+            Point(83, -72), Point(82.5, -66), Point(82, -62),
+            Point(81, -64), Point(80, -68), Point(79, -74),
+            Point(78, -80), Point(77.5, -84), Point(78, -88),
+            Point(79, -90), Point(80, -88), Point(81, -84),
+            Point(82, -78), Point(83, -72),
+        ]))
+
+        coastlines.append(Polygon('Victoria Island', [
+            Point(73, -110), Point(72.5, -106), Point(72, -104),
+            Point(71, -104), Point(70, -106), Point(69, -110),
+            Point(69.5, -114), Point(70, -116), Point(71, -115),
+            Point(72, -113), Point(73, -110),
         ]))
 
         # Greenland
@@ -353,21 +554,207 @@ class GeoData:
             Point(71, 28),
         ]))
 
-        # British Isles
-        coastlines.append(Polygon('British Isles', [
-            # Great Britain
-            Point(59, -3), Point(58, -5), Point(57, -6), Point(56, -6),
-            Point(55, -5), Point(54, -5), Point(53, -4), Point(53, -3),
-            Point(52, -4), Point(51, -5), Point(50, -5), Point(50, -4),
-            Point(51, -3), Point(51, -1), Point(51, 0), Point(51, 1),
-            Point(52, 2), Point(53, 0), Point(54, -1), Point(55, -2),
-            Point(56, -2), Point(57, -2), Point(58, -3), Point(59, -3),
+        # Great Britain - highly detailed coastline
+        coastlines.append(Polygon('Great Britain', [
+            # Northern Scotland - Highlands and islands
+            Point(58.6, -3),  # Duncansby Head (NE tip)
+            Point(58.5, -3.5), Point(58.4, -4),
+            Point(58.5, -4.5), Point(58.6, -5),  # Pentland Firth
+            Point(58.5, -5), Point(58.4, -5.2),
+            # Northwest Scotland coast
+            Point(58.3, -5), Point(58.2, -5.2), Point(58.1, -5),
+            Point(58, -5.3), Point(57.9, -5.5),
+            Point(57.8, -5.3), Point(57.7, -5.6),  # Cape Wrath area
+            Point(57.5, -5.4), Point(57.3, -5.8),
+            # West Highlands
+            Point(57, -5.7), Point(56.8, -5.8), Point(56.6, -5.6),
+            Point(56.5, -5.9), Point(56.3, -5.7),
+            # Skye and mainland opposite
+            Point(57.3, -6.4), Point(57.1, -6.2), Point(57, -6.5),
+            Point(56.8, -6.3), Point(56.7, -6.6), Point(56.5, -6.4),
+            Point(56.4, -6.7), Point(56.2, -6.5),
+            # Sound of Mull area
+            Point(56.5, -5.6), Point(56.3, -5.8), Point(56.1, -5.6),
+            Point(56, -5.9), Point(55.8, -5.7),
+            # Kintyre Peninsula
+            Point(55.9, -5.5), Point(55.7, -5.8), Point(55.5, -5.7),
+            Point(55.4, -5.5), Point(55.3, -5.7),
+            # Ayrshire coast
+            Point(55.5, -4.8), Point(55.3, -4.9), Point(55.1, -4.7),
+            Point(55, -5), Point(54.8, -5),
+            # Solway Firth
+            Point(54.9, -4.3), Point(54.8, -3.6), Point(54.7, -3.2),
+            # Cumbria / Lancashire coast
+            Point(54.5, -3.5), Point(54.3, -3.2), Point(54.1, -3),
+            Point(54, -2.8), Point(53.9, -3.2),
+            # Liverpool Bay / Welsh coast
+            Point(53.8, -3), Point(53.6, -3.1), Point(53.4, -3.3),
+            Point(53.3, -3.8), Point(53.2, -4.1),
+            # Anglesey
+            Point(53.4, -4.3), Point(53.3, -4.5), Point(53.2, -4.3),
+            # Lleyn Peninsula
+            Point(52.8, -4.2), Point(52.9, -4.5), Point(52.8, -4.8),
+            # Cardigan Bay
+            Point(52.5, -4.3), Point(52.3, -4.1), Point(52.1, -4.5),
+            Point(52, -4.7), Point(51.8, -4.5),
+            # Pembrokeshire
+            Point(51.7, -5), Point(51.6, -5.2), Point(51.7, -5.4),
+            Point(51.6, -5.1), Point(51.5, -5.3),
+            # South Wales coast
+            Point(51.6, -4.8), Point(51.6, -4.3), Point(51.5, -3.8),
+            Point(51.4, -3.5), Point(51.5, -3.2),
+            # Bristol Channel / Somerset
+            Point(51.4, -3), Point(51.2, -3.2), Point(51.1, -3.5),
+            Point(51, -4), Point(50.8, -4.5),
+            # North Cornwall
+            Point(50.8, -4.8), Point(50.7, -5),
+            # Cornwall - Land's End area
+            Point(50.1, -5.5), Point(50, -5.7), Point(50.1, -5.5),
+            Point(50.2, -5.4),
+            # South Cornwall
+            Point(50.1, -5.2), Point(50, -5), Point(50.1, -4.8),
+            Point(50.2, -4.5), Point(50.3, -4.2),
+            # Devon coast
+            Point(50.2, -4), Point(50.3, -3.8), Point(50.4, -3.5),
+            Point(50.5, -3.2), Point(50.6, -2.9),
+            # Dorset / Jurassic coast
+            Point(50.6, -2.5), Point(50.7, -2.2), Point(50.7, -1.9),
+            # Hampshire / Isle of Wight
+            Point(50.7, -1.5), Point(50.6, -1.2), Point(50.7, -1),
+            Point(50.8, -1.3), Point(50.8, -1),
+            # Sussex coast
+            Point(50.8, -0.7), Point(50.8, -0.3), Point(50.8, 0),
+            Point(50.8, 0.3), Point(50.9, 0.6),
+            # Kent coast - Dungeness to North Foreland
+            Point(51, 0.9), Point(51.1, 1), Point(51.2, 1.2),
+            Point(51.3, 1.4), Point(51.4, 1.4),  # Dover
+            # Thames Estuary
+            Point(51.5, 1.2), Point(51.5, 0.9), Point(51.6, 0.6),
+            Point(51.5, 0.4), Point(51.6, 0.1),
+            # Essex coast
+            Point(51.7, 0.5), Point(51.8, 0.9), Point(51.9, 1),
+            Point(52, 1.2), Point(51.9, 1.4),
+            # Suffolk coast
+            Point(52.1, 1.6), Point(52.3, 1.7), Point(52.5, 1.7),
+            # Norfolk coast
+            Point(52.7, 1.7), Point(52.9, 1.5), Point(53, 1),
+            Point(53, 0.5), Point(53, 0),
+            # The Wash
+            Point(53, 0.2), Point(52.9, 0.3), Point(52.8, 0.1),
+            Point(52.9, -0.1), Point(53, 0),
+            # Lincolnshire / Humber
+            Point(53.3, 0), Point(53.5, 0), Point(53.7, -0.1),
+            Point(53.7, -0.3),
+            # Yorkshire coast
+            Point(53.9, -0.2), Point(54.1, -0.1), Point(54.3, 0),
+            Point(54.5, -0.6), Point(54.6, -1),
+            # Northumberland coast
+            Point(55, -1.4), Point(55.3, -1.5), Point(55.5, -1.6),
+            Point(55.7, -1.8), Point(55.8, -2),
+            # Scottish Borders coast
+            Point(55.9, -2.1), Point(56, -2.3), Point(56.1, -2.5),
+            # Firth of Forth
+            Point(56.1, -2.8), Point(56, -3), Point(56.1, -3.2),
+            Point(56.2, -3), Point(56.3, -2.8),
+            # Fife coast
+            Point(56.4, -2.7), Point(56.5, -2.5), Point(56.5, -2.8),
+            # Angus / Aberdeenshire
+            Point(56.6, -2.5), Point(56.8, -2.3), Point(57, -2.1),
+            Point(57.2, -2), Point(57.4, -1.9),
+            # Moray Firth
+            Point(57.6, -2), Point(57.7, -2.5), Point(57.7, -3),
+            Point(57.8, -3.5), Point(57.7, -4),
+            # Northern Scotland east coast
+            Point(58, -3.5), Point(58.2, -3.2), Point(58.4, -3.1),
+            Point(58.6, -3),  # Close at Duncansby Head
         ]))
 
+        # Ireland - comprehensive detailed coastline
         coastlines.append(Polygon('Ireland', [
-            Point(55, -6), Point(55, -8), Point(54, -10), Point(53, -10),
-            Point(52, -10), Point(51, -10), Point(52, -8), Point(52, -6),
-            Point(53, -6), Point(54, -6), Point(55, -6),
+            # Northeast - Belfast Lough / Antrim coast
+            Point(55.2, -5.9),  # Malin Head (northernmost)
+            Point(55.3, -6.3), Point(55.2, -6.8), Point(55, -7),
+            Point(55.2, -7.3),  # Inishowen Peninsula
+            # North Antrim coast (Giant's Causeway area)
+            Point(55.2, -6.1), Point(55.2, -5.9), Point(55, -5.8),
+            # Antrim coast
+            Point(54.9, -5.7), Point(54.8, -5.8), Point(54.7, -5.7),
+            # Belfast Lough
+            Point(54.7, -5.6), Point(54.6, -5.7), Point(54.6, -5.9),
+            # Ards Peninsula
+            Point(54.5, -5.5), Point(54.4, -5.5), Point(54.3, -5.6),
+            # Strangford Lough
+            Point(54.4, -5.6), Point(54.3, -5.5), Point(54.2, -5.6),
+            # Mourne coast
+            Point(54.1, -5.7), Point(54, -5.9), Point(54, -6),
+            # Carlingford Lough (border area)
+            Point(54.1, -6.1), Point(54, -6.2), Point(53.9, -6.1),
+            # Dundalk Bay
+            Point(54, -6.3), Point(53.9, -6.4), Point(53.8, -6.3),
+            # East coast - Dublin area
+            Point(53.7, -6.1), Point(53.5, -6), Point(53.3, -6.1),
+            Point(53.2, -5.9), Point(53.1, -6),
+            # Wicklow coast
+            Point(53, -6), Point(52.9, -5.9), Point(52.8, -6),
+            Point(52.7, -6.1), Point(52.6, -6.2),
+            # Wexford coast
+            Point(52.5, -6.2), Point(52.4, -6.3), Point(52.3, -6.4),
+            Point(52.2, -6.5), Point(52.1, -6.8),
+            # Waterford Harbour
+            Point(52.1, -7), Point(52, -7.2), Point(52.1, -7.1),
+            # South coast - Cork area
+            Point(51.9, -7.5), Point(51.8, -7.8), Point(51.9, -8),
+            Point(51.8, -8.3), Point(51.7, -8.5),
+            # Cork Harbour
+            Point(51.8, -8.2), Point(51.9, -8.4), Point(51.8, -8.6),
+            # West Cork
+            Point(51.6, -9), Point(51.5, -9.3), Point(51.4, -9.6),
+            Point(51.5, -9.9), Point(51.4, -10),
+            # Mizen Head / Bantry Bay
+            Point(51.5, -9.8), Point(51.6, -9.6), Point(51.5, -9.9),
+            Point(51.6, -10.1),
+            # Kenmare River / Iveragh Peninsula
+            Point(51.7, -10), Point(51.8, -10.3), Point(51.7, -10.5),
+            # Dingle Peninsula
+            Point(52, -10.4), Point(52.1, -10.3), Point(52.2, -10.5),
+            Point(52.3, -10.2),
+            # Shannon Estuary
+            Point(52.4, -10), Point(52.5, -9.7), Point(52.6, -9.5),
+            Point(52.6, -9.8), Point(52.5, -10),
+            # Loop Head
+            Point(52.6, -9.9), Point(52.7, -9.8), Point(52.6, -9.6),
+            # Clare coast - Cliffs of Moher
+            Point(52.8, -9.5), Point(52.9, -9.4), Point(53, -9.5),
+            Point(53.1, -9.6), Point(53.1, -9.9),
+            # Galway Bay
+            Point(53.2, -9.5), Point(53.3, -9), Point(53.3, -8.8),
+            Point(53.2, -9.2), Point(53.1, -9.4),
+            # Connemara
+            Point(53.4, -9.8), Point(53.5, -10), Point(53.5, -10.2),
+            Point(53.6, -10.1), Point(53.5, -10),
+            # Killala Bay
+            Point(53.7, -9.8), Point(53.8, -9.6), Point(53.9, -9.5),
+            Point(54, -9.6), Point(54.1, -9.8),
+            # Clew Bay
+            Point(53.8, -9.7), Point(53.9, -9.9), Point(53.8, -10),
+            # Mayo coast
+            Point(54, -10), Point(54.1, -9.9), Point(54.2, -10),
+            Point(54.3, -10.1),
+            # Erris Peninsula / Broadhaven Bay
+            Point(54.2, -9.8), Point(54.3, -9.6), Point(54.2, -9.9),
+            # Donegal Bay
+            Point(54.3, -9.5), Point(54.4, -9), Point(54.5, -8.5),
+            Point(54.5, -8.2), Point(54.6, -8),
+            # South Donegal coast
+            Point(54.5, -8.4), Point(54.6, -8.6), Point(54.5, -8.3),
+            # Donegal coast
+            Point(54.7, -8.2), Point(54.8, -8), Point(54.9, -8.2),
+            Point(55, -8), Point(55.1, -7.8),
+            # Northwest coast
+            Point(55, -7.5), Point(55.1, -7.2), Point(55.2, -7),
+            Point(55.2, -6.5), Point(55.3, -6.2),
+            # Back to Malin Head
+            Point(55.2, -5.9),
         ]))
 
         # Africa - detailed outline
@@ -657,7 +1044,9 @@ class GeoData:
             'Greenland', 'Australia', 'Tasmania', 'New Zealand North',
             'New Zealand South', 'Japan', 'Hokkaido', 'Sumatra', 'Borneo',
             'New Guinea', 'Philippines', 'Madagascar', 'Sri Lanka',
-            'British Isles', 'Ireland'
+            'Great Britain', 'Ireland',  # Updated names for detailed coastlines
+            'Alaska', 'Alaska Panhandle',  # North America detailed
+            'Baffin Island', 'Ellesmere Island', 'Victoria Island',  # Canadian Arctic
         ]
 
         for coastline in self.coastlines:
@@ -677,97 +1066,254 @@ class GeoData:
                                 land.add((lat, lon))
 
         # Second pass: continental approximations for accurate shapes
-        # North America - contiguous US + Southern Canada with proper coastal detail
-        for lat in range(25, 55):
-            if lat >= 49:
-                # US-Canada border region
-                west, east = -125, -52
-            elif lat >= 45:
-                # Great Lakes region - narrower in east
-                west, east = -125, -66
-            elif lat >= 42:
-                # Northern US
+
+        # ========================================
+        # NORTH AMERICA - Detailed land mask
+        # ========================================
+
+        # Contiguous US - with accurate coastal boundaries
+        for lat in range(25, 50):
+            if lat == 49:
+                # US-Canada border (straight line from coast to Lake of the Woods)
+                west, east = -124, -67
+            elif lat == 48:
+                # Northern border states (WA, ID, MT, ND, MN)
+                west, east = -124, -67
+            elif lat == 47:
+                west, east = -124, -68
+            elif lat == 46:
+                west, east = -124, -68
+            elif lat == 45:
+                # Northern tier states
+                west, east = -124, -67
+            elif lat == 44:
+                west, east = -124, -68
+            elif lat == 43:
                 west, east = -124, -70
-            elif lat >= 38:
-                # Mid-Atlantic states
+            elif lat == 42:
+                # Oregon/Idaho/Wisconsin/Michigan/New York border
+                west, east = -124, -71
+            elif lat == 41:
+                west, east = -124, -71
+            elif lat == 40:
+                # Northern California to New Jersey
                 west, east = -124, -74
-            elif lat >= 35:
-                # Southern states
-                west, east = -122, -75
-            elif lat >= 30:
-                # Gulf states / Florida panhandle
-                west, east = -118, -80
-            elif lat >= 27:
+            elif lat == 39:
+                west, east = -123, -74
+            elif lat == 38:
+                # San Francisco to Maryland/Delaware
+                west, east = -123, -75
+            elif lat == 37:
+                west, east = -122, -76
+            elif lat == 36:
+                # Central California to Virginia
+                west, east = -122, -76
+            elif lat == 35:
+                west, east = -121, -76
+            elif lat == 34:
+                # Southern California to North Carolina
+                west, east = -120, -77
+            elif lat == 33:
+                # Los Angeles area to South Carolina
+                west, east = -118, -79
+            elif lat == 32:
+                # San Diego area to South Carolina coast
+                west, east = -117, -80
+            elif lat == 31:
+                # Texas to Georgia coast
+                west, east = -106, -81
+            elif lat == 30:
+                # Texas to Florida panhandle
+                west, east = -104, -81
+            elif lat == 29:
+                # Texas Gulf coast / Florida
+                west, east = -101, -81
+            elif lat == 28:
+                # South Texas / Florida peninsula
+                west, east = -99, -80
+            elif lat == 27:
+                # Florida peninsula
+                west, east = -98, -80
+            elif lat == 26:
                 # Florida peninsula (narrower)
                 west, east = -98, -80
             else:
-                # Southern Florida tip
+                # Southern Florida (lat 25)
                 west, east = -82, -80
+
             for lon in range(west, east + 1):
-                # Exclude Gulf of Mexico (larger exclusion)
-                if 25 <= lat <= 30 and -97 <= lon <= -82:
-                    continue
-                # Exclude Great Lakes (more precise - don't exclude Chicago)
+                # Exclude Gulf of Mexico (detailed shape)
+                if lat <= 30:
+                    # Gulf exclusion zone
+                    if lat == 30 and -96 <= lon <= -84:
+                        continue
+                    if lat == 29 and -97 <= lon <= -82:
+                        continue
+                    if lat == 28 and -97 <= lon <= -81:
+                        continue
+                    if lat == 27 and -97 <= lon <= -82:
+                        continue
+                    if lat == 26 and -97 <= lon <= -82:
+                        continue
+                    if lat == 25 and -97 <= lon <= -82:
+                        continue
+
+                # Exclude Great Lakes with more precision
                 # Lake Superior: lat 46-49, lon -92 to -84
-                # Lake Michigan: lat 42-46, lon -87 to -84
-                # Lake Huron: lat 43-46, lon -84 to -80
-                # Lake Erie: lat 41-43, lon -84 to -78
-                # Lake Ontario: lat 43-44, lon -80 to -76
                 if 46 <= lat <= 49 and -92 <= lon <= -84:
-                    continue  # Lake Superior
-                if 42 <= lat <= 46 and -87 <= lon <= -84:
-                    continue  # Lake Michigan (east of Chicago)
-                if 43 <= lat <= 46 and -84 <= lon <= -80:
-                    continue  # Lake Huron
-                if 41 <= lat <= 43 and -84 <= lon <= -78:
-                    continue  # Lake Erie
-                if 43 <= lat <= 44 and -80 <= lon <= -76:
-                    continue  # Lake Ontario
+                    continue
+                # Lake Michigan: lat 43-46, lon -87 to -85 (keep Chicago at 42, -88)
+                if 43 <= lat <= 46 and -87 <= lon <= -85:
+                    continue
+                # Lake Huron: lat 44-46, lon -84 to -81
+                if 44 <= lat <= 46 and -84 <= lon <= -81:
+                    continue
+                # Lake Erie: lat 42-43, lon -83 to -79
+                if 42 <= lat <= 43 and -83 <= lon <= -79:
+                    continue
+                # Lake Ontario: lat 43-44, lon -78 to -76 (Toronto at -79 is on shore)
+                if 43 <= lat <= 44 and -78 <= lon <= -76:
+                    continue
+
                 land.add((lat, lon))
 
-        # Florida peninsula detail
-        for lat in range(25, 31):
-            if lat >= 29:
+        # Florida peninsula - detailed shape
+        for lat in range(24, 31):
+            if lat == 30:
                 for lon in range(-88, -80):
                     land.add((lat, lon))
-            elif lat >= 27:
+            elif lat == 29:
+                # Panhandle and northern Florida
+                for lon in range(-87, -80):
+                    land.add((lat, lon))
+            elif lat == 28:
+                # Central Florida (wider)
                 for lon in range(-83, -80):
                     land.add((lat, lon))
+            elif lat == 27:
+                # Central-South Florida
+                for lon in range(-82, -80):
+                    land.add((lat, lon))
+            elif lat == 26:
+                # South Florida
+                for lon in range(-82, -80):
+                    land.add((lat, lon))
+            elif lat == 25:
+                # Miami area / Keys approach
+                for lon in range(-81, -80):
+                    land.add((lat, lon))
             else:
+                # Florida Keys (lat 24)
                 for lon in range(-82, -80):
                     land.add((lat, lon))
 
-        # Northern Canada and Canadian Arctic Archipelago
-        for lat in range(55, 86):
+        # Canada - mainland with provincial detail
+        for lat in range(50, 84):
             if lat >= 80:
-                # High Arctic islands (Ellesmere, etc.)
-                west, east = -120, -60
+                # High Arctic islands (Ellesmere, Devon, etc.)
+                west, east = -130, -55
             elif lat >= 75:
-                west, east = -130, -60
+                # Northern Arctic (Baffin north, etc.)
+                west, east = -135, -55
+            elif lat >= 70:
+                # Arctic mainland and islands
+                west, east = -141, -55
             elif lat >= 65:
-                west, east = -140, -55
+                # Northern territories (NWT, Nunavut)
+                west, east = -141, -55
+            elif lat >= 60:
+                # Yukon, NWT, northern provinces
+                west, east = -141, -55
+            elif lat >= 55:
+                # Northern BC, Alberta, Saskatchewan, Manitoba, Ontario, Quebec
+                west, east = -140, -52
             else:
-                west, east = -140, -55
+                # Southern Canada (BC to Maritime provinces)
+                west, east = -135, -52
+
             for lon in range(west, east + 1):
-                # Exclude Hudson Bay
-                if 52 <= lat <= 65 and -95 <= lon <= -78:
+                # Exclude Hudson Bay (more detailed shape)
+                if 52 <= lat <= 63:
+                    if lat <= 55 and -95 <= lon <= -78:
+                        continue  # Southern Hudson Bay
+                    if 56 <= lat <= 60 and -95 <= lon <= -77:
+                        continue  # Central Hudson Bay
+                    if 61 <= lat <= 63 and -92 <= lon <= -77:
+                        continue  # Northern Hudson Bay / Foxe Basin approach
+
+                # Exclude James Bay
+                if 51 <= lat <= 55 and -82 <= lon <= -78:
                     continue
+
+                # Exclude Gulf of St. Lawrence
+                if 46 <= lat <= 52 and -66 <= lon <= -56:
+                    continue
+
                 land.add((lat, lon))
 
-        # Alaska (extend to Arctic coast)
-        for lat in range(55, 75):
-            for lon in range(-170, -130):
+        # Alaska - comprehensive with Aleutians
+        # Main Alaska
+        for lat in range(54, 72):
+            if lat >= 70:
+                # Arctic coast (Barrow, Prudhoe Bay)
+                west, east = -162, -141
+            elif lat >= 68:
+                # Northern Alaska (Brooks Range)
+                west, east = -165, -141
+            elif lat >= 65:
+                # Central Alaska (Fairbanks region)
+                west, east = -168, -141
+            elif lat >= 62:
+                # Interior Alaska
+                west, east = -167, -141
+            elif lat >= 60:
+                # Anchorage / Kenai region
+                west, east = -166, -141
+            elif lat >= 58:
+                # Bristol Bay / Kodiak region
+                west, east = -162, -132
+            elif lat >= 56:
+                # Alaska Peninsula / SE Alaska
+                west, east = -164, -130
+            else:
+                # Aleutian chain approach
+                west, east = -170, -130
+
+            for lon in range(west, east + 1):
                 land.add((lat, lon))
+
+        # Aleutian Islands chain (extending west)
+        for lat in range(51, 56):
+            if lat >= 54:
+                for lon in range(-168, -163):
+                    land.add((lat, lon))
+            elif lat >= 52:
+                for lon in range(-177, -163):
+                    land.add((lat, lon))
+            else:
+                # Western Aleutians
+                for lon in range(-180, -170):
+                    land.add((lat, lon))
+                for lon in range(172, 180):
+                    land.add((lat, lon))
 
         # Mexico and Central America
         for lat in range(8, 33):
             if lat >= 25:
-                west, east = -117, -87
+                west, east = -117, -97  # Stop at Texas border, don't extend into Gulf
+            elif lat >= 22:
+                west, east = -110, -86  # Yucatan extends east
             elif lat >= 18:
                 west, east = -105, -86
             else:
                 west, east = -92, -77
             for lon in range(west, east + 1):
+                # Exclude Gulf of Mexico water area
+                if 22 <= lat <= 31 and -97 <= lon <= -87:
+                    # Only add actual Mexican land (Yucatan, etc.)
+                    if lat <= 22 and lon >= -92:
+                        land.add((lat, lon))
+                    continue
                 land.add((lat, lon))
 
         # South America (with Brazilian bulge and Patagonia)
@@ -801,31 +1347,87 @@ class GeoData:
             for lon in range(-72, -66):
                 land.add((lat, lon))
 
-        # Europe - enhanced detail coverage
-        # Great Britain (separate from continental Europe)
-        for lat in range(50, 59):
-            if lat >= 57:  # Northern Scotland / Highlands
-                for lon in range(-7, -1):
+        # ========================================
+        # EUROPE - UK and Ireland detailed
+        # ========================================
+
+        # Great Britain - accurate shape with regional detail
+        # Scotland
+        for lat in range(55, 59):
+            if lat == 58:
+                # Northern Scotland (Caithness, Sutherland) - narrower
+                for lon in range(-6, -2):
                     land.add((lat, lon))
-            elif lat >= 55:  # Scotland
-                for lon in range(-6, 0):
+            elif lat == 57:
+                # Highlands / Moray Firth
+                for lon in range(-7, -2):
                     land.add((lat, lon))
-            elif lat >= 53:  # Northern England / Wales
-                for lon in range(-5, 1):
+            elif lat == 56:
+                # Central Scotland (Glasgow/Edinburgh belt)
+                for lon in range(-7, -2):
                     land.add((lat, lon))
-            elif lat >= 51:  # Southern England
+            else:  # lat 55
+                # Southern Scotland / Border region
+                for lon in range(-6, -2):
+                    land.add((lat, lon))
+
+        # England and Wales
+        for lat in range(50, 55):
+            if lat == 54:
+                # Northern England (Cumbria, Durham, Northumberland)
+                for lon in range(-4, 0):
+                    land.add((lat, lon))
+            elif lat == 53:
+                # Lancashire, Yorkshire, Humber
+                for lon in range(-4, 1):
+                    land.add((lat, lon))
+            elif lat == 52:
+                # Midlands, East Anglia (wider)
+                for lon in range(-5, 2):
+                    land.add((lat, lon))
+            elif lat == 51:
+                # London, Home Counties, Bristol
                 for lon in range(-6, 2):
                     land.add((lat, lon))
-            else:  # Cornwall / Kent
+            else:  # lat 50
+                # South coast (Cornwall to Kent)
                 for lon in range(-6, 2):
                     land.add((lat, lon))
-        # Ireland (island separate from Britain)
+
+        # Wales - additional detail for the western bulge
+        for lat in range(51, 54):
+            if lat == 53:
+                for lon in range(-5, -3):
+                    land.add((lat, lon))
+            elif lat == 52:
+                for lon in range(-5, -3):
+                    land.add((lat, lon))
+            else:  # lat 51
+                for lon in range(-6, -4):
+                    land.add((lat, lon))
+
+        # Ireland - comprehensive island shape
+        # Note: range uses -5 as end to include lon=-6 (Dublin is at -6.3)
         for lat in range(51, 56):
-            if lat >= 54:  # Northern Ireland / Donegal
-                for lon in range(-11, -6):
+            if lat == 55:
+                # Northern Ireland / Donegal (northern tip)
+                for lon in range(-11, -5):  # Include -6
                     land.add((lat, lon))
-            else:  # Southern Ireland
-                for lon in range(-11, -6):
+            elif lat == 54:
+                # Ulster region (wider) - Belfast at -5.9
+                for lon in range(-11, -5):  # Include -6
+                    land.add((lat, lon))
+            elif lat == 53:
+                # Connacht / Leinster (Dublin coast at -6.3)
+                for lon in range(-11, -5):  # Include -6
+                    land.add((lat, lon))
+            elif lat == 52:
+                # Munster / South Leinster (widest part)
+                for lon in range(-11, -5):  # Include -6
+                    land.add((lat, lon))
+            else:  # lat 51
+                # Southern coast (Cork, Waterford)
+                for lon in range(-10, -5):  # Include -6
                     land.add((lat, lon))
 
         # Iberian Peninsula (with better coastal definition)
@@ -1340,18 +1942,87 @@ class GeoData:
 
         # English Channel - narrow water between Britain and France
         for lat in range(49, 51):
-            for lon in range(-1, 2):
+            for lon in range(-2, 2):
                 land.discard((lat, lon))
 
-        # Irish Sea - water between Ireland and Britain (narrow)
-        for lat in range(52, 55):
+        # Irish Sea - water between Ireland and Britain
+        # Critical for separating the two islands
+        for lat in range(52, 56):
             for lon in range(-6, -4):
                 land.discard((lat, lon))
 
-        # North Sea (narrow strip between Britain and continental Europe)
-        for lat in range(52, 58):
-            for lon in range(2, 4):
+        # St George's Channel (southern Irish Sea)
+        for lat in range(51, 53):
+            for lon in range(-6, -4):
                 land.discard((lat, lon))
+
+        # North Channel (northern Irish Sea, between Northern Ireland and Scotland)
+        for lat in range(54, 56):
+            for lon in range(-6, -5):
+                land.discard((lat, lon))
+
+        # Celtic Sea (southwest of Ireland/UK)
+        for lat in range(50, 52):
+            for lon in range(-8, -5):
+                land.discard((lat, lon))
+
+        # North Sea (narrow strip between Britain and continental Europe)
+        for lat in range(52, 59):
+            for lon in range(2, 5):
+                land.discard((lat, lon))
+
+        # Re-add Great Britain after water exclusions (ensure island integrity)
+        # Scotland
+        for lat in range(55, 59):
+            if lat == 58:
+                for lon in range(-6, -2):
+                    land.add((lat, lon))
+            elif lat == 57:
+                for lon in range(-7, -2):
+                    land.add((lat, lon))
+            elif lat == 56:
+                for lon in range(-7, -2):
+                    land.add((lat, lon))
+            else:  # lat 55
+                for lon in range(-6, -2):
+                    land.add((lat, lon))
+
+        # England/Wales
+        for lat in range(50, 55):
+            if lat == 54:
+                for lon in range(-4, 0):
+                    land.add((lat, lon))
+            elif lat == 53:
+                for lon in range(-4, 1):
+                    land.add((lat, lon))
+            elif lat == 52:
+                for lon in range(-5, 2):
+                    land.add((lat, lon))
+            elif lat == 51:
+                for lon in range(-6, 2):
+                    land.add((lat, lon))
+            else:  # lat 50 - South coast (English Channel at lon 0)
+                for lon in range(-6, 0):  # Stop before lon 0 (English Channel)
+                    land.add((lat, lon))
+
+        # Re-add Ireland after water exclusions (ensure island integrity)
+        # Note: range(-11, -5) includes -11 to -6, ensuring Dublin (-6) is on land
+        for lat in range(51, 56):
+            if lat == 55:
+                for lon in range(-11, -5):  # Include lon=-6
+                    land.add((lat, lon))
+            elif lat == 54:
+                for lon in range(-11, -5):  # Include lon=-6
+                    land.add((lat, lon))
+            elif lat == 53:
+                for lon in range(-11, -5):  # Include lon=-6 (Dublin at -6.3)
+                    land.add((lat, lon))
+            elif lat == 52:
+                for lon in range(-11, -5):  # Include lon=-6
+                    land.add((lat, lon))
+            else:  # lat 51
+                for lon in range(-11, -5):  # Include lon=-6
+                    land.add((lat, lon))
 
         # Skagerrak/Kattegat - between Denmark and Norway/Sweden
         for lat in range(56, 59):

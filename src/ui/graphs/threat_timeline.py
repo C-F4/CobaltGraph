@@ -124,7 +124,7 @@ class ThreatTimelineGraph(Static):
         )
 
         return Panel(
-            chart_str,
+            Text.from_ansi(chart_str),
             title="[bold cyan]Threat Timeline[/bold cyan]",
             border_style="dim cyan",
             padding=(0, 0),

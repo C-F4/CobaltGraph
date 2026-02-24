@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from threading import Lock, RLock
 from typing import Dict, List, Optional, Tuple, Any
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
 

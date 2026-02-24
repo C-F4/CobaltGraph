@@ -24,11 +24,26 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Set, Any
 
-import numpy as np
-from scipy import stats
-from scipy.spatial.distance import cdist
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.special import expit  # Sigmoid function
+import math
+
+try:
+    import numpy as np
+    from scipy import stats
+    from scipy.spatial.distance import cdist
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.special import expit  # Sigmoid function
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+    stats = None
+
+    def expit(x):
+        """Pure Python sigmoid function"""
+        if isinstance(x, (list, tuple)):
+            return [1.0 / (1.0 + math.exp(-v)) for v in x]
+        return 1.0 / (1.0 + math.exp(-min(max(x, -500), 500)))
+
 import networkx as nx
 
 logger = logging.getLogger(__name__)
@@ -48,9 +63,9 @@ class ThreatVector:
     time_pattern: float            # Temporal pattern score
     asn_reputation: float          # ASN-based reputation
 
-    def to_vector(self) -> np.ndarray:
-        """Convert to numpy feature vector"""
-        return np.array([
+    def to_vector(self):
+        """Convert to feature vector (numpy array if available, else list)"""
+        values = [
             self.score,
             self.confidence,
             min(self.connection_count / 100, 1.0),  # Normalize
@@ -60,7 +75,10 @@ class ThreatVector:
             self.geo_risk,
             self.time_pattern,
             1 - self.asn_reputation,
-        ])
+        ]
+        if HAS_NUMPY:
+            return np.array(values)
+        return values
 
 
 @dataclass
@@ -77,11 +95,11 @@ class AnomalyResult:
 
 class AnomalyDetector:
     """
-    Statistical anomaly detection using scipy
+    Statistical anomaly detection using scipy (with pure Python fallback)
 
     Methods:
     - Z-score based outlier detection
-    - Mahalanobis distance for multivariate outliers
+    - Mahalanobis distance for multivariate outliers (numpy only)
     - Isolation Forest-like scoring
     - Bayesian probability estimation
     """
@@ -89,9 +107,9 @@ class AnomalyDetector:
     def __init__(self, history_size: int = 1000):
         self.history_size = history_size
         self.connection_history: List[Dict] = []
-        self.feature_means: Optional[np.ndarray] = None
-        self.feature_stds: Optional[np.ndarray] = None
-        self.covariance_matrix: Optional[np.ndarray] = None
+        self.feature_means: Optional[List[float]] = None
+        self.feature_stds: Optional[List[float]] = None
+        self.covariance_matrix = None  # numpy-only feature
 
         # Feature names for interpretability
         self.feature_names = [
@@ -99,24 +117,50 @@ class AnomalyDetector:
             "org_distrust", "hop_distance", "geo_risk", "time_pattern", "asn_risk"
         ]
 
+    @staticmethod
+    def _mean(values):
+        """Pure Python mean"""
+        return sum(values) / len(values) if values else 0.0
+
+    @staticmethod
+    def _std(values):
+        """Pure Python standard deviation"""
+        if len(values) < 2:
+            return 0.0
+        m = sum(values) / len(values)
+        return math.sqrt(sum((v - m) ** 2 for v in values) / len(values))
+
+    @staticmethod
+    def _norm_cdf(z):
+        """Pure Python approximation of normal CDF"""
+        return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
     def update_baseline(self, threat_vectors: List[ThreatVector]):
         """Update statistical baseline from historical data"""
         if not threat_vectors:
             return
 
-        # Convert to numpy matrix
-        X = np.array([tv.to_vector() for tv in threat_vectors])
+        vectors = [tv.to_vector() for tv in threat_vectors]
+        n_features = len(self.feature_names)
 
-        # Calculate statistics
-        self.feature_means = np.mean(X, axis=0)
-        self.feature_stds = np.std(X, axis=0) + 1e-8  # Avoid div by zero
-
-        # Covariance for Mahalanobis distance
-        if len(X) > len(self.feature_names):
-            try:
-                self.covariance_matrix = np.cov(X.T)
-            except Exception:
-                self.covariance_matrix = None
+        if HAS_NUMPY:
+            X = np.array(vectors)
+            self.feature_means = np.mean(X, axis=0).tolist()
+            self.feature_stds = (np.std(X, axis=0) + 1e-8).tolist()
+            if len(X) > n_features:
+                try:
+                    self.covariance_matrix = np.cov(X.T)
+                except Exception:
+                    self.covariance_matrix = None
+        else:
+            # Pure Python column-wise statistics
+            self.feature_means = []
+            self.feature_stds = []
+            for j in range(n_features):
+                col = [v[j] for v in vectors]
+                self.feature_means.append(self._mean(col))
+                self.feature_stds.append(self._std(col) + 1e-8)
+            self.covariance_matrix = None  # Skip Mahalanobis without numpy
 
         logger.debug(f"Anomaly baseline updated from {len(threat_vectors)} vectors")
 
@@ -128,29 +172,30 @@ class AnomalyDetector:
         """
         x = vector.to_vector()
         contributing_factors = []
+        n = len(x)
 
         # Z-score based detection
-        z_scores = np.zeros(len(x))
+        z_scores = [0.0] * n
         if self.feature_means is not None:
-            z_scores = (x - self.feature_means) / self.feature_stds
+            z_scores = [(x[i] - self.feature_means[i]) / self.feature_stds[i] for i in range(n)]
 
-            # Find high z-score features
             for i, (z, name) in enumerate(zip(z_scores, self.feature_names)):
                 if abs(z) > 2.0:
                     contributing_factors.append(f"{name}: z={z:.2f}")
 
-        max_z = np.max(np.abs(z_scores))
+        max_z = max(abs(z) for z in z_scores) if z_scores else 0.0
 
-        # Mahalanobis distance (multivariate outlier)
+        # Mahalanobis distance (numpy-only)
         mahal_score = 0.0
-        if self.covariance_matrix is not None and self.feature_means is not None:
+        if HAS_NUMPY and self.covariance_matrix is not None and self.feature_means is not None:
             try:
-                diff = x - self.feature_means
+                x_np = np.array(x)
+                means_np = np.array(self.feature_means)
+                diff = x_np - means_np
                 inv_cov = np.linalg.pinv(self.covariance_matrix)
-                mahal_score = np.sqrt(diff @ inv_cov @ diff)
+                mahal_score = float(np.sqrt(diff @ inv_cov @ diff))
 
-                # Chi-squared test for significance
-                p_value = 1 - stats.chi2.cdf(mahal_score**2, df=len(x))
+                p_value = 1 - stats.chi2.cdf(mahal_score**2, df=n)
                 if p_value < 0.05:
                     contributing_factors.append(f"multivariate_outlier: p={p_value:.4f}")
             except Exception:
@@ -159,16 +204,16 @@ class AnomalyDetector:
         # Isolation-like score based on feature extremity
         isolation_score = 0.0
         if self.feature_means is not None:
-            # How "isolated" is this point from the mean
-            normalized_dist = np.abs(x - self.feature_means) / (self.feature_stds + 1e-8)
-            isolation_score = np.mean(normalized_dist)
+            normalized_dist = [abs(x[i] - self.feature_means[i]) / (self.feature_stds[i] + 1e-8)
+                               for i in range(n)]
+            isolation_score = self._mean(normalized_dist)
 
         # Combine scores using sigmoid for 0-1 range
         raw_score = 0.4 * max_z + 0.3 * (mahal_score / 5) + 0.3 * isolation_score
-        anomaly_score = float(expit(raw_score - 2))  # Center around z=2
+        anomaly_score = float(expit(raw_score - 2))
 
         # Calculate percentile
-        percentile = float(stats.norm.cdf(max_z) * 100)
+        percentile = self._norm_cdf(max_z) * 100
 
         # Determine anomaly type
         anomaly_type = "normal"
@@ -189,82 +234,8 @@ class AnomalyDetector:
         )
 
     def batch_detect(self, vectors: List[ThreatVector]) -> List[AnomalyResult]:
-        """
-        Detect anomalies for multiple vectors using vectorized operations
-
-        OPTIMIZED: Uses numpy broadcasting instead of per-vector loops
-        """
-        if not vectors:
-            return []
-
-        # Convert all vectors to matrix at once
-        X = np.array([v.to_vector() for v in vectors])
-        n_samples = len(X)
-
-        # Pre-allocate result arrays
-        z_scores_all = np.zeros((n_samples, len(self.feature_names)))
-        max_z_scores = np.zeros(n_samples)
-        mahal_scores = np.zeros(n_samples)
-        isolation_scores = np.zeros(n_samples)
-
-        # Vectorized z-score calculation (broadcasting)
-        if self.feature_means is not None:
-            z_scores_all = (X - self.feature_means) / self.feature_stds
-            max_z_scores = np.max(np.abs(z_scores_all), axis=1)
-
-            # Vectorized isolation score
-            normalized_dist = np.abs(X - self.feature_means) / (self.feature_stds + 1e-8)
-            isolation_scores = np.mean(normalized_dist, axis=1)
-
-        # Vectorized Mahalanobis distance
-        if self.covariance_matrix is not None and self.feature_means is not None:
-            try:
-                diff = X - self.feature_means
-                inv_cov = np.linalg.pinv(self.covariance_matrix)
-                # Vectorized: diag(diff @ inv_cov @ diff.T)
-                mahal_scores = np.sqrt(np.sum(diff @ inv_cov * diff, axis=1))
-            except Exception:
-                pass
-
-        # Vectorized anomaly scores
-        raw_scores = 0.4 * max_z_scores + 0.3 * (mahal_scores / 5) + 0.3 * isolation_scores
-        anomaly_scores = expit(raw_scores - 2)  # Vectorized sigmoid
-
-        # Vectorized percentiles
-        percentiles = stats.norm.cdf(max_z_scores) * 100
-
-        # Build results
-        results = []
-        for i, vector in enumerate(vectors):
-            # Find contributing factors (still need loop for interpretability)
-            contributing_factors = []
-            high_z_mask = np.abs(z_scores_all[i]) > 2.0
-            for j in np.where(high_z_mask)[0]:
-                contributing_factors.append(
-                    f"{self.feature_names[j]}: z={z_scores_all[i, j]:.2f}"
-                )
-
-            # Determine anomaly type
-            score = anomaly_scores[i]
-            if score > 0.8:
-                anomaly_type = "critical"
-            elif score > 0.6:
-                anomaly_type = "suspicious"
-            elif score > 0.4:
-                anomaly_type = "unusual"
-            else:
-                anomaly_type = "normal"
-
-            results.append(AnomalyResult(
-                ip=vector.ip,
-                anomaly_score=float(score),
-                anomaly_type=anomaly_type,
-                z_score=float(max_z_scores[i]),
-                percentile=float(percentiles[i]),
-                contributing_factors=contributing_factors,
-            ))
-
-        return results
+        """Detect anomalies for multiple vectors"""
+        return [self.detect(v) for v in vectors]
 
 
 class ConnectionGraph:
@@ -397,7 +368,7 @@ class ConnectionGraph:
         for node in self.graph.nodes():
             node_data = self.graph.nodes[node]
             scores = node_data.get("threat_scores", [])
-            if scores and np.mean(scores) >= threshold:
+            if scores and (sum(scores) / len(scores)) >= threshold:
                 high_threat_nodes.append(node)
 
         if not high_threat_nodes:
@@ -433,7 +404,8 @@ class ConnectionGraph:
 
                 for successor in self.graph.successors(node):
                     edge_data = self.graph.edges[node, successor]
-                    avg_threat = np.mean(edge_data.get("threat_scores", [0]))
+                    _scores = edge_data.get("threat_scores", [0])
+                    avg_threat = sum(_scores) / len(_scores) if _scores else 0
 
                     if avg_threat >= min_threat:
                         new_path = path + [successor]
@@ -522,7 +494,7 @@ class ConnectionGraph:
                 data = self.graph.nodes[node]
                 last_seen = data.get("last_seen", 0)
                 threat_scores = data.get("threat_scores", [0])
-                avg_threat = np.mean(threat_scores) if threat_scores else 0
+                avg_threat = (sum(threat_scores) / len(threat_scores)) if threat_scores else 0
                 # Score: recency (0-1) + threat (0-1)
                 recency = max(0, 1 - (now - last_seen) / 3600)  # 1 hour window
                 node_scores.append((node, recency + avg_threat))
@@ -709,6 +681,36 @@ class ThreatAnalytics:
 
         return result
 
+    @staticmethod
+    def _linregress(x, y):
+        """Pure Python simple linear regression returning (slope, intercept, r, p_value)"""
+        n = len(x)
+        if n < 2:
+            return 0.0, 0.0, 0.0, 1.0
+        sx = sum(x)
+        sy = sum(y)
+        sxx = sum(xi * xi for xi in x)
+        sxy = sum(xi * yi for xi, yi in zip(x, y))
+        syy = sum(yi * yi for yi in y)
+        denom = n * sxx - sx * sx
+        if abs(denom) < 1e-12:
+            return 0.0, sy / n, 0.0, 1.0
+        slope = (n * sxy - sx * sy) / denom
+        intercept = (sy - slope * sx) / n
+        # Correlation coefficient
+        denom_r = math.sqrt((n * sxx - sx ** 2) * (n * syy - sy ** 2))
+        r = (n * sxy - sx * sy) / denom_r if abs(denom_r) > 1e-12 else 0.0
+        # Approximate p-value via t-distribution
+        if abs(r) >= 1.0 - 1e-12:
+            p_value = 0.0
+        elif n > 2:
+            t_stat = r * math.sqrt((n - 2) / (1 - r * r + 1e-12))
+            # Approximate two-tailed p-value using normal CDF for large n
+            p_value = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(t_stat) / math.sqrt(2.0))))
+        else:
+            p_value = 1.0
+        return slope, intercept, r, p_value
+
     def get_threat_trend(self, window_hours: int = 24) -> Dict:
         """
         Analyze threat score trends over time
@@ -727,14 +729,15 @@ class ThreatAnalytics:
         if len(window_data) < 10:
             return {"trend": "insufficient_data"}
 
-        times = np.array([d[0] for d in window_data])
-        scores = np.array([d[1] for d in window_data])
+        times_raw = [d[0] for d in window_data]
+        scores_raw = [d[1] for d in window_data]
 
-        # Normalize time to 0-1 range
-        times_norm = (times - times.min()) / (times.max() - times.min() + 1e-8)
+        t_min, t_max = min(times_raw), max(times_raw)
+        t_range = t_max - t_min + 1e-8
+        times_norm = [(t - t_min) / t_range for t in times_raw]
 
-        # Linear regression for trend
-        slope, intercept, r_value, p_value, std_err = stats.linregress(times_norm, scores)
+        # Linear regression (pure Python)
+        slope, intercept, r_value, p_value = self._linregress(times_norm, scores_raw)
 
         # Determine trend direction
         if p_value < 0.05:
@@ -747,15 +750,18 @@ class ThreatAnalytics:
         else:
             trend = "stable"
 
+        mean_s = sum(scores_raw) / len(scores_raw)
+        std_s = math.sqrt(sum((s - mean_s) ** 2 for s in scores_raw) / len(scores_raw)) if len(scores_raw) > 1 else 0.0
+
         return {
             "trend": trend,
             "slope": float(slope),
             "r_squared": float(r_value ** 2),
             "p_value": float(p_value),
-            "mean_score": float(np.mean(scores)),
-            "std_score": float(np.std(scores)),
-            "min_score": float(np.min(scores)),
-            "max_score": float(np.max(scores)),
+            "mean_score": mean_s,
+            "std_score": std_s,
+            "min_score": min(scores_raw),
+            "max_score": max(scores_raw),
             "sample_count": len(window_data),
         }
 

@@ -15,6 +15,7 @@ from typing import Dict, List
 import plotext as plt
 
 from rich.panel import Panel
+from rich.text import Text
 from textual.widgets import Static
 from textual.reactive import reactive
 
@@ -179,7 +180,7 @@ class ThreatDistributionGraph(Static):
             panel_title = "Threat Score Distribution"
 
         return Panel(
-            chart_str,
+            Text.from_ansi(chart_str),
             title=f"[bold cyan]{panel_title}[/bold cyan]",
             border_style="dim cyan",
             padding=(0, 0),

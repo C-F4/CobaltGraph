@@ -63,6 +63,9 @@ class Database:
         "domain_trust", "dga_detected", "domain_asn_mismatch"
     ]
 
+    # Maximum consecutive flush failures before dropping batch
+    MAX_FLUSH_RETRIES = 3
+
     def __init__(self, db_path: str = "database/cobaltgraph.db"):
         """Initialize optimized database connection"""
         self.db_path = db_path
@@ -75,6 +78,8 @@ class Database:
         self._last_flush = time.time()
         self._flush_thread: Optional[Thread] = None
         self._running = True
+        self._consecutive_flush_failures = 0
+        self._readonly_warned = False
 
         # Statistics
         self.stats = {
@@ -83,19 +88,90 @@ class Database:
             "avg_batch_size": 0,
         }
 
+        # Resolve to a writable database path (handles root-owned dirs from sudo runs)
+        self.db_path = self._resolve_db_path(self.db_path)
+
+        db_dir = Path(self.db_path).parent
         try:
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            db_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             raise DatabaseError(f"Failed to create database directory: {e}")
 
         try:
-            self.conn = sqlite3.connect(db_path, check_same_thread=False)
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._optimize_connection()
             self._init_schema()
             self._start_flush_thread()
             logger.info("📁 Database initialized (optimized): %s", self.db_path)
         except sqlite3.Error as e:
             raise DatabaseError(f"Failed to connect to database: {e}")
+
+    @staticmethod
+    def _check_writable(db_dir: Path) -> bool:
+        """
+        Check if database directory and files are writable by the current user.
+
+        Returns True if writable, False otherwise.
+        """
+        import os
+
+        if not db_dir.exists():
+            # Directory doesn't exist yet; will be created - check parent
+            parent = db_dir.parent
+            return os.access(str(parent), os.W_OK)
+
+        if not os.access(str(db_dir), os.W_OK):
+            return False
+
+        # Check existing database files
+        for pattern in ["*.db", "*.db-wal", "*.db-shm", "*.db-journal"]:
+            for item in db_dir.glob(pattern):
+                if not os.access(str(item), os.W_OK):
+                    return False
+
+        return True
+
+    @staticmethod
+    def _resolve_db_path(requested_path: str) -> str:
+        """
+        Resolve database path, falling back to a user-writable location
+        if the requested path is not writable (e.g. owned by root from a
+        previous sudo run).
+        """
+        import os
+
+        db_path = Path(requested_path)
+        db_dir = db_path.parent
+
+        if Database._check_writable(db_dir):
+            return requested_path
+
+        # Not writable - log warning and fall back to user data directory
+        logger.warning(
+            "Database directory '%s' is not writable (likely owned by root from a "
+            "previous sudo run). To fix permanently: sudo chown -R $(whoami) %s",
+            db_dir, db_dir
+        )
+
+        # Fall back to ~/.local/share/cobaltgraph/
+        fallback_dir = Path.home() / ".local" / "share" / "cobaltgraph"
+        fallback_path = str(fallback_dir / db_path.name)
+
+        try:
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+        if os.access(str(fallback_dir), os.W_OK):
+            logger.info("Using fallback database path: %s", fallback_path)
+            return fallback_path
+
+        # Last resort: use temp directory
+        import tempfile
+        tmp_path = str(Path(tempfile.gettempdir()) / "cobaltgraph" / db_path.name)
+        Path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+        logger.warning("Using temporary database path: %s (data will not persist across reboots)", tmp_path)
+        return tmp_path
 
     def _optimize_connection(self):
         """Apply performance-critical PRAGMA settings"""
@@ -573,6 +649,9 @@ class Database:
                 )
                 self.conn.commit()
 
+            # Reset failure counter on success
+            self._consecutive_flush_failures = 0
+
             # Update stats
             self.stats["total_inserts"] += len(batch)
             self.stats["batch_flushes"] += 1
@@ -583,8 +662,39 @@ class Database:
             logger.debug(f"Batch flush: {len(batch)} connections (avg: {self.stats['avg_batch_size']:.1f})")
 
         except sqlite3.Error as e:
-            logger.error(f"Batch insert failed: {e}")
-            # Re-queue failed batch for retry
+            self._consecutive_flush_failures += 1
+            error_msg = str(e).lower()
+
+            # Detect persistent/unrecoverable errors - don't re-queue
+            is_readonly = "readonly" in error_msg or "read-only" in error_msg
+            is_disk_full = "disk" in error_msg and "full" in error_msg
+
+            if is_readonly:
+                if not self._readonly_warned:
+                    self._readonly_warned = True
+                    logger.error(
+                        "Database is read-only. This usually means the database files "
+                        "are owned by root from a previous sudo run. "
+                        "Fix with: sudo chown -R $(whoami) %s",
+                        Path(self.db_path).parent
+                    )
+                logger.warning(f"Dropping {len(batch)} inserts (readonly database)")
+                return
+
+            if is_disk_full:
+                logger.error(f"Disk full - dropping {len(batch)} inserts: {e}")
+                return
+
+            if self._consecutive_flush_failures >= self.MAX_FLUSH_RETRIES:
+                logger.error(
+                    f"Batch insert failed {self._consecutive_flush_failures} times, "
+                    f"dropping {len(batch)} inserts: {e}"
+                )
+                self._consecutive_flush_failures = 0
+                return
+
+            # Transient error - re-queue for retry
+            logger.warning(f"Batch insert failed (attempt {self._consecutive_flush_failures}): {e}")
             with self._batch_lock:
                 self._pending_inserts.extendleft(batch)
 
