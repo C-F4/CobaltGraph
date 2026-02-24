@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Metadata Aggregator and Time-Series Analysis - OPTIMIZED
 High-performance pandas operations with batch buffering
@@ -18,9 +19,18 @@ from datetime import datetime, timedelta
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Any
 
-import numpy as np
-import pandas as pd
-from scipy import stats
+import math
+
+try:
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+    np = None
+    pd = None
+    stats = None
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +41,53 @@ class AggregationWindow:
     start: float
     end: float
     duration_hours: int
+
+
+class _StubTimeSeries:
+    """Lightweight fallback when pandas is unavailable"""
+
+    def __init__(self, max_records: int = 30000):
+        self.max_records = max_records
+        self._records: List[Dict] = []
+        self.total_records = 0
+        self.flush_count = 0
+
+    def add_connection(self, connection_data: Dict):
+        self._records.append(connection_data)
+        self.total_records += 1
+        if len(self._records) > self.max_records:
+            self._records = self._records[-self.max_records // 2:]
+
+    def add_batch(self, connections: List[Dict]):
+        for conn in connections:
+            self.add_connection(conn)
+
+    def flush(self):
+        pass
+
+    @property
+    def df(self):
+        return None
+
+    @property
+    def empty(self):
+        return len(self._records) == 0
+
+    def get_rolling_stats(self, window: str = "1H"):
+        return None
+
+    def get_hourly_pattern(self) -> Dict:
+        return {}
+
+    def get_threat_trend(self, hours: int = 24) -> Dict:
+        if len(self._records) < 10:
+            return {"trend": "insufficient_data"}
+        scores = [r.get("threat_score", 0) for r in self._records[-500:]]
+        mean_s = sum(scores) / len(scores) if scores else 0
+        return {"trend": "stable", "period_mean": mean_s, "data_points": len(scores)}
+
+    def detect_anomalous_periods(self, threshold_sigma: float = 2.0) -> List[Dict]:
+        return []
 
 
 class ThreatTimeSeries:
@@ -48,6 +105,8 @@ class ThreatTimeSeries:
     - Seasonal decomposition
     - Anomaly detection via time patterns
     - Forecasting simple trends
+
+    Falls back to _StubTimeSeries if pandas is unavailable.
     """
 
     # Batch configuration
@@ -68,9 +127,16 @@ class ThreatTimeSeries:
         "dst_country": "category",
         "hop_count": "Int8",  # Nullable int8
         "org_trust_score": "float32",
-    }
+    } if HAS_PANDAS else {}
+
+    def __new__(cls, *args, **kwargs):
+        if not HAS_PANDAS:
+            return _StubTimeSeries(*args, **kwargs)
+        return super().__new__(cls)
 
     def __init__(self, max_records: int = 30000):  # Reduced from 100k for memory (-25MB)
+        if not HAS_PANDAS:
+            return  # _StubTimeSeries already initialized via __new__
         self.max_records = max_records
         self._lock = Lock()
 
@@ -389,20 +455,25 @@ class MetadataAggregator:
     def __init__(self):
         self.time_series = ThreatTimeSeries()
 
-        # Pre-aggregated statistics
-        self.asn_stats = pd.DataFrame(columns=[
-            "asn", "asn_name", "connection_count", "mean_threat",
-            "unique_ips", "first_seen", "last_seen"
-        ])
+        if HAS_PANDAS:
+            # Pre-aggregated statistics
+            self.asn_stats = pd.DataFrame(columns=[
+                "asn", "asn_name", "connection_count", "mean_threat",
+                "unique_ips", "first_seen", "last_seen"
+            ])
 
-        self.org_stats = pd.DataFrame(columns=[
-            "org", "org_type", "connection_count", "mean_threat",
-            "unique_ips", "unique_asns", "first_seen", "last_seen"
-        ])
+            self.org_stats = pd.DataFrame(columns=[
+                "org", "org_type", "connection_count", "mean_threat",
+                "unique_ips", "unique_asns", "first_seen", "last_seen"
+            ])
 
-        self.port_stats = pd.DataFrame(columns=[
-            "port", "connection_count", "mean_threat", "unique_ips"
-        ])
+            self.port_stats = pd.DataFrame(columns=[
+                "port", "connection_count", "mean_threat", "unique_ips"
+            ])
+        else:
+            self.asn_stats = []
+            self.org_stats = []
+            self.port_stats = []
 
     def process_connection(self, connection: Dict):
         """Process a single connection"""
@@ -420,7 +491,7 @@ class MetadataAggregator:
         # This is simplified - in production would use incremental updates
         pass
 
-    def get_asn_analysis(self) -> pd.DataFrame:
+    def get_asn_analysis(self):
         """
         Aggregate statistics by ASN
 
@@ -431,6 +502,9 @@ class MetadataAggregator:
         - Unique IPs
         - First/last seen
         """
+        if not HAS_PANDAS:
+            return []
+
         df = self.time_series.df
 
         if df.empty:
@@ -457,12 +531,15 @@ class MetadataAggregator:
 
         return agg.sort_values("mean_threat", ascending=False)
 
-    def get_org_type_analysis(self) -> pd.DataFrame:
+    def get_org_type_analysis(self):
         """
         Aggregate statistics by organization type
 
         Useful for understanding traffic patterns to different org categories
         """
+        if not HAS_PANDAS:
+            return []
+
         df = self.time_series.df
 
         if df.empty:
@@ -494,12 +571,15 @@ class MetadataAggregator:
 
         return agg.sort_values("risk_score", ascending=False)
 
-    def get_port_analysis(self) -> pd.DataFrame:
+    def get_port_analysis(self):
         """
         Analyze connections by destination port
 
         Identifies unusual port usage patterns
         """
+        if not HAS_PANDAS:
+            return []
+
         df = self.time_series.df
 
         if df.empty:
@@ -520,10 +600,13 @@ class MetadataAggregator:
 
         return agg.sort_values("connection_count", ascending=False)
 
-    def get_geographic_analysis(self) -> pd.DataFrame:
+    def get_geographic_analysis(self):
         """
         Aggregate by country/geographic region
         """
+        if not HAS_PANDAS:
+            return []
+
         df = self.time_series.df
 
         if df.empty or "dst_country" not in df.columns:
@@ -553,6 +636,9 @@ class MetadataAggregator:
 
         Useful for understanding network topology
         """
+        if not HAS_PANDAS:
+            return {}
+
         df = self.time_series.df
 
         if df.empty or "hop_count" not in df.columns:
@@ -574,13 +660,19 @@ class MetadataAggregator:
             ) if len(df_hops) > 10 else None,
         }
 
-    def export_summary(self, format: str = "dict") -> Any:
+    def export_summary(self, format: str = "dict"):
         """
         Export comprehensive summary
 
         Args:
             format: "dict", "json", or "dataframe"
         """
+        if not HAS_PANDAS or self.time_series.df is None:
+            return {
+                "total_connections": getattr(self.time_series, 'total_records', 0),
+                "trend": self.time_series.get_threat_trend(),
+            }
+
         summary = {
             "total_connections": len(self.time_series.df),
             "time_range": {
@@ -614,12 +706,15 @@ class MetadataAggregator:
 
         return summary
 
-    def get_correlation_matrix(self) -> pd.DataFrame:
+    def get_correlation_matrix(self):
         """
         Calculate correlations between numeric features
 
         Useful for understanding feature relationships
         """
+        if not HAS_PANDAS:
+            return []
+
         df = self.time_series.df
 
         if df.empty:

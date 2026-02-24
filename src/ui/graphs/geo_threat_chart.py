@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple
 import plotext as plt
 
 from rich.panel import Panel
+from rich.text import Text
 from textual.widgets import Static
 from textual.reactive import reactive
 
@@ -184,7 +185,7 @@ class GeoThreatGraph(Static):
             panel_title = "Connections by Country"
 
         return Panel(
-            chart_str,
+            Text.from_ansi(chart_str),
             title=f"[bold cyan]{panel_title}[/bold cyan]",
             border_style="dim cyan",
             padding=(0, 0),

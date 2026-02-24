@@ -559,8 +559,8 @@ class OrganizationScorer(ThreatScorer):
         factors = []
         base_score = 0.5  # Start neutral
 
-        # Get TTL from metadata if available
-        ttl = connection_metadata.get("ttl", 0)
+        # Get TTL from metadata if available (may be None even when key exists)
+        ttl = connection_metadata.get("ttl") or 0
 
         # Perform ASN lookup
         asn_info = self._get_asn_info(dst_ip, ttl)
@@ -640,7 +640,7 @@ class OrganizationScorer(ThreatScorer):
                 factors.append(f"HIGH_HOP_COUNT({hops})")
 
         # Factor 5: TTL anomaly detection
-        if self.ttl_analyzer and ttl > 0:
+        if self.ttl_analyzer and ttl and ttl > 0:
             ttl_result = self.ttl_analyzer.analyze(dst_ip, ttl, timestamp)
             if ttl_result.get("anomaly"):
                 base_score += 0.2
@@ -727,6 +727,8 @@ class OrganizationScorer(ThreatScorer):
         """Get ASN info with session caching"""
         if not self.asn_service:
             return None
+
+        ttl = ttl or 0  # Guard against None
 
         # Check session cache
         if ip in self._session_cache:

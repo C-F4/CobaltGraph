@@ -26,12 +26,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table as RichTable
 from rich.text import Text
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, Container
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, Container, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import Header, Footer, Static, DataTable
 from textual.reactive import reactive
 
@@ -1160,7 +1163,7 @@ class SmartConnectionTable(Static):
         return self._connection_map.get(row_key, {})
 
 
-class NetworkDevicePanel(Static):
+class NetworkDevicePanel(VerticalScroll):
     """
     Network Intelligence Panel - Passive Network Reconnaissance
 
@@ -1168,7 +1171,7 @@ class NetworkDevicePanel(Static):
     Shows traffic flow analysis, MAC discovery, subnet intelligence, and
     protocol distribution - all from observed traffic only.
 
-    Design: Professional SOC aesthetic emphasizing passive intelligence gathering.
+    Uses VerticalScroll so content scrolls when MAC count exceeds panel height.
 
     PASSIVITY PRINCIPLE: CobaltGraph sees without being seen.
     - All intelligence derived from observed packets only
@@ -1181,8 +1184,16 @@ class NetworkDevicePanel(Static):
     NetworkDevicePanel {
         height: 100%;
         width: 100%;
+        scrollbar-size: 1 1;
+        scrollbar-background: $surface;
+        scrollbar-color: $text-muted;
+    }
+    NetworkDevicePanel:focus-within {
+        scrollbar-color: cyan;
+    }
+    NetworkDevicePanel > .net-intel-content {
+        width: 100%;
         padding: 0 1;
-        overflow: auto;
     }
     """
 
@@ -1190,17 +1201,25 @@ class NetworkDevicePanel(Static):
     devices = reactive(list)
     network_info = reactive(dict)
 
+    # A MAC with this many or more distinct IPs seen over its lifetime is flagged
+    IP_CHURN_THRESHOLD = 8
+    # Max recent IPs to display per MAC in the grid cell
+    MAX_DISPLAY_IPS = 5
+
     def __init__(self, mode: str = "device", **kwargs):
         super().__init__(**kwargs)
         self.mode = mode
         self.flows = {}
         self.topology_data = {}
         self.devices = []
+        # Persistent IP history: {mac: {ip: last_seen_timestamp}}
+        # Survives across refresh cycles so we know recency
+        self._mac_ip_history: Dict[str, Dict[str, float]] = {}
         self.network_info = {
             'ip_range': 'detecting...',
             # Extended passive intelligence
             'subnets_detected': set(),
-            'mac_sources': {},      # MAC -> {'direction': 'src'|'dst'|'both', 'ips': set(), 'count': int}
+            'mac_sources': {},      # MAC -> {'direction': ..., 'ips': list, 'count': int, ...}
             'protocol_stats': {},   # {'TCP': int, 'UDP': int}
             'arp_activity': [],     # Recent ARP observations
             'broadcast_count': 0,
@@ -1208,93 +1227,139 @@ class NetworkDevicePanel(Static):
             'outbound_macs': set(), # MACs seen as source (sending traffic)
         }
 
+    def compose(self) -> ComposeResult:
+        """Mount a child Static that holds the rendered content."""
+        yield Static(classes="net-intel-content")
+
+    def _update_content(self) -> None:
+        """Re-render and push content into the child Static."""
+        try:
+            content_widget = self.query_one(".net-intel-content", Static)
+            content_widget.update(self._render_panel())
+        except Exception:
+            pass
+
     def watch_topology_data(self, new_data: dict) -> None:
         """Update topology when data changes (network mode)"""
         self.flows = new_data
-        self._update_network_info()
-        self.refresh()
+        self._update_network_info_merged()
+        self._update_content()
 
     def watch_devices(self, new_devices: list) -> None:
         """Update devices when data changes (device mode)"""
         self.devices = new_devices
-        self._update_network_info_from_devices()
-        self.refresh()
+        self._update_network_info_merged()
+        self._update_content()
 
-    def _update_network_info(self):
-        """Extract network intelligence from observed traffic flows"""
-        if not self.flows:
-            return
+    def _record_mac_ips(self, mac: str, ips):
+        """Record IPs for a MAC with timestamps for recency tracking."""
+        now = time.monotonic()
+        if mac not in self._mac_ip_history:
+            self._mac_ip_history[mac] = {}
+        for ip in ips:
+            if isinstance(ip, str) and ip:
+                self._mac_ip_history[mac][ip] = now
 
+    def _get_recent_ips(self, mac: str) -> tuple:
+        """Return (recent_ips, total_seen, is_churning) for a MAC.
+
+        recent_ips: up to MAX_DISPLAY_IPS most recently seen IPs
+        total_seen: total distinct IPs ever observed for this MAC
+        is_churning: True if total_seen >= IP_CHURN_THRESHOLD
+        """
+        history = self._mac_ip_history.get(mac, {})
+        total_seen = len(history)
+        is_churning = total_seen >= self.IP_CHURN_THRESHOLD
+
+        # Sort by timestamp descending, take most recent
+        recent = sorted(history.items(), key=lambda x: x[1], reverse=True)
+        recent_ips = [ip for ip, _ts in recent[:self.MAX_DISPLAY_IPS]]
+
+        return recent_ips, total_seen, is_churning
+
+    def _update_network_info_merged(self):
+        """Merge topology flows and device inventory into unified network intel.
+
+        Topology data provides flow direction and protocol stats.
+        Device data fills in additional MACs not seen in current flows.
+        Neither source clobbers the other - they are combined.
+        IPs are tracked with timestamps in _mac_ip_history for recency pruning.
+        """
         src_ips = set()
         mac_sources = {}
         protocol_stats = {'TCP': 0, 'UDP': 0, 'OTHER': 0}
 
-        for src_mac, flow_data in self.flows.items():
-            # Track MAC as source (outbound traffic)
-            if src_mac not in mac_sources:
-                mac_sources[src_mac] = {
-                    'direction': 'outbound',
-                    'ips': set(),
-                    'count': 0,
-                    'vendor': flow_data.get('device_vendor'),
-                    'threat_avg': flow_data.get('threat_avg', 0)
-                }
+        # First pass: topology flows (richer data - has direction + protocol)
+        if self.flows:
+            for src_mac, flow_data in self.flows.items():
+                if src_mac not in mac_sources:
+                    mac_sources[src_mac] = {
+                        'direction': 'outbound',
+                        'count': 0,
+                        'vendor': flow_data.get('device_vendor'),
+                        'threat_avg': flow_data.get('threat_avg', 0)
+                    }
 
-            if 'src_ip' in flow_data:
-                src_ips.add(flow_data['src_ip'])
-                mac_sources[src_mac]['ips'].add(flow_data['src_ip'])
+                if 'src_ip' in flow_data:
+                    src_ips.add(flow_data['src_ip'])
+                    self._record_mac_ips(src_mac, [flow_data['src_ip']])
 
-            # Count flows per MAC
-            destinations = flow_data.get('destinations', {})
-            mac_sources[src_mac]['count'] += len(destinations)
+                destinations = flow_data.get('destinations', {})
+                mac_sources[src_mac]['count'] += len(destinations)
 
-            # Protocol statistics
-            for dest_key, dest_data in destinations.items():
-                proto = dest_data.get('protocol', 'TCP').upper()
-                if proto in protocol_stats:
-                    protocol_stats[proto] += dest_data.get('count', 1)
+                for dest_key, dest_data in destinations.items():
+                    proto = dest_data.get('protocol', 'TCP').upper()
+                    if proto in protocol_stats:
+                        protocol_stats[proto] += dest_data.get('count', 1)
+                    else:
+                        protocol_stats['OTHER'] += dest_data.get('count', 1)
+
+        # Second pass: device inventory (fills in MACs not in flows)
+        if self.devices:
+            for device in self.devices:
+                mac = device.get('mac', '')
+                if not mac:
+                    continue
+
+                ip_addresses = device.get('ip_addresses', [])
+                if isinstance(ip_addresses, str):
+                    try:
+                        import json
+                        ip_addresses = json.loads(ip_addresses)
+                    except (json.JSONDecodeError, TypeError):
+                        ip_addresses = []
+
+                self._record_mac_ips(mac, ip_addresses)
+
+                if mac in mac_sources:
+                    # MAC already from flows - merge vendor if needed
+                    if not mac_sources[mac].get('vendor') or mac_sources[mac]['vendor'] == 'Unknown':
+                        mac_sources[mac]['vendor'] = device.get('vendor')
                 else:
-                    protocol_stats['OTHER'] += dest_data.get('count', 1)
+                    # MAC only in device inventory, not in current flows
+                    mac_sources[mac] = {
+                        'direction': 'observed',
+                        'count': device.get('connection_count', 0),
+                        'vendor': device.get('vendor'),
+                        'threat_avg': device.get('threat_score', 0)
+                    }
+
+                for ip in ip_addresses:
+                    if isinstance(ip, str):
+                        src_ips.add(ip)
+
+        # Resolve recent IPs and churn flags from history
+        for mac in mac_sources:
+            recent_ips, total_seen, is_churning = self._get_recent_ips(mac)
+            mac_sources[mac]['ips'] = recent_ips
+            mac_sources[mac]['total_ips_seen'] = total_seen
+            mac_sources[mac]['ip_churning'] = is_churning
 
         self.network_info['mac_sources'] = mac_sources
         self.network_info['protocol_stats'] = protocol_stats
-        self.network_info['outbound_macs'] = set(mac_sources.keys())
-        self._detect_network_range(src_ips)
-
-    def _update_network_info_from_devices(self):
-        """Extract network intelligence from device inventory"""
-        if not self.devices:
-            return
-
-        src_ips = set()
-        mac_sources = {}
-
-        for device in self.devices:
-            mac = device.get('mac', '')
-            if not mac:
-                continue
-
-            ip_addresses = device.get('ip_addresses', [])
-            if isinstance(ip_addresses, str):
-                try:
-                    import json
-                    ip_addresses = json.loads(ip_addresses)
-                except (json.JSONDecodeError, TypeError):
-                    ip_addresses = []
-
-            mac_sources[mac] = {
-                'direction': 'observed',
-                'ips': set(ip_addresses) if ip_addresses else set(),
-                'count': device.get('connection_count', 0),
-                'vendor': device.get('vendor'),
-                'threat_avg': device.get('threat_score', 0)
-            }
-
-            for ip in ip_addresses:
-                if isinstance(ip, str):
-                    src_ips.add(ip)
-
-        self.network_info['mac_sources'] = mac_sources
+        self.network_info['outbound_macs'] = set(
+            m for m, d in mac_sources.items() if d.get('direction') == 'outbound'
+        )
         self._detect_network_range(src_ips)
 
     def _detect_network_range(self, src_ips: set):
@@ -1328,8 +1393,67 @@ class NetworkDevicePanel(Static):
 
         self.network_info['subnets_detected'] = detected_subnets
 
-    def render(self):
-        """Render professional network intelligence panel"""
+    def _build_device_cell(self, mac: str, mac_data: dict) -> Text:
+        """Build a compact Text renderable for one device in the matrix grid."""
+        vendor = (mac_data.get('vendor') or 'Unknown')[:12]
+        ips = mac_data.get('ips', [])
+        flow_count = mac_data.get('count', 0)
+        threat_avg = float(mac_data.get('threat_avg', 0) or 0)
+        direction = mac_data.get('direction', 'observed')
+        total_ips_seen = mac_data.get('total_ips_seen', len(ips))
+        is_churning = mac_data.get('ip_churning', False)
+
+        # Direction indicator
+        if direction == 'outbound':
+            dir_icon, dir_style = "→", "cyan"
+        elif direction == 'inbound':
+            dir_icon, dir_style = "←", "magenta"
+        else:
+            dir_icon, dir_style = "◆", "dim"
+
+        # Threat indicator + score color
+        if threat_avg >= 0.5:
+            threat_icon, score_style = "▲", "bold red"
+        elif threat_avg >= 0.3:
+            threat_icon, score_style = "─", "yellow"
+        else:
+            threat_icon, score_style = "▼", "dim green"
+
+        # Confidence bar (4-char mini bar)
+        filled = int(threat_avg * 4)
+        conf_bar = "█" * filled + "░" * (4 - filled)
+
+        mac_short = mac[:8] + ".." + mac[-5:] if len(mac) > 15 else mac
+
+        cell = Text()
+        cell.append(dir_icon, style=dir_style)
+        cell.append(threat_icon, style=score_style)
+        cell.append(f" {mac_short}", style="dim")
+        # IP churn flag on the header line
+        if is_churning:
+            cell.append(f" ⟳{total_ips_seen}", style="bold yellow")
+        cell.append("\n")
+        cell.append(f"{vendor:<12} ", style="dim")
+        cell.append(conf_bar, style=score_style)
+        cell.append(f" {threat_avg:.0%}\n", style=score_style)
+        # IPs - show only the most recent (already pruned by _get_recent_ips)
+        if ips:
+            for ip in ips:
+                cell.append(f"{ip}\n")
+            # Indicate how many more are hidden
+            hidden = total_ips_seen - len(ips)
+            if hidden > 0:
+                cell.append(f"+{hidden} more\n", style="dim italic")
+        else:
+            cell.append("—\n", style="dim")
+        # Flow count
+        if flow_count:
+            cell.append(f"×{flow_count} flows", style="dim italic")
+
+        return cell
+
+    def _render_panel(self):
+        """Build the Rich renderable for network intelligence content."""
         has_flow_data = bool(self.flows)
         has_device_data = bool(self.devices)
         mac_sources = self.network_info.get('mac_sources', {})
@@ -1351,24 +1475,11 @@ class NetworkDevicePanel(Static):
                 padding=(0, 1)
             )
 
-        lines = []
+        # ═══ HEADER: Subnet + Traffic Summary (compact) ═══
+        header_lines = []
 
-        # ═══ HEADER: Subnet Intelligence ═══
-        lines.append(f"[dim]{'─' * 38}[/dim]")
         ip_range = self.network_info.get('ip_range', 'unknown')
         subnets = self.network_info.get('subnets_detected', set())
-
-        lines.append(f"[bold dim]SUBNET[/bold dim] [bright_white]{ip_range}[/bright_white]")
-
-        if len(subnets) > 1:
-            other_subnets = [s for s in subnets if s != ip_range][:2]
-            if other_subnets:
-                lines.append(f"[dim]  also: {', '.join(other_subnets)}[/dim]")
-
-        # ═══ SECTION: Traffic Flow Summary ═══
-        lines.append("")
-        lines.append("[bold dim]TRAFFIC FLOW[/bold dim]")
-
         total_macs = len(mac_sources)
         total_flows = sum(m.get('count', 0) for m in mac_sources.values())
         protocol_stats = self.network_info.get('protocol_stats', {})
@@ -1378,79 +1489,71 @@ class NetworkDevicePanel(Static):
         other_count = protocol_stats.get('OTHER', 0)
         total_proto = tcp_count + udp_count + other_count
 
-        # Traffic metrics
-        lines.append(f"  [dim]endpoints[/dim] {total_macs:>5}  [dim]│[/dim]  [dim]flows[/dim] {total_flows:>6}")
+        header_lines.append(f"[bold dim]SUBNET[/bold dim] [bright_white]{ip_range}[/bright_white]")
+        if len(subnets) > 1:
+            other_subnets = [s for s in subnets if s != ip_range][:2]
+            if other_subnets:
+                header_lines.append(f"[dim]  also: {', '.join(other_subnets)}[/dim]")
 
-        # Protocol bar visualization
+        # Compact traffic summary on one line
+        flow_summary = f"[dim]endpoints[/dim] {total_macs}  [dim]flows[/dim] {total_flows}"
+        if total_proto > 0:
+            flow_summary += f"  [cyan]TCP {tcp_count}[/cyan] [magenta]UDP {udp_count}[/magenta]"
+            if other_count:
+                flow_summary += f" [dim]+{other_count}[/dim]"
+        header_lines.append(flow_summary)
+
+        # Protocol bar
         if total_proto > 0:
             bar_width = 20
             tcp_bar = int((tcp_count / total_proto) * bar_width)
             udp_bar = int((udp_count / total_proto) * bar_width)
             other_bar = bar_width - tcp_bar - udp_bar
-
             proto_bar = f"[cyan]{'▮' * tcp_bar}[/cyan][magenta]{'▮' * udp_bar}[/magenta][dim]{'▯' * other_bar}[/dim]"
-            lines.append(f"  {proto_bar}")
-            lines.append(f"  [cyan]TCP {tcp_count}[/cyan] [magenta]UDP {udp_count}[/magenta] [dim]other {other_count}[/dim]")
+            header_lines.append(f"  {proto_bar}")
 
-        # ═══ SECTION: MAC Intelligence ═══
-        lines.append("")
-        lines.append("[bold dim]MAC DISCOVERY[/bold dim]")
-        lines.append(f"  [dim]method: passive observation[/dim]")
+        header_lines.append("")
+        header_lines.append(f"[bold dim]MAC DISCOVERY[/bold dim] [dim]{total_macs} devices · passive observation[/dim]")
 
-        # Sort MACs by activity (flow count)
+        header_text = Text.from_markup("\n".join(header_lines))
+
+        # ═══ MATRIX GRID: Device cells ═══
         sorted_macs = sorted(
             mac_sources.items(),
             key=lambda x: (x[1].get('threat_avg', 0), x[1].get('count', 0)),
             reverse=True
-        )[:5]
+        )
 
-        for idx, (mac, mac_data) in enumerate(sorted_macs):
-            vendor = (mac_data.get('vendor') or 'Unknown')[:10]
-            ips = mac_data.get('ips', set())
-            flow_count = mac_data.get('count', 0)
-            threat_avg = float(mac_data.get('threat_avg', 0) or 0)
-            direction = mac_data.get('direction', 'observed')
+        # Determine column count: 2 base, 3 if many devices
+        num_cols = 3 if len(sorted_macs) >= 6 else 2
 
-            # Direction indicator
-            if direction == 'outbound':
-                dir_icon = "[cyan]→[/cyan]"  # Sending traffic
-                dir_label = "OUT"
-            elif direction == 'inbound':
-                dir_icon = "[magenta]←[/magenta]"  # Receiving traffic
-                dir_label = "IN"
-            else:
-                dir_icon = "[dim]◆[/dim]"  # Observed
-                dir_label = "OBS"
+        grid = RichTable(
+            show_header=False,
+            show_edge=False,
+            box=None,
+            expand=True,
+            padding=(0, 1, 1, 0),
+        )
+        for _ in range(num_cols):
+            grid.add_column(ratio=1)
 
-            # Threat indicator
-            if threat_avg >= 0.5:
-                threat_ind = f"[bold red]▲[/bold red]"
-            elif threat_avg >= 0.3:
-                threat_ind = f"[yellow]─[/yellow]"
-            else:
-                threat_ind = f"[dim green]▼[/dim green]"
+        # Pack device cells into rows
+        cells = [self._build_device_cell(mac, data) for mac, data in sorted_macs]
 
-            # MAC line (truncated for display)
-            mac_short = mac[:8] + "..." + mac[-5:] if len(mac) > 17 else mac
+        for row_start in range(0, len(cells), num_cols):
+            row = cells[row_start:row_start + num_cols]
+            # Pad incomplete rows with empty Text
+            while len(row) < num_cols:
+                row.append(Text(""))
+            grid.add_row(*row)
 
-            is_last = idx == len(sorted_macs) - 1
-            prefix = "└" if is_last else "├"
-
-            lines.append(f"  [dim]{prefix}[/dim] {dir_icon} {threat_ind} [dim]{mac_short}[/dim]")
-
-            # Show primary IP and vendor
-            primary_ip = list(ips)[0] if ips else "—"
-            lines.append(f"  [dim]{'│' if not is_last else ' '}[/dim]   [dim]{vendor:<10}[/dim] {primary_ip}")
-
-        # ═══ SECTION: Intelligence Notes ═══
-        lines.append("")
-        lines.append(f"[dim]{'─' * 38}[/dim]")
-        lines.append("[dim italic]→=outbound ←=inbound ▲=risk ▼=safe[/dim italic]")
-
-        content = "\n".join(lines)
+        # ═══ FOOTER ═══
+        footer = Text.from_markup(
+            "[dim italic]→=out ←=in ◆=seen ▲=risk ▼=safe ⟳=IP churn[/dim italic]"
+        )
 
         return Panel(
-            content,
+            Group(header_text, grid, footer),
             title="[bold bright_white]NET INTEL[/bold bright_white]",
             border_style="dim cyan",
             padding=(0, 1)
@@ -1990,15 +2093,23 @@ class GraphAnalyticsPanel(Static):
 
         mode_idx = self.GRAPH_MODES.index(mode) if mode in self.GRAPH_MODES else 0
         mode_label = self.GRAPH_LABELS.get(mode, mode)
-        nav_hint = f"[dim]({mode_idx + 1}/{len(self.GRAPH_MODES)}) press 'c' to cycle[/dim]"
+        nav_hint = f"({mode_idx + 1}/{len(self.GRAPH_MODES)}) press 'c' to cycle"
 
         try:
             chart_str = self._render_current_graph(connections, mode, w, h)
+            # plotext returns ANSI escape codes; convert to Rich Text
+            chart_text = Text.from_ansi(chart_str)
         except Exception as e:
-            chart_str = f"[dim]Graph render error: {e}[/dim]"
+            chart_text = Text(f"Graph render error: {e}", style="dim")
+
+        nav_text = Text(nav_hint, style="dim")
+        content = Text()
+        content.append_text(chart_text)
+        content.append("\n")
+        content.append_text(nav_text)
 
         return Panel(
-            f"{chart_str}\n{nav_hint}",
+            content,
             title=f"[bold cyan]{mode_label}[/bold cyan]",
             border_style="dim cyan",
             padding=(0, 0),
@@ -2050,6 +2161,235 @@ class GraphAnalyticsPanel(Static):
         return "[dim]Unknown graph mode[/dim]"
 
 
+class CobaltCommandPalette(ModalScreen):
+    """
+    Full-screen interactive Command Center for CobaltGraph.
+
+    Features:
+    - Live network stats bar (mode, connections, threats, devices)
+    - Categorized commands with glowing key badges and descriptions
+    - Press any highlighted key to execute + close palette
+    - ESC / Ctrl+P / ? to close without executing
+    """
+
+    CSS = """
+    CobaltCommandPalette {
+        align: center middle;
+        background: rgba(0, 0, 20, 0.96);
+    }
+
+    #palette_container {
+        width: 84%;
+        height: 88%;
+        border: double rgb(0, 140, 220);
+        background: rgb(4, 8, 28);
+        overflow-y: auto;
+    }
+
+    #palette_inner {
+        padding: 1 3;
+        height: auto;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss_palette", "Close", show=False),
+        Binding("ctrl+p", "dismiss_palette", "Close", show=False),
+        Binding("?", "dismiss_palette", "Close", show=False),
+    ]
+
+    # (key_display, event_key, action_name, label, description)
+    _COMMAND_GROUPS = [
+        {
+            "name": "NAVIGATION",
+            "color": "bright_cyan",
+            "icon": "◈",
+            "commands": [
+                ("R",   "r",      "refresh",                  "Refresh Data",
+                 "Reset view — pull fresh connections from the database"),
+                ("N",   "n",      "focus_net_intel",          "Net Intel Focus",
+                 "Keyboard-scroll the network intelligence panel"),
+                ("ESC", "escape", "close_modal",              "Close / Unfocus",
+                 "Dismiss modals or release keyboard focus"),
+            ],
+        },
+        {
+            "name": "PANEL VIEWS",
+            "color": "bright_blue",
+            "icon": "◧",
+            "commands": [
+                ("M",   "m",      "toggle_mode_panel",        "Mode Panel",
+                 "Toggle device / network topology view"),
+                ("A",   "a",      "toggle_anomalies",         "Anomaly Alerts",
+                 "Toggle live anomaly detection panel"),
+                ("O",   "o",      "toggle_org_intel",         "Org Intel",
+                 "Toggle organization intelligence panel"),
+                ("C",   "c",      "toggle_graphs",            "Graph Analytics",
+                 "Cycle analytical visualization charts"),
+            ],
+        },
+        {
+            "name": "VISUALIZATION",
+            "color": "bright_magenta",
+            "icon": "◎",
+            "commands": [
+                ("G",   "g",      "toggle_globe",             "Globe Animation",
+                 "Pause / Resume the rotating threat globe"),
+                ("I",   "i",      "cycle_intel_map",          "Intel Map Type",
+                 "Cycle: Flat World → Rotating → Simple Globe"),
+                ("K",   "k",      "show_metric_key",          "Metric Key",
+                 "Cycle threat score legend (3 display modes)"),
+            ],
+        },
+        {
+            "name": "FILTERING",
+            "color": "bright_yellow",
+            "icon": "◉",
+            "commands": [
+                ("V",   "v",      "cycle_verification_filter", "Verify Filter",
+                 "All → Verified → Flagged → Pending → Unknown"),
+            ],
+        },
+        {
+            "name": "SYSTEM",
+            "color": "bright_red",
+            "icon": "◆",
+            "commands": [
+                ("Q",    "q",  "quit", "Quit Application",
+                 "Exit CobaltGraph cleanly"),
+                ("^P / ?", None, None, "Command Palette",
+                 "Open / close this command center"),
+            ],
+        },
+    ]
+
+    def __init__(self, app_mode: str = "device", stats: dict = None):
+        super().__init__()
+        self.app_mode = app_mode
+        self.app_stats = stats or {}
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="palette_container"):
+            yield Static(self._build_markup(), id="palette_inner")
+
+    # ── Markup renderer ────────────────────────────────────────────────────
+
+    def _build_markup(self) -> str:
+        """Assemble rich-markup string for the full palette."""
+        mode        = self.app_mode.upper()
+        total       = self.app_stats.get("total", 0)
+        high_threat = self.app_stats.get("high_threat", 0)
+        devices     = self.app_stats.get("devices", 0)
+
+        lines = []
+
+        # ── ASCII logo ─────────────────────────────────────────────────────
+        logo = [
+            r"  ██████╗ ██████╗ ██████╗  █████╗ ██╗  ████████╗",
+            r"  ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║  ╚══██╔══╝",
+            r"  ██║     ██║   ██║██████╔╝███████║██║     ██║   ",
+            r"  ██║     ██║   ██║██╔══██╗██╔══██╗██║     ██║   ",
+            r"  ╚██████╗╚██████╔╝██████╔╝██║  ██║███████╗██║   ",
+            r"   ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝   ",
+        ]
+        lines.append("")
+        for row in logo:
+            lines.append(f"[bold bright_cyan]{row}[/bold bright_cyan]")
+
+        subtitle = "C O M M A N D   C E N T E R"
+        lines.append(f"[dim cyan]{subtitle:>55}[/dim cyan]")
+        lines.append("")
+
+        # ── Live stats bar ─────────────────────────────────────────────────
+        threat_color = (
+            "bold red"    if high_threat > 50  else
+            "bold yellow" if high_threat > 10  else
+            "bright_green"
+        )
+        mode_color = "bright_cyan" if mode == "NETWORK" else "bright_blue"
+        threat_icon = "⚠" if high_threat > 0 else "✓"
+
+        lines.append(
+            f"  [{mode_color}]◉ MODE: {mode}[/{mode_color}]"
+            f"  [dim]│[/dim]"
+            f"  [bright_white]⚡ CONNECTIONS: {total:,}[/bright_white]"
+            f"  [dim]│[/dim]"
+            f"  [{threat_color}]{threat_icon} THREATS: {high_threat}[/{threat_color}]"
+            f"  [dim]│[/dim]"
+            f"  [bright_white]⬡ DEVICES: {devices}[/bright_white]"
+        )
+        lines.append(f"  [dim]{'━' * 68}[/dim]")
+        lines.append("")
+
+        # ── Command groups ─────────────────────────────────────────────────
+        for group in self._COMMAND_GROUPS:
+            color = group["color"]
+            icon  = group["name"][0]   # not used directly
+            gicon = group["icon"]
+            name  = group["name"]
+
+            # Category header
+            dash_len = max(4, 60 - len(name) - 6)
+            lines.append(
+                f"  [{color}]── {gicon} {name} [/{color}]"
+                f"[dim]{'─' * dash_len}[/dim]"
+            )
+            lines.append("")
+
+            for cmd in group["commands"]:
+                key_disp, _, _, label, desc = cmd
+                # Key badge: reverse video
+                badge = f"[bold reverse {color}]  {key_disp:<5} [/bold reverse {color}]"
+                lbl   = f"[bold white]{label:<22}[/bold white]"
+                dsc   = f"[dim]{desc}[/dim]"
+                lines.append(f"  {badge}  {lbl}  {dsc}")
+
+            lines.append("")
+
+        # ── Footer hint ────────────────────────────────────────────────────
+        lines.append(f"  [dim]{'━' * 68}[/dim]")
+        hint = "Press any highlighted key to execute  ·  ESC / Ctrl+P / ? to close"
+        lines.append(f"  [dim italic]{hint}[/dim italic]")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    # ── Key dispatch ───────────────────────────────────────────────────────
+
+    def on_key(self, event) -> None:
+        """Intercept keys: close keys dismiss; command keys execute + dismiss."""
+        key = event.key
+
+        # Close without action
+        if key in ("escape", "ctrl+p", "?"):
+            event.stop()
+            self.dismiss()
+            return
+
+        # Build action map
+        action_map: dict = {}
+        for group in self._COMMAND_GROUPS:
+            for cmd in group["commands"]:
+                _, ev_key, action_name, _, _ = cmd
+                if ev_key and action_name:
+                    action_map[ev_key] = action_name
+
+        if key in action_map:
+            event.stop()
+            action_name = action_map[key]
+
+            def _run_action():
+                method = getattr(self.app, f"action_{action_name}", None)
+                if callable(method):
+                    method()
+
+            self.dismiss()
+            self.app.set_timer(0.05, _run_action)
+
+    def action_dismiss_palette(self) -> None:
+        self.dismiss()
+
+
 class CobaltGraphDashboardEnhanced(UnifiedDashboard):
     """
     Enhanced unified dashboard with mode support (device/network)
@@ -2072,19 +2412,22 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
     """
 
     BINDINGS = [
-        ("q", "quit", "Quit Application"),
-        ("r", "refresh", "Refresh Data"),
-        ("a", "toggle_anomalies", "Toggle Anomaly Panel"),
-        ("o", "toggle_org_intel", "Toggle Org Intel Panel"),
-        ("g", "toggle_globe", "Pause/Resume Globe Animation"),
-        ("i", "cycle_intel_map", "Cycle Intel Map Type"),
-        ("m", "toggle_mode_panel", "Toggle Mode Panel"),
-        ("c", "toggle_graphs", "Toggle Graph Analytics"),
-        ("k", "show_metric_key", "Show Full Metric Key"),
-        ("v", "cycle_verification_filter", "Cycle Verification Filter"),
-        ("escape", "close_modal", "Close Modal"),
-        ("?", "help", "Show Keybindings"),
-        ("ctrl+p", "command_palette", "Command Palette"),
+        # ── 3 visible footer entries ───────────────────────────────────────
+        Binding("q",      "quit",             "Quit"),
+        Binding("r",      "refresh",          "Refresh"),
+        Binding("ctrl+p", "command_palette",  "⌨  Commands", priority=True),
+        # ── Full command set (hidden from footer — accessible via palette) ─
+        Binding("a",      "toggle_anomalies",          "Anomaly Alerts",       show=False),
+        Binding("o",      "toggle_org_intel",           "Org Intel",            show=False),
+        Binding("g",      "toggle_globe",               "Globe",                show=False),
+        Binding("i",      "cycle_intel_map",             "Intel Map",            show=False),
+        Binding("m",      "toggle_mode_panel",           "Mode Panel",           show=False),
+        Binding("c",      "toggle_graphs",               "Graph Analytics",      show=False),
+        Binding("n",      "focus_net_intel",             "Net Intel",            show=False),
+        Binding("k",      "show_metric_key",             "Metric Key",           show=False),
+        Binding("v",      "cycle_verification_filter",   "Verify Filter",        show=False),
+        Binding("escape", "close_modal",                 "Close",                show=False),
+        Binding("?",      "command_palette",             "Commands",             show=False),
     ]
 
     CSS = """
@@ -2707,9 +3050,21 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.exit()
 
     def action_help(self) -> None:
-        """Show keybindings help in subtitle"""
-        help_text = "Q=Quit R=Refresh A=Anom O=Org C=Graphs M=Dev G=Globe I=Map K=Key V=Filter Enter=Details ?=Help ESC=Close"
-        self.sub_title = help_text
+        """Open the command palette (alias for ? key)."""
+        self.action_command_palette()
+
+    def action_command_palette(self) -> None:
+        """Push the full-screen CobaltGraph Command Center palette."""
+        stats: dict = {}
+        if hasattr(self, "data_manager") and self.data_manager:
+            try:
+                stats = self.data_manager.get_stats()
+            except Exception:
+                pass
+        self.push_screen(CobaltCommandPalette(
+            app_mode=getattr(self, "mode", "device"),
+            stats=stats,
+        ))
 
     def _show_connection_detail(self, connection: dict) -> None:
         """Show connection detail modal"""
@@ -2721,8 +3076,14 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             self.modal_backdrop.styles.display = "block"
             self.sub_title = f"Viewing details for {connection.get('dst_ip', 'Unknown')} - Press ESC to close"
 
+    def action_focus_net_intel(self) -> None:
+        """Focus the NET INTEL panel for keyboard scrolling"""
+        if self.mode_specific_panel and self.mode_specific_panel.styles.display != "none":
+            self.mode_specific_panel.focus()
+            self.sub_title = "NET INTEL focused — ↑↓ PgUp/PgDn Home/End to scroll, ESC to unfocus"
+
     def action_close_modal(self) -> None:
-        """Close the detail modal"""
+        """Close the detail modal or unfocus scrollable panels"""
         if self.detail_modal and self.modal_backdrop:
             modal_visible = self.detail_modal.has_class("visible")
             if modal_visible:
@@ -2731,6 +3092,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 self.modal_backdrop.remove_class("visible")
                 self.modal_backdrop.styles.display = "none"
                 self.sub_title = "Modal closed"
+                return
+        # Unfocus any focused scrollable panel back to the app
+        self.screen.set_focus(None)
+        self.sub_title = ""
 
     def action_toggle_anomalies(self) -> None:
         """Toggle Anomaly Alerts panel visibility"""
