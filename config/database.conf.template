@@ -10,7 +10,7 @@ user = cobaltgraph_user
 
 # ⚠️  SECURITY: Change this password!
 # For production, use environment variables or a secrets manager
-password = CHANGE_ME_PLEASE
+password = <CHANGE_ME>
 
 # Connection pool settings
 min_connections = 2

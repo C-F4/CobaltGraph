@@ -373,6 +373,8 @@ class ThreatPostureQuickPanel(Static):
             'inbound_count': 0,
             'outbound_count': 0,
             'protocols': {},
+            'org_type_counts': {},
+            'org_type_baseline': {},
         }
 
     def watch_threat_data(self, new_data: dict) -> None:
@@ -441,6 +443,33 @@ class ThreatPostureQuickPanel(Static):
         agree_pct = int(agreement * 100)
         agree_color = "green" if agree_pct >= 80 else ("yellow" if agree_pct >= 60 else "red")
         lines.append(f"[dim]consensus[/dim] [{agree_color}]{agree_pct}%[/{agree_color}]  [dim]uncertain[/dim] {uncertain}")
+
+        # ═══ C2 Infrastructure Fingerprint ═══
+        HIGH_RISK = ('bulletproof', 'tor_proxy', 'proxy', 'vpn', 'residential_proxy')
+        org_current = self.threat_data.get('org_type_counts', {})
+        org_baseline = self.threat_data.get('org_type_baseline', {})
+
+        lines.append("")
+        lines.append("[dim]C2 INFRA[/dim]")
+
+        c2_any_active = False
+        for ot in HIGH_RISK:
+            count = org_current.get(ot, 0)
+            if count == 0:
+                continue
+            c2_any_active = True
+            prev = org_baseline.get(ot, 0)
+            delta = count - prev
+            color = "bold red" if ot in ('bulletproof', 'tor_proxy') else "yellow"
+            delta_str = f"+{delta}" if delta > 0 else str(delta)
+            lines.append(f"  [{color}]{ot[:12]:<12}[/{color}]  {count:>2}  [dim]{delta_str}[/dim]")
+
+        if not c2_any_active:
+            lines.append("  [dim green]no high-risk infra[/dim green]")
+
+        normal_cloud = org_current.get('cloud', 0)
+        normal_cdn = org_current.get('cdn', 0)
+        lines.append(f"[dim]  baseline: cloud {normal_cloud} cdn {normal_cdn}[/dim]")
 
         # ═══ Top flagged (compact) ═══
         lines.append("")
@@ -1161,6 +1190,96 @@ class SmartConnectionTable(Static):
     def get_connection_by_row_key(self, row_key: str) -> dict:
         """Get connection data by row key"""
         return self._connection_map.get(row_key, {})
+
+
+class IPPivotPanel(Static):
+    """
+    Bottom-right pivot: all connections for a selected IP.
+    Populated when a row is selected in SmartConnectionTable.
+    Toggled with 'p'.
+    """
+
+    DEFAULT_CSS = """
+    IPPivotPanel {
+        height: 100%;
+        width: 100%;
+        padding: 0 1;
+        overflow-y: auto;
+    }
+    """
+
+    pivot_data = reactive(dict)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.pivot_data = {}
+
+    def watch_pivot_data(self, _) -> None:
+        self.refresh()
+
+    def render(self):
+        ip = self.pivot_data.get('ip', '')
+        connections = self.pivot_data.get('connections', [])
+
+        if not ip:
+            return Panel(
+                "[dim]Select a row in the connection table\nto pivot on that IP[/dim]",
+                title="[bold bright_white]IP PIVOT[/bold bright_white]",
+                border_style="dim cyan"
+            )
+
+        # Header metrics
+        first_seen = self.pivot_data.get('first_seen', 0)
+        dga_count = self.pivot_data.get('dga_count', 0)
+        scan_count = self.pivot_data.get('scan_count', 0)
+
+        time_str = datetime.fromtimestamp(first_seen).strftime('%H:%M:%S') if first_seen else '--'
+
+        lines = []
+        lines.append(f"[bold cyan]{ip}[/bold cyan]  [dim]{len(connections)} connections │ first: {time_str}[/dim]")
+        lines.append("[dim]─────────────────────────────────────[/dim]")
+
+        # Connection rows sorted by threat desc, top 12
+        for conn in connections[:12]:
+            t = float(conn.get('threat_score', 0) or 0)
+            if t >= 0.7:
+                tc = "bold red"
+            elif t >= 0.4:
+                tc = "yellow"
+            else:
+                tc = "dim green"
+
+            dst_ip = conn.get('dst_ip', '?')
+            src_ip = conn.get('src_ip', '?')
+            port = conn.get('dst_port', 0)
+            proto = conn.get('protocol', 'TCP')
+            org_type = (conn.get('dst_org_type') or '?')[:8]
+
+            # Show the OTHER end of the connection
+            other = dst_ip if dst_ip != ip else src_ip
+            lines.append(
+                f"  [dim]→[/dim] {other[-15:]:>15}[dim]:{port:<5}[/dim] "
+                f"[dim]{proto:<4}[/dim] [{tc}]{t:.2f}[/{tc}] [dim]{org_type}[/dim]"
+            )
+
+        if not connections:
+            lines.append("  [dim]no connections found[/dim]")
+
+        # Behavioral summary
+        lines.append("[dim]─────────────────────────────────────[/dim]")
+        dga_color = "red" if dga_count > 0 else "dim"
+        scan_color = "yellow" if scan_count > 0 else "dim"
+        lines.append(
+            f"[{dga_color}]DGA: {dga_count}[/{dga_color}]  "
+            f"[{scan_color}]SCAN: {scan_count}[/{scan_color}]  "
+            f"[dim]AVG HOPS: {self.pivot_data.get('avg_hops', 0):.1f}[/dim]"
+        )
+
+        return Panel(
+            "\n".join(lines),
+            title="[bold bright_white]IP PIVOT[/bold bright_white]",
+            border_style="dim cyan"
+        )
 
 
 class NetworkDevicePanel(VerticalScroll):
@@ -2428,6 +2547,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         Binding("v",      "cycle_verification_filter",   "Verify Filter",        show=False),
         Binding("escape", "close_modal",                 "Close",                show=False),
         Binding("?",      "command_palette",             "Commands",             show=False),
+        Binding("p",      "toggle_pivot",                "Pivot IP",             show=False),
     ]
 
     CSS = """
@@ -2510,6 +2630,12 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         display: block;
     }
 
+    #pivot_panel {
+        display: none;
+        width: 50%;
+        padding: 1 0 0 1;
+    }
+
     #detail_modal {
         display: none;
         layer: modal;
@@ -2553,6 +2679,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.anomaly_panel = None
         self.org_intel_panel = None
         self.graph_panel = None
+        self.pivot_panel = None
         self.detail_modal = None
         self.modal_backdrop = None
 
@@ -2596,6 +2723,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 self.graph_panel = GraphAnalyticsPanel(id="graph_analytics_panel")
                 yield self.graph_panel
 
+                # IP Pivot panel (hidden by default, toggle with 'p')
+                self.pivot_panel = IPPivotPanel(id="pivot_panel")
+                yield self.pivot_panel
+
         # Detail modal (hidden by default, shown on row click)
         self.modal_backdrop = Static(id="modal_backdrop")
         yield self.modal_backdrop
@@ -2628,6 +2759,9 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             if hasattr(self.mode_specific_panel, 'devices'):
                 self.mode_specific_panel.devices = []
 
+        if self.pivot_panel:
+            self.pivot_panel.pivot_data = {}
+
         # Clear filter cache so it doesn't restore old data
         if hasattr(self, '_all_connections'):
             delattr(self, '_all_connections')
@@ -2638,27 +2772,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         """Initialize dashboard on mount"""
         # Import heartbeat singleton for component health tracking
         from src.utils.heartbeat import heartbeat
-        import socket
-        import os
-        import pwd
 
-        # Get hostname and current user for display
-        try:
-            hostname = socket.gethostname()
-        except Exception:
-            hostname = "unknown"
-
-        try:
-            username = pwd.getpwuid(os.getuid()).pw_name
-        except Exception:
-            try:
-                username = os.getlogin()
-            except Exception:
-                username = os.environ.get("USER", "unknown")
-
-        self._hostname = hostname
-        self._username = username
-        self.title = f"CobaltGraph Enhanced - {self.mode.upper()} Mode │ {username}@{hostname}"
+        self.title = f"CobaltGraph Enhanced - {self.mode.upper()} Mode"
 
         if self.data_manager.connect():
             self.is_connected = True
@@ -2743,6 +2858,12 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 baseline_threats = threat_scores[:len(threat_scores)//3] if threat_scores else []
                 baseline = sum(baseline_threats) / len(baseline_threats) if baseline_threats else 0.15
 
+                # Inline org_type count for C2 infra fingerprint
+                org_type_counts = {}
+                for c in connections:
+                    ot = (c.get('dst_org_type') or 'unknown').lower()
+                    org_type_counts[ot] = org_type_counts.get(ot, 0) + 1
+
                 self.threat_posture_panel.threat_data = {
                     'current_threat': current_threat,
                     'baseline_threat': baseline,
@@ -2757,6 +2878,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                     'inbound_count': inbound_count,
                     'outbound_count': outbound_count,
                     'protocols': protocols,
+                    'org_type_counts': org_type_counts,
+                    'org_type_baseline': self._previous_org_counts.copy(),
                 }
 
             # Update connection table
@@ -3068,6 +3191,32 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
     def _show_connection_detail(self, connection: dict) -> None:
         """Show connection detail modal"""
+        # Populate pivot panel with all connections for the selected IP
+        if self.pivot_panel:
+            src_ip = connection.get('src_ip', '')
+            dst_ip = connection.get('dst_ip', '')
+            # Pivot on the internal (lateral) IP if src is private, else dst
+            pivot_ip = src_ip if (_is_private_ip(src_ip) and src_ip) else dst_ip
+
+            all_conns = getattr(self.connection_table, 'connections', [])
+            related = [
+                c for c in all_conns
+                if c.get('src_ip') == pivot_ip or c.get('dst_ip') == pivot_ip
+            ]
+            related.sort(key=lambda c: float(c.get('threat_score', 0) or 0), reverse=True)
+
+            self.pivot_panel.pivot_data = {
+                'ip': pivot_ip,
+                'connections': related,
+                'first_seen': min((c.get('timestamp', 0) or 0) for c in related) if related else 0,
+                'dga_count': sum(1 for c in related if c.get('dga_detected')),
+                'scan_count': sum(1 for c in related if c.get('tcp_is_scan')),
+                'avg_hops': (
+                    sum(int(c.get('hop_count', 0) or 0) for c in related) / len(related)
+                    if related else 0.0
+                ),
+            }
+
         if self.detail_modal and self.modal_backdrop:
             self.detail_modal.connection = connection
             self.detail_modal.add_class("visible")
@@ -3176,6 +3325,14 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         panel_name = "Network Topology" if self.mode == "network" else "Device Discovery"
         self.sub_title = f"Showing {panel_name} (press 'a' for anomalies, 'o' for org intel)"
 
+    def action_toggle_pivot(self) -> None:
+        """Toggle IP Pivot panel visibility"""
+        if not self.pivot_panel:
+            return
+        self._hide_all_bottom_right_panels()
+        self.pivot_panel.styles.display = "block"
+        self.sub_title = "IP Pivot active — select a row to pivot (press 'm' for devices)"
+
     def action_show_metric_key(self) -> None:
         """Show full metric key/legend in subtitle area"""
         # Cycle through key display modes
@@ -3247,6 +3404,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         if self.graph_panel:
             self.graph_panel.remove_class("visible")
             self.graph_panel.styles.display = "none"
+        if self.pivot_panel:
+            self.pivot_panel.styles.display = "none"
 
 
 if __name__ == '__main__':
