@@ -1,242 +1,57 @@
-# Cobalt Graph
+# CobaltGraph Documentation
 
-**Blue-Team Network Intelligence Platform**
-
-A terminal-based network security monitoring system that provides real-time threat intelligence through multi-agent consensus scoring.
+See the [project README](../README.md) for the full overview, quick start, architecture, and capability reference.
 
 ---
 
-## Overview
+## Index
 
-Cobalt Graph passively monitors network traffic to detect and score potential threats. It uses multiple independent threat scoring algorithms with Byzantine Fault Tolerant (BFT) consensus to provide reliable, trustworthy threat assessments.
-
-### Key Capabilities
-
-- **Passive Network Monitoring**: Captures and analyzes network traffic without generating any packets
-- **Multi-Agent Threat Scoring**: Three independent scorers (statistical, rule-based, ML-based) vote on threat levels
-- **Device Discovery**: Automatically discovers devices on the network via MAC address tracking
-- **Threat Intelligence Enrichment**: Integrates with VirusTotal, AbuseIPDB, and geolocation services
-- **Terminal Dashboard**: Real-time visualization with no web server required
+- **Quick Start** → `docs/START_HERE.md`
+- **Configuration reference** → `config/cobaltgraph.conf` (inline comments)
+- **API keys setup** → `config/threat_intel.conf` (gitignored template)
+- **Tests** → `pytest tests/`
 
 ---
 
-## Modes of Operation
-
-| Mode | Focus | What It Shows | Requirements |
-|------|-------|---------------|--------------|
-| **Device** | External destinations | Where THIS machine connects to (remote IPs, orgs, threat levels) | No root required |
-| **Network** | LAN reconnaissance | Devices ON your network + where they connect to (MAC, vendor, hostname, flows) | Root + promiscuous mode |
-
-### Mode Comparison
-
-**Device Mode** (non-root):
-- Monitors outbound connections from the local machine only
-- Shows external destination IPs, organizations, and threat scores
-- Uses `ss`/`netstat` for connection tracking
-- Panel shows: "DESTINATIONS" with external IP:port listings
-
-**Network Mode** (sudo):
-- Discovers ALL devices on the local network via passive ARP/broadcast monitoring
-- Tracks where each LAN device connects externally
-- Shows MAC addresses, vendors, hostnames, and connection flows
-- Panel shows: "LAN DISCOVERY" with device→destination mappings
-
----
-
-## Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/C-F4/CobaltGraph.git
-cd CobaltGraph
-
-# Install dependencies
-pip3 install -r requirements.txt
-
-# Run in device mode (no root required)
-python3 start.py --mode device
-
-# Run in network mode (requires root)
-sudo python3 start.py --mode network
-```
-
----
-
-## Architecture
+## Architecture Summary
 
 ```
-Network Traffic (passive capture)
+Network Traffic (passive)
         │
         ▼
-┌──────────────────────────────────────┐
-│       PACKET CAPTURE ENGINE          │
-│  MAC resolution │ Protocol parsing   │
-└────────────────┬─────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────┐
-│      THREAT INTELLIGENCE APIs        │
-│  Geolocation │ ASN │ IP Reputation   │
-└────────────────┬─────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────┐
-│       CONSENSUS ENGINE (BFT)         │
-├──────────────────────────────────────┤
-│  Statistical  │  Rule-Based  │  ML   │
-│   Scorer      │   Scorer     │Scorer │
-├──────────────────────────────────────┤
-│         Median Voting + Outlier      │
-│         Detection + Uncertainty      │
-└────────────────┬─────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────┐
-│         TERMINAL DASHBOARD           │
-│  Threat Globe │ Connection Table     │
-│  Device Tree  │ Network Topology     │
-└──────────────────────────────────────┘
+┌─────────────────────────────┐
+│     Capture Layer           │
+│  device_monitor  │          │
+│  network_monitor │          │
+│  passive_discovery          │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│     Pipeline Stages         │
+│  validation → enrichment    │
+│  → scoring → storage        │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  5-Agent BFT Consensus      │
+│  Statistical │ Rule         │
+│  Heuristic   │ Organization │
+│  Neural (GRU)               │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  Storage + Export           │
+│  SQLite (WAL) │ JSON Lines  │
+│  CSV          │ STIX 2.1    │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  Terminal Dashboard         │
+│  Textual TUI │ Globe/Map    │
+│  Analytics Graphs           │
+└─────────────────────────────┘
 ```
-
----
-
-## Dashboard Features
-
-The terminal UI displays:
-
-- **Threat Posture**: Current threat level with top threat radar visualization
-- **Threat Globe**: Geographic visualization of connection destinations
-- **Connection Table**: Real-time connection log with enrichment data (IP, port, protocol, organization, threat score)
-- **LAN Discovery** (network mode): Device-to-destination flow mapping showing:
-  - Local devices by MAC address and vendor
-  - Hostname resolution (passive DNS)
-  - Threat scores aggregated from connections
-  - Top external destinations per device
-- **Destinations** (device mode): External connection targets showing:
-  - Remote IP addresses and ports
-  - Organization and threat level
-  - Connection counts
-
-### Display Information
-
-Each connection shows:
-- Source/Destination IP addresses
-- MAC addresses and resolved vendor names
-- Port and protocol (TCP/UDP)
-- Organization and ASN information
-- Threat score with confidence level
-- Geographic location (country, coordinates)
-- Hop count estimation
-
----
-
-## Threat Scoring
-
-### Consensus Algorithm
-
-Three independent scorers evaluate each connection:
-
-1. **Statistical Scorer**: Uses confidence intervals and baseline deviation
-2. **Rule-Based Scorer**: Applies expert-defined heuristics (port analysis, known bad ranges)
-3. **ML-Based Scorer**: Trained model for pattern recognition
-
-Scores are combined using Byzantine Fault Tolerant median voting:
-- **Outlier Detection**: Identifies when scorers significantly disagree
-- **Uncertainty Flag**: Raised when consensus confidence is low
-- **Final Score**: 0.0 (safe) to 1.0 (critical threat)
-
----
-
-## Configuration
-
-### Optional API Keys
-
-Create `config/config.conf` to enable enhanced threat intelligence:
-
-```ini
-[threat_intel]
-virustotal_api_key = YOUR_KEY
-abuseipdb_api_key = YOUR_KEY
-```
-
-The system works without API keys but provides richer threat data with them.
-
-### Database
-
-Connections are stored in SQLite at `database/cobaltgraph.db` for historical analysis.
-
----
-
-## Export
-
-Data can be exported in two formats:
-- **JSON Lines**: Full enrichment data with audit trail
-- **CSV**: Analyst-ready summary for spreadsheet tools
-
----
-
-## Project Structure
-
-```
-src/
-├── core/           # Launcher and data pipeline orchestration
-├── ui/             # Terminal dashboard components
-├── capture/        # Network/device packet capture
-├── consensus/      # BFT threat scoring system
-├── services/       # Threat intelligence API integrations
-├── storage/        # SQLite database operations
-├── analytics/      # Threat analytics and anomaly detection
-└── export/         # JSON/CSV export functionality
-```
-
----
-
-## Security Design
-
-- **No Web Server**: Pure terminal operation, zero HTTP attack surface
-- **Passive Monitoring**: Never injects packets into the network
-- **Local Processing**: All threat scoring done locally
-- **Minimal Permissions**: Device mode requires no special privileges
-
----
-
-## Requirements
-
-- Python 3.8+
-- Linux, macOS, or Windows (WSL recommended)
-- Root/sudo for network-wide monitoring mode
-
-### Dependencies
-
-Core: `requests`, `scapy`, `numpy`, `textual`, `rich`
-
-Optional: `scipy`, `networkx`, `pandas` for advanced analytics
-
----
-
-## Use Cases
-
-1. **Home Network Monitoring**: Understand what devices are connecting where
-2. **SOC Triage**: Prioritize alerts with multi-agent consensus confidence
-3. **Incident Investigation**: Historical connection analysis
-4. **Security Research**: Study network traffic patterns and threat indicators
-
----
-
-## License
-
-MIT License
-
----
-
-## Contributing
-
-Contributions welcome for:
-- Additional threat intelligence scorers
-- Dashboard visualization improvements
-- Platform compatibility enhancements
-
-**Guidelines:**
-- Maintain terminal-first design
-- No hardcoded credentials
-- All tests must pass
