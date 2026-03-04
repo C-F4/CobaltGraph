@@ -122,4 +122,5 @@ static/
 tools/
 
 # ML model state files (may encode patterns from real captured traffic)
-models/
+models/*
+!models/.gitkeep
