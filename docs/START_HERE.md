@@ -10,47 +10,50 @@
 
 ```bash
 # Interactive mode (recommended)
-python3 start.py
+./cobaltgraph
 
 # Device-only monitoring (no root required)
-python3 start.py --mode device --no-disclaimer
+./cobaltgraph --mode device
 
 # Network-wide monitoring (requires root)
-sudo python3 start.py --mode network
+sudo ./cobaltgraph --mode network
 
 # Health check
-python3 start.py --health
+bin/cobaltgraph-health
 ```
 
-### Windows
+### Windows (WSL required for network mode)
 
-```powershell
+```bash
 # Interactive mode
-python start.py
+./cobaltgraph
 
-# For network monitoring (Run PowerShell as Administrator)
-python start.py --mode network
+# For network monitoring (run in WSL with root)
+sudo ./cobaltgraph --mode network
 ```
 
 ---
 
 ## System Requirements
 
-- Python 3.8+
+- Python 3.10+
 - SQLite (included with Python)
-- Terminal/Command Prompt
-- Root/Admin privileges (only for network-wide mode)
+- Terminal / WSL
+- Root privileges only for network-wide mode
 
 ---
 
 ## Features
 
-✅ **Multi-Agent Consensus** - Byzantine Fault Tolerant threat intelligence
-✅ **Pure Terminal Interface** - No web server, no HTTP ports
-✅ **Device Monitoring** - No root required for device-level capture
-✅ **Export Functionality** - JSON Lines + CSV export
-✅ **Threat Intelligence** - VirusTotal, AbuseIPDB integration
-✅ **Geolocation** - IP geolocation tracking
+- **5-Agent BFT Consensus** - Statistical, Rule, Heuristic, Organization, Neural scorers
+- **Pure Terminal Interface** - No web server, no HTTP ports
+- **Device Monitoring** - No root required for device-level capture
+- **Passive Network Discovery** - LAN device enumeration without sending packets
+- **Export Functionality** - JSON Lines, CSV, and STIX 2.1
+- **Threat Intelligence** - VirusTotal, AbuseIPDB, AlienVault OTX, GreyNoise
+- **Geolocation & ASN** - IP geolocation with ASN/org trust scoring
+- **Beaconing Detection** - C2 pattern recognition via timing analysis
+- **JA3 TLS Fingerprinting** - Passive TLS client identification
 
 ---
 
@@ -67,9 +70,9 @@ python start.py --mode network
 ## Support
 
 For issues or questions:
-- Check the health status: `python3 start.py --health`
+- Check the health status: `bin/cobaltgraph-health`
 - Review logs in `logs/` directory
-- See `README.md` for detailed documentation
+- See `README.md` for full documentation
 
 ---
 

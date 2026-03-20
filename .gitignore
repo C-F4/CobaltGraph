@@ -18,6 +18,13 @@ config/auth.conf
 config/threat_intel.conf
 config/database.conf
 
+# TLS/HTTPS certificate and private key files (generated at runtime)
+config/server.crt
+config/server.key
+config/*.pem
+*.crt
+*.key
+
 # Runtime data (database files, logs in data directory)
 data/*.db
 data/**/*.db
@@ -103,6 +110,8 @@ Thumbs.db
 # Documentation (auto-generated markdown)
 docs/
 *.md
+# Allow the public-facing README at repo root
+!README.md
 
 # Other directories that should not be tracked
 security/
@@ -113,4 +122,5 @@ static/
 tools/
 
 # ML model state files (may encode patterns from real captured traffic)
-models/
+models/*
+!models/.gitkeep
