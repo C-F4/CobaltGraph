@@ -988,7 +988,7 @@ class SmartConnectionTable(Static):
         # Enhanced columns (14 total) - shows more enrichment data + anomaly/spread
         self.table.add_column("Time", key="time", width=8)
         self.table.add_column("Dir", key="direction", width=3)  # Direction indicator
-        self.table.add_column("Src", key="src_ip", width=12)
+        self.table.add_column("Src", key="src_ip", width=15)
         self.table.add_column("Dst", key="dst_ip", width=15)
         self.table.add_column("Port", key="port", width=5)
         self.table.add_column("Proto", key="proto", width=5)
