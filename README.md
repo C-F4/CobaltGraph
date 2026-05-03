@@ -5,13 +5,7 @@
 
 **Blue-Team Network Intelligence Platform**
 
-A terminal-native passive network monitoring system with multi-agent consensus threat scoring, real-time geospatial visualization, and structured threat intelligence export — no web server, no C dependencies, no root required for device-level monitoring.
-
----
-
-## Overview
-
-CobaltGraph passively observes network traffic and scores connections using five independent threat assessment engines coordinated through Byzantine Fault Tolerant (BFT) consensus. All processing runs locally in the terminal. No packets are injected onto the network.
+A terminal-native passive network monitoring system with multi-agent consensus threat scoring, real-time geospatial visualization, and a structured threat intelligence export.
 
 ---
 
