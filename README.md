@@ -1,5 +1,8 @@
 # CobaltGraph
 
+<img width="924" height="436" alt="cobalt_001" src="https://github.com/user-attachments/assets/20180fe3-1db9-4898-b888-1fb76b42dbcd" />
+
+
 **Blue-Team Network Intelligence Platform**
 
 A terminal-native passive network monitoring system with multi-agent consensus threat scoring, real-time geospatial visualization, and structured threat intelligence export — no web server, no C dependencies, no root required for device-level monitoring.
