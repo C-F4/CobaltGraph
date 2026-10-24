@@ -119,7 +119,10 @@ scripts/
 static/
 
 # Security tooling (capture scripts, analysis tools — operational, not source)
-tools/
+tools/*
+# Project utilities with no captured data (reviewed): database maintenance and demo seeding
+!tools/db_utils.py
+!tools/seed_demo_db.py
 
 # ML model state files (may encode patterns from real captured traffic)
 models/*
