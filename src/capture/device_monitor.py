@@ -12,6 +12,7 @@ Methods:
 - Windows netstat
 """
 
+import ipaddress
 import logging
 import platform
 import re
@@ -21,6 +22,14 @@ import time
 from typing import Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+
+def _port_or_none(addr: str, base: int = 10) -> Optional[int]:
+    """Return the port part of "ip:port" (or "[ip]:port"), or None if it is not parseable."""
+    try:
+        return int(addr.rsplit(":", 1)[1], base)
+    except (IndexError, ValueError):
+        return None
 
 
 class DeviceMonitor:
@@ -67,7 +76,10 @@ class DeviceMonitor:
         """Main monitoring loop"""
         # Track when connections were last seen for TTL-based deduplication
         connection_timestamps: Dict[str, float] = {}
+        # 4-tuples seen so far: a flow is "new" the first time it appears
+        flow_seen: Dict[str, float] = {}
         DEDUP_TTL = 60.0  # Re-emit connection after 60 seconds
+        FLOW_TTL = 300.0  # Forget a 4-tuple unseen for 5 minutes
 
         while self._running:
             try:
@@ -77,6 +89,11 @@ class DeviceMonitor:
                 for conn in connections:
                     # Create unique key for deduplication
                     key = f"{conn.get('dst_ip')}:{conn.get('dst_port')}"
+                    flow_key = f"{conn.get('src_ip')}:{conn.get('src_port')}>{key}"
+
+                    # Every poll updates flow state; the 60 s re-emit of a live socket is not a new flow
+                    conn["new_flow"] = flow_key not in flow_seen
+                    flow_seen[flow_key] = now
 
                     last_seen = connection_timestamps.get(key, 0)
 
@@ -95,6 +112,9 @@ class DeviceMonitor:
                         k: v for k, v in connection_timestamps.items()
                         if v > cutoff
                     }
+                if len(flow_seen) > 5000:
+                    flow_cutoff = now - FLOW_TTL
+                    flow_seen = {k: v for k, v in flow_seen.items() if v > flow_cutoff}
 
             except Exception as e:
                 logger.debug(f"Monitor loop error: {e}")
@@ -160,7 +180,7 @@ class DeviceMonitor:
         Parse a single ss output line
 
         Format: Proto State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
-        Example: tcp   ESTAB 0      0      192.168.1.100:52234 142.250.80.46:443
+        Example: tcp   ESTAB 0      0      192.168.1.100:52234 203.0.113.46:443
         """
         try:
             parts = line.split()
@@ -199,7 +219,8 @@ class DeviceMonitor:
                 except ValueError:
                     return None
 
-            # Parse local address for src_ip
+            # Parse local address for src_ip and src_port (flow identity)
+            src_port = _port_or_none(local_addr)
             if local_addr.startswith("["):
                 local_match = re.match(r'\[(.+)\]:(\d+)', local_addr)
                 src_ip = local_match.group(1) if local_match else "local"
@@ -220,6 +241,7 @@ class DeviceMonitor:
                 "type": "connection",
                 "timestamp": time.time(),
                 "src_ip": src_ip,
+                "src_port": src_port,
                 "dst_ip": dst_ip,
                 "dst_port": dst_port,
                 "protocol": proto.upper(),
@@ -308,6 +330,7 @@ class DeviceMonitor:
                 "timestamp": time.time(),
                 "src_ip": src_ip,
                 "dst_ip": dst_ip,
+                "src_port": _port_or_none(local_addr, base=16),
                 "dst_port": dst_port,
                 "protocol": "TCP",
                 "metadata": {"source": "proc_net_tcp"},
@@ -392,38 +415,55 @@ class DeviceMonitor:
 
         return connections
 
+    @staticmethod
+    def _split_host_port(addr: str):
+        """
+        Split an IPv4 endpoint into (ip, port).
+
+        Windows prints 'ip:port'; macOS prints 'ip.port'. Returns (None, None) when the
+        text is not an IPv4 endpoint.
+        """
+        sep = ":" if ":" in addr else "."
+        host, _, port = addr.rpartition(sep)
+        try:
+            ipaddress.IPv4Address(host)
+            return host, int(port)
+        except (ValueError, ipaddress.AddressValueError):
+            return None, None
+
     def _parse_netstat_line(self, line: str) -> Optional[Dict]:
-        """Parse netstat output line (macOS/Windows)"""
+        """
+        Parse an ESTABLISHED line from macOS or Windows netstat.
+
+        The local and foreign endpoints are the two columns immediately before the state,
+        which works for both column layouts (macOS has Recv-Q/Send-Q, Windows does not).
+        """
         try:
             parts = line.split()
+            if "ESTABLISHED" not in parts:
+                return None
+            state_idx = parts.index("ESTABLISHED")
+            if state_idx < 2:
+                return None
+            local_addr, foreign_addr = parts[state_idx - 2], parts[state_idx - 1]
 
-            # Find the foreign address column
-            for i, part in enumerate(parts):
-                if "." in part and ":" in part:
-                    # Looks like IP:Port
-                    ip_port = part.rsplit(":", 1)
-                    if len(ip_port) == 2:
-                        dst_ip = ip_port[0]
-                        try:
-                            dst_port = int(ip_port[1])
-                        except ValueError:
-                            continue
+            dst_ip, dst_port = self._split_host_port(foreign_addr)
+            if dst_ip is None:
+                return None
+            if self._is_private_ip(dst_ip) or dst_ip.startswith("127.") or dst_ip == "0.0.0.0":
+                return None
 
-                        if self._is_private_ip(dst_ip):
-                            continue
-                        if dst_ip.startswith("127."):
-                            continue
-
-                        return {
-                            "type": "connection",
-                            "timestamp": time.time(),
-                            "src_ip": "local",
-                            "dst_ip": dst_ip,
-                            "dst_port": dst_port,
-                            "protocol": "TCP",
-                            "metadata": {"source": "netstat"},
-                        }
+            src_ip, src_port = self._split_host_port(local_addr)
+            return {
+                "type": "connection",
+                "timestamp": time.time(),
+                "src_ip": src_ip or "local",
+                "src_port": src_port,
+                "dst_ip": dst_ip,
+                "dst_port": dst_port,
+                "protocol": "TCP",
+                "metadata": {"source": "netstat"},
+            }
         except Exception:
-            pass
+            return None
 
-        return None

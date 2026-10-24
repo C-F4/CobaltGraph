@@ -94,13 +94,16 @@ class StatisticalScorer(ThreatScorer):
         tcp_state: Optional[str],
         domain: Optional[str],
         timestamp: float,
+        record_timing: bool = True,
     ) -> ConnectionBaseline:
         """Update baseline statistics with new connection data"""
         baseline = self._get_or_create_baseline(dst_ip)
 
         baseline.total_connections += 1
         baseline.last_seen = timestamp
-        baseline.recent_timestamps.append(timestamp)
+        # Periodic re-emits of a live socket are not new connections; they would look like beaconing
+        if record_timing:
+            baseline.recent_timestamps.append(timestamp)
 
         # Track TCP state
         if tcp_state:
@@ -263,7 +266,10 @@ class StatisticalScorer(ThreatScorer):
         domain = connection_metadata.get("tls_sni") or connection_metadata.get("dns_query")
 
         # Update connection baseline for this destination
-        baseline = self._update_baseline(dst_ip, tcp_state, domain, timestamp)
+        baseline = self._update_baseline(
+            dst_ip, tcp_state, domain, timestamp,
+            record_timing=connection_metadata.get("new_flow", True),
+        )
         features["baseline_total_connections"] = baseline.total_connections
         features["baseline_unique_domains"] = len(baseline.unique_domains)
 
