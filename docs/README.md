@@ -1,15 +1,15 @@
 # CobaltGraph Documentation
 
-See the [project README](../README.md) for the full overview, quick start, architecture, and capability reference.
+See the [project README](../README.md) for the full overview, quick start, architecture, detection logic, and known limitations.
 
 ---
 
 ## Index
 
 - **Quick Start** → `docs/START_HERE.md`
-- **Configuration reference** → `config/cobaltgraph.conf` (inline comments)
-- **API keys setup** → `config/threat_intel.conf` (gitignored template)
-- **Tests** → `pytest tests/`
+- **Configuration reference** → `config/cobaltgraph.conf` (comments on their own lines)
+- **API keys setup** → `config/threat_intel.conf` (gitignored; format in the README)
+- **Tests** → `pytest src/`
 
 ---
 
@@ -28,14 +28,14 @@ Network Traffic (passive)
            │
            ▼
 ┌─────────────────────────────┐
-│     Pipeline Stages         │
-│  validation → enrichment    │
-│  → scoring → storage        │
+│  DataPipeline (core/)       │
+│  dedup → enrichment →       │
+│  consensus scoring → storage│
 └──────────┬──────────────────┘
            │
            ▼
 ┌─────────────────────────────┐
-│  5-Agent BFT Consensus      │
+│  5-Scorer Median Consensus  │
 │  Statistical │ Rule         │
 │  Heuristic   │ Organization │
 │  Neural (GRU)               │
@@ -55,3 +55,7 @@ Network Traffic (passive)
 │  Analytics Graphs           │
 └─────────────────────────────┘
 ```
+
+**Notes**
+- The live pipeline is `DataPipeline` in `src/core/orchestrator.py`. `src/pipeline/stages/` holds only the correlator and base classes it imports.
+- Consensus combines scorer outputs by median voting with outlier rejection. It is not a full Byzantine agreement protocol.

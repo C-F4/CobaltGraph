@@ -1,6 +1,6 @@
 # CobaltGraph - Start Here
 
-**Pure Terminal Network Intelligence Platform**
+**Terminal Network Intelligence Platform**
 
 ---
 
@@ -45,14 +45,15 @@ sudo ./cobaltgraph --mode network
 
 ## Features
 
-- **5-Agent BFT Consensus** - Statistical, Rule, Heuristic, Organization, Neural scorers
+- **5-Scorer Median Consensus** - Statistical, Rule, Heuristic, Organization, and Neural scorers. Scores are heuristic risk estimates.
 - **Pure Terminal Interface** - No web server, no HTTP ports
 - **Device Monitoring** - No root required for device-level capture
 - **Passive Network Discovery** - LAN device enumeration without sending packets
 - **Export Functionality** - JSON Lines, CSV, and STIX 2.1
 - **Threat Intelligence** - VirusTotal, AbuseIPDB, AlienVault OTX, GreyNoise
-- **Geolocation & ASN** - IP geolocation with ASN/org trust scoring
-- **Beaconing Detection** - C2 pattern recognition via timing analysis
+- **Geolocation & ASN** - IP geolocation with ASN/org-type risk weighting
+- **Regular-Interval Analysis** - Flags unusually regular connection timing (heuristic; see Known Limitations in the README)
+- **Detection Queue and Log** - Recorded detections grouped by destination (`a` queue, `l` log). In the log, `s` sets the minimum severity; `e` exports JSON Lines and `c` exports CSV. The main table's `s` switches between time and risk order.
 - **JA3 TLS Fingerprinting** - Passive TLS client identification
 
 ---
@@ -60,9 +61,9 @@ sudo ./cobaltgraph --mode network
 ## Documentation
 
 - **Quick Start**: This file
-- **Consensus System**: `docs/consensus-transformation/`
-- **Configuration**: `docs/02-CONFIGURATION/`
-- **Testing**: `docs/03-TESTING/`
+- **Architecture and detection logic**: `README.md`
+- **Configuration**: `config/cobaltgraph.conf` (comments on their own lines)
+- **Tests**: `pytest src/`
 - **Main README**: `README.md`
 
 ---
@@ -72,8 +73,8 @@ sudo ./cobaltgraph --mode network
 For issues or questions:
 - Check the health status: `bin/cobaltgraph-health`
 - Review logs in `logs/` directory
-- See `README.md` for full documentation
+- See `README.md` for full documentation, including Known Limitations
 
 ---
 
-**CobaltGraph** - Revolutionary Blue-Team Network Intelligence
+**CobaltGraph** - Blue-Team Network Intelligence Platform

@@ -127,10 +127,6 @@ Threat Intelligence:
   ✅ AbuseIPDB: ENABLED (API key configured)
   ⚠️  Using fallback priority chain
 
-Dashboard:
-  ✅ Web: http://127.0.0.1:8080
-  ⚠️  Authentication: DISABLED (enable for production!)
-
 Features:
   ✅ ML Anomaly Detection: ENABLED
   ✅ CSV/JSON Export: ENABLED
@@ -139,21 +135,12 @@ Features:
 
 ## Environment Variables (Alternative to Config Files)
 
-You can also use environment variables (useful for Docker):
+You can also use environment variables for these settings:
 
 ```bash
-# Main settings
-export SUARON_CAPTURE_METHOD=auto
-export SUARON_WEB_PORT=8080
-export SUARON_ENABLE_AUTH=true
-
-# Authentication
-export SUARON_AUTH_USERNAME=admin
-export SUARON_AUTH_PASSWORD=secure_password
-
-# API Keys
-export SUARON_ABUSEIPDB_KEY=your_key_here
-export SUARON_VIRUSTOTAL_KEY=your_key_here
+export COBALTGRAPH_CAPTURE_METHOD=auto
+export COBALTGRAPH_ABUSEIPDB_KEY=your_key_here
+export COBALTGRAPH_VIRUSTOTAL_KEY=your_key_here
 ```
 
 Environment variables override config file settings.
@@ -177,20 +164,10 @@ chmod 600 config/auth.conf config/threat_intel.conf
 curl -H "Key: YOUR_KEY" https://api.abuseipdb.com/api/v2/check?ipAddress=8.8.8.8
 ```
 
-### "Port 8080 already in use"
-```bash
-# Option 1: Kill existing process
-lsof -ti:8080 | xargs kill -9
-
-# Option 2: Change port in config
-[Dashboard]
-web_port = 8081
-```
-
 ### Grey Man capture fails
 ```bash
 # Requires sudo/root for raw sockets
-sudo ./cobaltgraph_startup.sh
+sudo ./cobaltgraph --mode network
 
 # OR set capture_method to 'ss' in config
 [Network]
