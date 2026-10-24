@@ -6,7 +6,7 @@ A dashboard widget showing high-priority connections for SOC analyst triage.
 Surfaces connections requiring human review based on:
 - High scorer uncertainty (disagreement)
 - New high-risk destinations
-- Beaconing patterns detected
+- Regular-interval (possible beaconing) patterns detected
 - Local IOC matches
 - Domain intelligence alerts (DGA, ASN mismatch)
 
@@ -80,7 +80,7 @@ class InvestigationItem:
     # Scorer breakdown (for uncertainty visualization)
     score_statistical: Optional[float] = None
     score_rule_based: Optional[float] = None
-    score_ml_based: Optional[float] = None
+    score_heuristic: Optional[float] = None
     score_organization: Optional[float] = None
 
     # Additional context
@@ -106,13 +106,13 @@ class InvestigationItem:
         reason_info = {
             InvestigationReason.HIGH_UNCERTAINTY: ("HIGH UNCERTAINTY", "!", "Scorers Disagreed"),
             InvestigationReason.NEW_HIGH_RISK: ("NEW HIGH-RISK", "!", "First Contact"),
-            InvestigationReason.BEACONING: ("BEACONING", "?", "Pattern Detected"),
+            InvestigationReason.BEACONING: ("PERIODIC TRAFFIC", "?", "Regular Interval Pattern"),
             InvestigationReason.LOCAL_IOC_MATCH: ("IOC MATCH", "!", "Local Database Hit"),
-            InvestigationReason.DGA_DETECTED: ("DGA DETECTED", "!", "Algorithmic Domain"),
+            InvestigationReason.DGA_DETECTED: ("DGA-LIKE DOMAIN", "!", "Heuristic Name Match"),
             InvestigationReason.DOMAIN_ASN_MISMATCH: ("DOMAIN MISMATCH", "?", "ASN Correlation Failed"),
             InvestigationReason.MULTI_DEVICE_CONTACT: ("MULTI-DEVICE", "?", "Multiple Sources"),
             InvestigationReason.UNUSUAL_PORT: ("UNUSUAL PORT", "?", "Non-standard Port"),
-            InvestigationReason.TOR_PROXY: ("TOR/PROXY", "!", "Anonymization Detected"),
+            InvestigationReason.TOR_PROXY: ("TOR/PROXY", "!", "Anonymizing Org Type"),
             InvestigationReason.MANUAL_FLAG: ("MANUAL FLAG", "?", "User Flagged"),
         }
         return reason_info.get(self.reason, ("UNKNOWN", "?", "Unknown reason"))
@@ -326,7 +326,7 @@ class InvestigationQueuePanel(Static):
             confidence=connection_data.get("confidence", 0),
             score_statistical=connection_data.get("score_statistical"),
             score_rule_based=connection_data.get("score_rule_based"),
-            score_ml_based=connection_data.get("score_ml_based"),
+            score_heuristic=connection_data.get("score_heuristic"),
             score_organization=connection_data.get("score_organization"),
             description=self._generate_description(connection_data, reason),
             metadata=self._extract_metadata(connection_data),
@@ -399,8 +399,8 @@ class InvestigationQueuePanel(Static):
                 f"Type: {data.get('local_ioc_type', 'unknown')}"
             ),
             InvestigationReason.DGA_DETECTED: (
-                f"Domain '{domain}' appears algorithmically generated. "
-                f"Common indicator of malware C2 communication."
+                f"Domain '{domain}' matches a heuristic for algorithmically generated names. "
+                f"Heuristic only; not verified as malicious."
             ),
             InvestigationReason.DOMAIN_ASN_MISMATCH: (
                 f"Domain '{domain}' doesn't match ASN owner. "
@@ -408,15 +408,15 @@ class InvestigationQueuePanel(Static):
             ),
             InvestigationReason.TOR_PROXY: (
                 f"Connection to Tor/Proxy service with threat score {threat:.2f}. "
-                f"Review for potential data exfiltration or C2."
+                f"Anonymizing infrastructure can hide the true destination. Review the connection."
             ),
             InvestigationReason.UNUSUAL_PORT: (
                 f"Connection to ephemeral port {data.get('dst_port')} with elevated threat. "
-                f"May indicate custom tunneling or C2 callback."
+                f"Unusual port can indicate tunneling or a custom service. Heuristic only."
             ),
             InvestigationReason.BEACONING: (
-                f"Regular beaconing pattern detected to {dst_ip}. "
-                f"Interval and jitter consistent with C2 communication."
+                f"Connections to {dst_ip} recur at a regular interval with low jitter. "
+                f"Can reflect beaconing or legitimate polling; not verified."
             ),
             InvestigationReason.NEW_HIGH_RISK: (
                 f"First contact with high-risk destination {dst_ip}. "
@@ -482,8 +482,8 @@ class InvestigationQueuePanel(Static):
                     scores = []
                     if item.score_rule_based is not None:
                         scores.append(f"Rule:{item.score_rule_based:.2f}")
-                    if item.score_ml_based is not None:
-                        scores.append(f"ML:{item.score_ml_based:.2f}")
+                    if item.score_heuristic is not None:
+                        scores.append(f"H:{item.score_heuristic:.2f}")
                     if item.score_organization is not None:
                         scores.append(f"Org:{item.score_organization:.2f}")
                     if scores:

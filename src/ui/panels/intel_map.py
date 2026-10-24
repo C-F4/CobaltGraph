@@ -141,7 +141,7 @@ class IntelMapPanel(Static):
         self._map.clear_threats()
         self._unknown_ips.clear()
 
-        for conn in connections[-50:]:
+        for conn in connections[:50]:  # DB order is newest first: take the newest 50
             try:
                 lat = float(conn.get('dst_lat', 0) or 0)
                 lon = float(conn.get('dst_lon', 0) or 0)

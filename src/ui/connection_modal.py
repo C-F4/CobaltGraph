@@ -11,7 +11,7 @@ Panels:
 3. AnomalyAnalysisPanel - Z-scores, percentiles, contributing factors
 4. ReputationPanel - VirusTotal, AbuseIPDB results
 5. RulesTriggeredPanel - Which rules fired
-6. GraphPositionPanel - Centrality, clusters, attack paths
+6. GraphPositionPanel - Centrality, clusters, high-threat graph paths
 """
 
 import logging
@@ -164,7 +164,7 @@ class ProtocolEnrichmentPanel(Static):
             if dga_detected:
                 lines.append("  [red]⚠ DGA PATTERN DETECTED[/red]")
                 lines.append("  [dim]Domain appears algorithmically generated[/dim]")
-                lines.append("  [dim]Common in malware C2 infrastructure[/dim]")
+                lines.append("  [dim]Heuristic match; seen in some malware domains[/dim]")
             else:
                 lines.append("  [green]✓ Normal domain pattern[/green]")
             lines.append("")
@@ -353,8 +353,7 @@ class InvestigationActionsPanel(Static):
         # Triage recommendation
         lines.append("[bold]Recommended Action[/bold]")
         if threat >= 0.7:
-            lines.append("  [red]⚠ BLOCK - High threat score[/red]")
-            lines.append("  [dim]Consider adding to blocklist[/dim]")
+            lines.append("  [red]⚠ HIGH RISK - High threat score[/red]")
         elif threat >= 0.4:
             lines.append("  [yellow]◐ INVESTIGATE - Elevated risk[/yellow]")
             lines.append("  [dim]Review all connections to this IP[/dim]")
@@ -367,9 +366,7 @@ class InvestigationActionsPanel(Static):
 
         # Available actions (informational - buttons handled by parent)
         lines.append("[bold]Available Actions[/bold]")
-        lines.append("  [cyan][B][/cyan] Add to Local Blocklist")
-        lines.append("  [cyan][W][/cyan] Add to Whitelist")
-        lines.append("  [cyan][E][/cyan] Export to STIX 2.1")
+        lines.append("  [dim]Review the evidence above; no actions are taken automatically.[/dim]")
         lines.append("")
 
         # Pivot options
@@ -481,17 +478,19 @@ class ModalConsensusBreakdownPanel(Static):
 
         score_statistical = self.data.get('score_statistical')
         score_rule_based = self.data.get('score_rule_based')
-        score_ml_based = self.data.get('score_ml_based')
+        score_heuristic = self.data.get('score_heuristic')
+        score_neural_net = self.data.get('score_neural_net')
         score_organization = self.data.get('score_organization')
         score_spread = self.data.get('score_spread')
 
-        has_real_data = any([score_statistical, score_rule_based, score_ml_based, score_organization])
+        has_real_data = any([score_statistical, score_rule_based, score_heuristic, score_organization])
 
         if has_real_data:
             scorers = [
                 ("Statistical", score_statistical, "Z-score analysis"),
                 ("Rule-Based", score_rule_based, "Pattern matching"),
-                ("ML Model", score_ml_based, "Neural network"),
+                ("Heuristic", score_heuristic, "Hand-tuned weights"),
+                ("Neural (GRU)", score_neural_net, "Online-learning GRU"),
                 ("Organization", score_organization, "Trust scoring"),
             ]
         else:
@@ -596,7 +595,7 @@ class EnrichmentDetailsPanel(Static):
             lines.append("  [dim]Unusual for destination - may indicate:[/dim]")
             lines.append("  [dim]  - P2P/BitTorrent traffic[/dim]")
             lines.append("  [dim]  - Custom tunneling[/dim]")
-            lines.append("  [dim]  - C2 callback on dynamic port[/dim]")
+            lines.append("  [dim]  - Custom service on dynamic port[/dim]")
         lines.append("")
 
         # ASN Information
@@ -872,22 +871,13 @@ class ReputationPanel(Static):
             lines.append("  Reports: [green]0[/green]")
         lines.append("")
 
-        # Whitelist status
-        lines.append("[bold]Whitelist Status[/bold]")
-        if org_type in ['cloud', 'cdn', 'enterprise', 'education']:
-            lines.append("  [green]✓ Organization whitelisted[/green]")
-        elif org_type in ['tor', 'proxy', 'vpn']:
-            lines.append("  [red]✗ High-risk category[/red]")
-        else:
-            lines.append("  [dim]○ Not whitelisted[/dim]")
-        lines.append("")
 
         # Abuse types (estimated)
         if threat >= 0.5:
-            lines.append("[bold]Detected Abuse Types[/bold]")
+            lines.append("[bold]Estimated Abuse Types (score-based)[/bold]")
             abuse_types = []
             if threat >= 0.7:
-                abuse_types.extend(["Malware", "Botnet C2"])
+                abuse_types.extend(["Malware", "Botnet"])
             if threat >= 0.5:
                 abuse_types.extend(["Scanning", "Brute Force"])
             for atype in abuse_types[:3]:
@@ -1001,7 +991,7 @@ class RulesTriggeredPanel(Static):
         lines.append(f"[bold]Summary:[/bold] {triggered_count}/{total_rules} rules fired")
 
         if triggered_count >= 4:
-            lines.append("[red]⚠ Multiple indicators of compromise[/red]")
+            lines.append("[red]⚠ Multiple risk rules fired[/red]")
         elif triggered_count >= 2:
             lines.append("[yellow]⚠ Elevated risk indicators[/yellow]")
         elif triggered_count >= 1:
@@ -1016,7 +1006,7 @@ class RulesTriggeredPanel(Static):
 class GraphPositionPanel(Static):
     """
     Shows the connection's position in the network graph.
-    Includes centrality, cluster membership, and attack path status.
+    Includes centrality, cluster membership, and high-threat graph path status.
     """
 
     DEFAULT_CSS = """
@@ -1056,7 +1046,7 @@ class GraphPositionPanel(Static):
         if centrality > 0:
             lines.append(f"  PageRank: [cyan]{centrality:.4f}[/cyan]")
             if centrality >= 0.05:
-                lines.append("  [yellow]⚠ High centrality (potential C2)[/yellow]")
+                lines.append("  [yellow]⚠ High centrality (hub node)[/yellow]")
             elif centrality >= 0.02:
                 lines.append("  [dim]Moderate centrality[/dim]")
             else:
@@ -1087,21 +1077,25 @@ class GraphPositionPanel(Static):
                 lines.append("  [green]Not in threat cluster[/green]")
         lines.append("")
 
-        # Attack paths from graph analytics
-        lines.append("[bold]Attack Path[/bold]")
+        # High-threat paths from graph analytics
+        lines.append("[bold]High-Threat Graph Path[/bold]")
         attack_paths = graph_cache.get('potential_attack_paths', [])
         in_path = False
         for path in attack_paths:
-            if dst_ip in path.get('path', []):
+            # Producer emits each chain as a list of node IPs; tolerate a dict form too
+            nodes = path.get('path', []) if isinstance(path, dict) else list(path)
+            if dst_ip in nodes:
                 in_path = True
-                lines.append("  [red]⚠ In potential attack chain[/red]")
-                lines.append(f"  [dim]Threat: {path.get('threat', 0):.2f}[/dim]")
+                lines.append("  [red]⚠ On a chain of high-threat connections[/red]")
+                if isinstance(path, dict):
+                    lines.append(f"  [dim]Threat: {path.get('threat', 0):.2f}[/dim]")
+                lines.append(f"  [dim]Chain: {len(nodes)} nodes[/dim]")
                 break
         if not in_path:
             if threat >= 0.7:
-                lines.append("  [yellow]Monitoring for attack patterns[/yellow]")
+                lines.append("  [yellow]High score; not on a high-threat chain[/yellow]")
             else:
-                lines.append("  [green]No attack path detected[/green]")
+                lines.append("  [green]No high-threat graph path[/green]")
         lines.append("")
 
         # Connection degree from graph summary
@@ -1232,11 +1226,11 @@ class VerificationTriangulationPanel(Static):
         lines.append("[bold]Source Agreement[/bold]")
 
         # Show triangulation sources
-        source_names = ["Statistical", "Rule-Based", "ML Model", "Organization"]
+        source_names = ["Statistical", "Rule-Based", "Heuristic", "Organization"]
         scores = [
             self.data.get('score_statistical'),
             self.data.get('score_rule_based'),
-            self.data.get('score_ml_based'),
+            self.data.get('score_heuristic'),
             self.data.get('score_organization'),
         ]
 
@@ -1336,7 +1330,7 @@ class MetricExplanationPanel(Static):
         'ephemeral_port': {
             'range': "Ports 49152-65535 (dynamic/private)",
             'normal': "Source ports are typically ephemeral - this is normal",
-            'concerning': "Destination ephemeral ports are unusual (P2P, tunneling, C2)",
+            'concerning': "Destination ephemeral ports are unusual (P2P, tunneling, custom services)",
         },
         'passive_discovery': {
             'limits': [
@@ -1433,8 +1427,8 @@ class MetricExplanationPanel(Static):
         pending_metrics = []
         if self.data.get('score_statistical') is None:
             pending_metrics.append("Statistical analysis")
-        if self.data.get('score_ml_based') is None:
-            pending_metrics.append("ML model")
+        if self.data.get('score_heuristic') is None:
+            pending_metrics.append("Heuristic score")
         if hop_count is None:
             pending_metrics.append("Network path")
 
@@ -1448,6 +1442,47 @@ class MetricExplanationPanel(Static):
 
         content = "\n".join(lines)
         return Panel(content, title="[bold cyan]Explanations[/bold cyan]", border_style="cyan")
+
+
+class BeaconingTimingPanel(Static):
+    """
+    Regular-interval timing for this destination (heuristic, not a verdict).
+    Flags come from the pipeline's timing analysis; regular polling can match too.
+    """
+
+    DEFAULT_CSS = """
+    BeaconingTimingPanel {
+        width: 100%;
+        height: auto;
+        padding: 1;
+    }
+    """
+
+    def __init__(self, connection_data: Dict[str, Any], **kwargs):
+        super().__init__(**kwargs)
+        self.data = connection_data
+
+    def render(self):
+        lines = ["[bold cyan]REGULAR-INTERVAL TIMING[/bold cyan]", ""]
+        flagged = self.data.get('beaconing_detected')
+        if flagged is None:
+            lines.append("  [dim]No timing data recorded for this connection.[/dim]")
+            lines.append("  [dim](recorded before timing capture was enabled)[/dim]")
+        elif flagged:
+            lines.append("  [bold yellow]FLAGGED[/bold yellow]  connections recur at a regular interval")
+            interval = self.data.get('beaconing_interval')
+            jitter = self.data.get('beaconing_jitter')
+            if interval is not None:
+                lines.append(f"  Interval:  [cyan]{float(interval):.1f}s[/cyan]")
+            if jitter is not None:
+                lines.append(f"  Jitter:    [cyan]{float(jitter):.0f}%[/cyan]")
+            lines.append("")
+            lines.append("  [dim]Regular timing can be beaconing or legitimate polling.[/dim]")
+            lines.append("  [dim]Verify the destination before acting on this flag.[/dim]")
+        else:
+            lines.append("  [green]Not flagged[/green]")
+            lines.append("  [dim]No regular-interval pattern recorded for this destination.[/dim]")
+        return "\n".join(lines)
 
 
 class ConnectionIntelligenceModal(ModalScreen):
@@ -1472,21 +1507,15 @@ class ConnectionIntelligenceModal(ModalScreen):
 
     Row 4:
     10. Rules Triggered - Which detection rules fired
-    11. Graph Position - Centrality, clusters, attack paths
+    11. Graph Position - Centrality, clusters, high-threat graph paths
 
     Key bindings:
     - ESC/Q: Close modal
-    - B: Add to blocklist (placeholder)
-    - W: Add to whitelist (placeholder)
-    - E: Export to STIX (placeholder)
     """
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close", show=True),
         Binding("q", "dismiss", "Close", show=False),
-        Binding("b", "add_blocklist", "Blocklist", show=False),
-        Binding("w", "add_whitelist", "Whitelist", show=False),
-        Binding("e", "export_stix", "Export STIX", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -1535,8 +1564,14 @@ class ConnectionIntelligenceModal(ModalScreen):
     }
 
     #modal_row4 {
-        height: 24%;
+        height: auto;
         width: 100%;
+        layout: vertical;
+    }
+    #modal_row4 .modal_panel {
+        width: 100%;
+        height: auto;
+        margin: 0 0 1 0;
     }
 
     .modal_panel {
@@ -1583,7 +1618,7 @@ class ConnectionIntelligenceModal(ModalScreen):
                 f"[bold]CONNECTION INTELLIGENCE[/bold]\n"
                 f"[cyan]{dst_ip}:{dst_port}[/cyan] | "
                 f"Threat: [{threat_style}]{threat:.3f}[/{threat_style}] | "
-                f"Time: {time_str}",
+                f"Flow time: {time_str}",
                 id="modal_header_text"
             )
 
@@ -1644,6 +1679,10 @@ class ConnectionIntelligenceModal(ModalScreen):
                         self.connection_data,
                         classes="modal_panel"
                     )
+                    yield BeaconingTimingPanel(
+                        self.connection_data,
+                        classes="modal_panel"
+                    )
 
             # Close button
             yield Button("Close [ESC]", id="close_button", variant="primary")
@@ -1657,43 +1696,3 @@ class ConnectionIntelligenceModal(ModalScreen):
         """Close the modal."""
         self.dismiss()
 
-    def action_add_blocklist(self) -> None:
-        """Add current IP/domain to local blocklist."""
-        dst_ip = self.connection_data.get('dst_ip', '')
-        domain = self.connection_data.get('dns_query') or self.connection_data.get('tls_sni')
-        indicator = domain or dst_ip
-
-        # Notify user (actual implementation would write to IOC file)
-        self.notify(
-            f"Blocklist: {indicator}",
-            title="Added to Blocklist",
-            severity="warning"
-        )
-        logger.info(f"User requested blocklist addition: {indicator}")
-
-    def action_add_whitelist(self) -> None:
-        """Add current IP/domain to local whitelist."""
-        dst_ip = self.connection_data.get('dst_ip', '')
-        domain = self.connection_data.get('dns_query') or self.connection_data.get('tls_sni')
-        indicator = domain or dst_ip
-
-        # Notify user (actual implementation would write to whitelist)
-        self.notify(
-            f"Whitelist: {indicator}",
-            title="Added to Whitelist",
-            severity="information"
-        )
-        logger.info(f"User requested whitelist addition: {indicator}")
-
-    def action_export_stix(self) -> None:
-        """Export current connection as STIX 2.1 indicator."""
-        dst_ip = self.connection_data.get('dst_ip', '')
-        threat_score = self.connection_data.get('threat_score', 0)
-
-        # Notify user (actual implementation would use stix_export.py)
-        self.notify(
-            f"STIX export: {dst_ip} (threat: {threat_score:.2f})",
-            title="STIX Export",
-            severity="information"
-        )
-        logger.info(f"User requested STIX export: {dst_ip}")

@@ -617,7 +617,7 @@ class ConsensusBreakdownPanel(Static):
             'scorer_history': {
                 'statistical': [],
                 'rule_based': [],
-                'ml_based': [],
+                'heuristic': [],
                 'organization': [],
             },
             'agreement_rate': 1.0,
@@ -632,7 +632,8 @@ class ConsensusBreakdownPanel(Static):
         """Update consensus display from a connection record"""
         score_statistical = conn.get('score_statistical')
         score_rule_based = conn.get('score_rule_based')
-        score_ml_based = conn.get('score_ml_based')
+        score_heuristic = conn.get('score_heuristic')
+        score_neural_net = conn.get('score_neural_net')
         score_organization = conn.get('score_organization')
         score_spread = conn.get('score_spread')
         high_uncertainty = conn.get('high_uncertainty', False)
@@ -641,7 +642,8 @@ class ConsensusBreakdownPanel(Static):
             'last_consensus': {
                 'statistical': score_statistical,
                 'rule_based': score_rule_based,
-                'ml_based': score_ml_based,
+                'heuristic': score_heuristic,
+                'neural_net': score_neural_net,
                 'organization': score_organization,
                 'spread': score_spread,
                 'high_uncertainty': high_uncertainty,
@@ -700,7 +702,7 @@ class ConsensusBreakdownPanel(Static):
             scorers = [
                 ("STAT", last.get('statistical'), "cyan"),
                 ("RULE", last.get('rule_based'), "magenta"),
-                ("ML  ", last.get('ml_based'), "blue"),
+                ("HEUR", last.get('heuristic'), "blue"),
                 ("ORG ", last.get('organization'), "yellow"),
             ]
 

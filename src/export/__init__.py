@@ -11,6 +11,7 @@ Features:
 """
 
 from .consensus_exporter import ConsensusExporter
+from .events_export import export_events
 from .stix_export import (
     STIXExporter,
     STIXIndicator,
@@ -28,4 +29,5 @@ __all__ = [
     "STIXBundle",
     "STIXRelationship",
     "create_stix_exporter",
+    "export_events",
 ]

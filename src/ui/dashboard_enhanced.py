@@ -38,6 +38,11 @@ from textual.screen import ModalScreen
 from textual.widgets import Header, Footer, Static, DataTable
 from textual.reactive import reactive
 
+from src.ui.theme import BADGE_LEGEND, DETECTION_BADGES, SEVERITY_STYLE, connection_flags, severity_rank, threat_style
+from src.utils.thresholds import get_alert_threshold
+from src.ui.detections_log import DetectionsLogScreen
+from src.ui.connection_modal import ConnectionIntelligenceModal
+
 logger = logging.getLogger(__name__)
 
 
@@ -436,7 +441,8 @@ class ThreatPostureQuickPanel(Static):
         # ═══ Quick metrics ═══
         lines.append("")
         flag_color = "red" if flagged > 5 else ("yellow" if flagged > 0 else "dim")
-        lines.append(f"[dim]conn[/dim] {total_conn:>4}  [dim]flag[/dim] [{flag_color}]{flagged:>3}[/{flag_color}]  [dim]crit[/dim] [red]{active:>2}[/red]")
+        alert_level = get_alert_threshold()
+        lines.append(f"[dim]flows[/dim] {total_conn:>4}  [dim]score ≥0.3[/dim] [{flag_color}]{flagged:>3}[/{flag_color}]  [dim]score ≥{alert_level:.2f}[/dim] [red]{active:>2}[/red]")
         lines.append(f"[dim]in[/dim]   {inbound:>4}  [dim]out[/dim]  {outbound:>3}  [dim]ips[/dim]  {ips:>3}")
 
         # ═══ Consensus status ═══
@@ -444,32 +450,44 @@ class ThreatPostureQuickPanel(Static):
         agree_color = "green" if agree_pct >= 80 else ("yellow" if agree_pct >= 60 else "red")
         lines.append(f"[dim]consensus[/dim] [{agree_color}]{agree_pct}%[/{agree_color}]  [dim]uncertain[/dim] {uncertain}")
 
-        # ═══ C2 Infrastructure Fingerprint ═══
+        # ═══ Elevated-risk org types (org-name/ASN heuristic) ═══
         HIGH_RISK = ('bulletproof', 'tor_proxy', 'proxy', 'vpn', 'residential_proxy')
         org_current = self.threat_data.get('org_type_counts', {})
         org_baseline = self.threat_data.get('org_type_baseline', {})
 
         lines.append("")
-        lines.append("[dim]C2 INFRA[/dim]")
+        lines.append("[dim]ELEVATED-RISK ORGS[/dim]")
 
-        c2_any_active = False
+        elevated_any = False
         for ot in HIGH_RISK:
             count = org_current.get(ot, 0)
             if count == 0:
                 continue
-            c2_any_active = True
+            elevated_any = True
             prev = org_baseline.get(ot, 0)
             delta = count - prev
             color = "bold red" if ot in ('bulletproof', 'tor_proxy') else "yellow"
             delta_str = f"+{delta}" if delta > 0 else str(delta)
             lines.append(f"  [{color}]{ot[:12]:<12}[/{color}]  {count:>2}  [dim]{delta_str}[/dim]")
 
-        if not c2_any_active:
-            lines.append("  [dim green]no high-risk infra[/dim green]")
+        if not elevated_any:
+            lines.append("  [dim green]no elevated-risk orgs[/dim green]")
 
         normal_cloud = org_current.get('cloud', 0)
         normal_cdn = org_current.get('cdn', 0)
         lines.append(f"[dim]  baseline: cloud {normal_cloud} cdn {normal_cdn}[/dim]")
+
+        # ═══ Recorded detections (last hour) ═══
+        detections = self.threat_data.get('detections') or {}
+        lines.append("")
+        lines.append("[dim]DETECTIONS (1h)[/dim]")
+
+        def _det(key: str, label: str) -> str:
+            n = int(detections.get(key, 0) or 0)
+            return f"[bold yellow]{label} {n}[/bold yellow]" if n else f"[dim]{label} {n}[/dim]"
+
+        lines.append(f"  {_det('beaconing', 'beacon')}  {_det('dga_like', 'dga-like')}")
+        lines.append(f"  {_det('consensus_uncertain', 'uncertain')}  {_det('high_threat', 'high-threat')}")
 
         # ═══ Top flagged (compact) ═══
         lines.append("")
@@ -482,9 +500,7 @@ class ThreatPostureQuickPanel(Static):
                 dst_port = conn.get('dst_port', 0)
 
                 t_ind, t_col, _ = self._get_threat_indicator(threat_score)
-                ip_short = dst_ip[-12:] if len(dst_ip) > 12 else dst_ip
-
-                lines.append(f"  [{t_col}]{t_ind}[/{t_col}] {ip_short}:{dst_port} [{t_col}]{threat_score:.2f}[/{t_col}]")
+                lines.append(f"  [{t_col}]{t_ind}[/{t_col}] {dst_ip}:{dst_port} [{t_col}]{threat_score:.2f}[/{t_col}]")
         else:
             lines.append("  [dim]none[/dim]")
 
@@ -644,7 +660,7 @@ class EnhancedThreatGlobePanel(Static):
             # 1. Flat World Map
             if self.world_map:
                 self.world_map.clear_threats()
-                for conn in connections[-50:]:
+                for conn in connections[:50]:  # DB order is newest first
                     try:
                         country = (conn.get('dst_country') or 'XX')[:2].upper()
                         threat = float(conn.get('threat_score', 0) or 0)
@@ -969,6 +985,9 @@ class SmartConnectionTable(Static):
 
     connections = reactive(list)
 
+    # Row order: 'time' (newest first, as the DB returns) or 'risk' (highest threat first)
+    sort_mode = "time"
+
     # Data flow indicators
     FLOW_CHARS = ['▸', '▹', '▸', '▹']
 
@@ -998,15 +1017,20 @@ class SmartConnectionTable(Static):
         self.table.add_column("Score", key="score", width=5)
         self.table.add_column("Anom", key="anomaly", width=4)      # Anomaly score
         self.table.add_column("Sprd", key="spread", width=4)       # Score spread
+        self.table.add_column("Flags", key="flags", width=5)      # B/D/S/M detection flags
         self.table.add_column("Hops", key="hops", width=4)
         self.table.add_column("Geo", key="country", width=3)
 
         yield self.table
-        yield Static(self._render_connection_key(), classes="connection-key")
+        self._key_static = Static(self._render_connection_key(), classes="connection-key")
+        yield self._key_static
 
     def _render_connection_key(self) -> Text:
         """Render key explaining connection security metrics"""
         key = Text()
+        key.append("Sort:", style="dim bold")
+        key.append(f"{self.sort_mode} ", style="bold cyan")
+        key.append("│ ", style="dim")
         key.append("Dir:", style="dim bold")
         key.append(" →", style="cyan")
         key.append("Out", style="dim")
@@ -1029,6 +1053,9 @@ class SmartConnectionTable(Static):
         key.append("=Disagr ", style="dim")
         key.append("Hops", style="dim bold")
         key.append("=NetDist", style="dim")
+        key.append(" │ ", style="dim")
+        key.append("Flags", style="dim bold")
+        key.append("=B beacon D dga S scan M asn", style="dim")
         return key
 
     def watch_connections(self, new_connections: list) -> None:
@@ -1037,18 +1064,23 @@ class SmartConnectionTable(Static):
             logger.warning("Connection table not yet initialized - skipping update")
             return
 
-        if not new_connections:
-            logger.debug("No connections to display")
-            return
-
         self.connections = new_connections
         self.table.clear()
         self._connection_map = {}
+        if getattr(self, "_key_static", None) is not None:
+            self._key_static.update(self._render_connection_key())
+
+        if not new_connections:
+            return
 
         logger.debug(f"Updating connection table with {len(new_connections)} connections")
 
+        ordered = new_connections
+        if self.sort_mode == "risk":
+            ordered = sorted(new_connections, key=lambda c: float(c.get('threat_score', 0) or 0), reverse=True)
+
         # Add rows with text color coding by threat and type
-        for conn in self.connections[-50:]:  # Most recent 50 (matches globe slice direction)
+        for conn in ordered[:50]:  # Newest (or highest-risk) 50
             try:
                 # Handle both float timestamps and ISO string timestamps
                 ts = conn.get('timestamp', 0)
@@ -1153,6 +1185,9 @@ class SmartConnectionTable(Static):
                     spread_color = 'dim'
                     spread_display = '-'
 
+                flags = connection_flags(conn)
+                flags_cell = f"[bold yellow]{flags}[/]" if flags else "[dim]·[/]"
+
                 # Store connection for detail modal
                 row_key = str(conn.get('id', id(conn)))
                 self._connection_map[row_key] = conn
@@ -1171,6 +1206,7 @@ class SmartConnectionTable(Static):
                     f"[{threat_color}]{score_display}[/]",
                     f"[{anomaly_color}]{anomaly_display}[/]",
                     f"[{spread_color}]{spread_display}[/]",
+                    flags_cell,
                     f"[cyan]{hops}[/]",
                     f"[dim]{country}[/]",
                     key=row_key
@@ -1695,209 +1731,6 @@ NetworkTopologyPanel = NetworkDevicePanel
 DeviceDiscoveryPanel = NetworkDevicePanel
 
 
-class ConnectionDetailModal(Static):
-    """
-    Modal dialog showing detailed connection information.
-    Displays all enrichment data for a selected connection.
-    """
-
-    DEFAULT_CSS = """
-    ConnectionDetailModal {
-        align: center middle;
-        width: 70%;
-        height: auto;
-        max-height: 80%;
-        padding: 1 2;
-        background: $surface;
-        border: thick $primary;
-    }
-    """
-
-    connection = reactive(dict)
-
-    def __init__(self, connection_data: dict = None, **kwargs):
-        super().__init__(**kwargs)
-        self.connection = connection_data or {}
-
-    def watch_connection(self, new_connection: dict) -> None:
-        """Update when connection changes"""
-        self.connection = new_connection
-        self.refresh()
-
-    def render(self):
-        """Render detailed connection information"""
-        conn = self.connection
-        if not conn:
-            return Panel(
-                "[dim]No connection selected[/dim]",
-                title="[bold cyan]CONNECTION DETAILS[/bold cyan]",
-                border_style="cyan"
-            )
-
-        # Build detailed view
-        lines = []
-
-        # Header with threat indicator
-        threat = float(conn.get('threat_score', 0) or 0)
-        if threat >= 0.7:
-            threat_style = "[bold red]"
-            threat_label = "CRITICAL"
-            threat_bar = "█████████████████████"
-        elif threat >= 0.5:
-            threat_style = "[bold yellow]"
-            threat_label = "HIGH"
-            threat_bar = "█████████████░░░░░░░░"
-        elif threat >= 0.3:
-            threat_style = "[yellow]"
-            threat_label = "MEDIUM"
-            threat_bar = "████████░░░░░░░░░░░░░"
-        else:
-            threat_style = "[green]"
-            threat_label = "LOW"
-            threat_bar = "████░░░░░░░░░░░░░░░░░"
-
-        lines.append(f"{threat_style}╔══════════════════════════════════════════════════╗[/]")
-        lines.append(f"{threat_style}║  THREAT LEVEL: {threat_label:8s}  Score: {threat:.3f}          ║[/]")
-        lines.append(f"{threat_style}║  {threat_bar}  ║[/]")
-        lines.append(f"{threat_style}╚══════════════════════════════════════════════════╝[/]")
-        lines.append("")
-
-        # Timestamp
-        timestamp = conn.get('timestamp', 0)
-        if timestamp:
-            time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            time_str = "Unknown"
-        lines.append(f"[bold cyan]📅 TIMESTAMP:[/bold cyan] {time_str}")
-        lines.append("")
-
-        # Network Information
-        lines.append("[bold cyan]═══ NETWORK INFORMATION ═══[/bold cyan]")
-
-        # Determine direction
-        src_ip = conn.get('src_ip', 'local')
-        dst_ip = conn.get('dst_ip', 'Unknown')
-        dir_label, dir_color, dir_symbol = get_direction(src_ip, dst_ip)
-        dir_full = {"OUT": "Outgoing", "IN": "Incoming", "INT": "Internal", "EXT": "External"}.get(dir_label, "Unknown")
-        lines.append(f"  [cyan]Direction:[/cyan]      [{dir_color}]{dir_symbol} {dir_full}[/{dir_color}]")
-
-        lines.append(f"  [cyan]Source IP:[/cyan]      {src_ip}")
-        lines.append(f"  [cyan]Source MAC:[/cyan]     {conn.get('src_mac', 'Unknown')}")
-        lines.append(f"  [cyan]Destination IP:[/cyan] {dst_ip}")
-        lines.append(f"  [cyan]Port:[/cyan]           {conn.get('dst_port', '-')}")
-        lines.append(f"  [cyan]Protocol:[/cyan]       {conn.get('protocol', 'TCP')}")
-        lines.append("")
-
-        # Geolocation
-        lines.append("[bold cyan]═══ GEOLOCATION ═══[/bold cyan]")
-        lines.append(f"  [cyan]Country:[/cyan]        {conn.get('dst_country', 'Unknown')}")
-        lines.append(f"  [cyan]Latitude:[/cyan]       {conn.get('dst_lat', 0):.4f}")
-        lines.append(f"  [cyan]Longitude:[/cyan]      {conn.get('dst_lon', 0):.4f}")
-        lines.append(f"  [cyan]Hostname:[/cyan]       {conn.get('dst_hostname', 'N/A')}")
-        lines.append("")
-
-        # Organization Intelligence
-        lines.append("[bold cyan]═══ ORGANIZATION INTEL ═══[/bold cyan]")
-        org_type = (conn.get('dst_org_type') or 'unknown').lower()
-        org_trust = float(conn.get('org_trust_score', 0) or 0)
-
-        type_colors = {
-            'cloud': 'bold cyan', 'cdn': 'cyan', 'hosting': 'blue',
-            'isp': 'magenta', 'vpn': 'bold magenta', 'tor': 'bold red',
-            'enterprise': 'bold green', 'government': 'bold blue',
-        }
-        org_color = type_colors.get(org_type, 'white')
-
-        lines.append(f"  [cyan]Organization:[/cyan]   {conn.get('dst_org', 'Unknown')}")
-        lines.append(f"  [cyan]Type:[/cyan]           [{org_color}]{org_type.upper()}[/{org_color}]")
-        lines.append(f"  [cyan]Trust Score:[/cyan]    {org_trust:.2f}")
-        lines.append(f"  [cyan]ASN:[/cyan]            {conn.get('dst_asn', 'N/A')}")
-        lines.append(f"  [cyan]ASN Name:[/cyan]       {conn.get('dst_asn_name', 'N/A')}")
-        lines.append(f"  [cyan]CIDR:[/cyan]           {conn.get('dst_cidr', 'N/A')}")
-        lines.append("")
-
-        # Network Topology
-        lines.append("[bold cyan]═══ NETWORK TOPOLOGY ═══[/bold cyan]")
-        ttl_observed = conn.get('ttl_observed', 0)
-        ttl_initial = conn.get('ttl_initial', 0)
-        hop_count = conn.get('hop_count', 0)
-        os_fingerprint = conn.get('os_fingerprint', 'Unknown')
-
-        lines.append(f"  [cyan]TTL Observed:[/cyan]   {ttl_observed}")
-        lines.append(f"  [cyan]TTL Initial:[/cyan]    {ttl_initial}")
-        lines.append(f"  [cyan]Hop Count:[/cyan]      {hop_count}")
-        lines.append(f"  [cyan]OS Fingerprint:[/cyan] {os_fingerprint}")
-        lines.append("")
-
-        # Scoring Details
-        lines.append("[bold cyan]═══ THREAT SCORING ═══[/bold cyan]")
-        confidence = float(conn.get('confidence', 0) or 0)
-        high_uncertainty = conn.get('high_uncertainty', False)
-        scoring_method = conn.get('scoring_method', 'consensus')
-
-        conf_color = 'green' if confidence >= 0.7 else 'yellow' if confidence >= 0.5 else 'red'
-        uncertainty_icon = "[bold yellow]⚠ HIGH UNCERTAINTY[/bold yellow]" if high_uncertainty else "[green]✓ Confirmed[/green]"
-
-        lines.append(f"  [cyan]Threat Score:[/cyan]   {threat_style}{threat:.3f}[/]")
-        lines.append(f"  [cyan]Confidence:[/cyan]     [{conf_color}]{confidence:.2f}[/{conf_color}]")
-        lines.append(f"  [cyan]Uncertainty:[/cyan]    {uncertainty_icon}")
-        lines.append(f"  [cyan]Method:[/cyan]         {scoring_method}")
-        lines.append("")
-
-        # Individual Scorer Breakdown
-        lines.append("[bold cyan]═══ SCORER BREAKDOWN ═══[/bold cyan]")
-
-        # Get individual scores
-        score_statistical = conn.get('score_statistical')
-        score_rule_based = conn.get('score_rule_based')
-        score_ml_based = conn.get('score_ml_based')
-        score_organization = conn.get('score_organization')
-        anomaly_score = conn.get('anomaly_score')
-        score_spread = conn.get('score_spread')
-
-        def format_score(name: str, score, width: int = 10) -> str:
-            """Format a score with visual bar"""
-            if score is None:
-                return f"  [cyan]{name:16s}[/cyan] [dim]N/A[/dim]"
-            val = float(score)
-            bar_len = int(val * width)
-            if val >= 0.7:
-                color = 'red'
-            elif val >= 0.5:
-                color = 'yellow'
-            else:
-                color = 'green'
-            bar = f"[{color}]{'█' * bar_len}[/{color}][dim]{'░' * (width - bar_len)}[/dim]"
-            return f"  [cyan]{name:16s}[/cyan] {bar} [{color}]{val:.2f}[/{color}]"
-
-        lines.append(format_score("Statistical", score_statistical))
-        lines.append(format_score("Rule-based", score_rule_based))
-        lines.append(format_score("ML-based", score_ml_based))
-        lines.append(format_score("Organization", score_organization))
-        lines.append(format_score("Anomaly", anomaly_score))
-
-        # Score spread with interpretation
-        if score_spread is not None:
-            spread = float(score_spread)
-            if spread >= 0.5:
-                spread_desc = "[bold yellow]↔ High disagreement[/bold yellow]"
-            elif spread >= 0.3:
-                spread_desc = "[yellow]~ Moderate spread[/yellow]"
-            else:
-                spread_desc = "[green]✓ Strong consensus[/green]"
-            lines.append(f"  [cyan]Score Spread:[/cyan]    {spread:.2f} {spread_desc}")
-        lines.append("")
-
-        lines.append("[dim]Press ESC or click outside to close[/dim]")
-
-        content = "\n".join(lines)
-        return Panel(
-            content,
-            title="[bold cyan]🔍 CONNECTION DETAILS[/bold cyan]",
-            border_style="cyan"
-        )
-
-
 class OrganizationIntelPanel(Static):
     """
     Organization Intelligence Panel with type distribution and trends.
@@ -2030,17 +1863,19 @@ class OrganizationIntelPanel(Static):
         )
 
 
-class AnomalyAlertPanel(Static):
+class DetectionQueuePanel(Static):
     """
-    Shows recent anomaly detections from threat analytics.
-    Displays last 5 anomalies with score, type, IP, and severity.
+    Detection queue: recorded detections grouped by destination, most urgent first.
+
+    Fed from events the pipeline recorded (high threat, beaconing, DGA-like,
+    uncertain consensus, anomaly). Nothing is derived from raw threat scores here.
     """
 
     DEFAULT_CSS = """
-    AnomalyAlertPanel {
+    DetectionQueuePanel {
         height: 100%;
         width: 100%;
-        padding: 1;
+        padding: 0 1;
         overflow: auto;
     }
     """
@@ -2051,77 +1886,65 @@ class AnomalyAlertPanel(Static):
         super().__init__(**kwargs)
         self.anomalies = []
 
-    def watch_anomalies(self, new_anomalies: list) -> None:
-        """Update anomalies when data changes"""
-        self.anomalies = new_anomalies
+    def watch_anomalies(self, new_rows: list) -> None:
+        """Redraw when the queue changes"""
+        self.anomalies = new_rows
         self.refresh()
 
     def render(self):
-        """Render recent anomaly alerts"""
         if not self.anomalies:
             return Panel(
-                "[dim]No anomalies detected[/dim]\n\n"
-                "[green]✓[/green] System nominal\n"
-                "[dim]Monitoring for statistical outliers,\n"
-                "unusual patterns, and threat spikes...[/dim]",
-                title="[bold yellow]⚡ ANOMALY ALERTS[/bold yellow]",
-                border_style="yellow"
+                "[dim]No detections recorded[/dim]\n\n"
+                "[dim]Destinations appear here when the pipeline records a\n"
+                "high-threat, beaconing, DGA-like, uncertain, or anomaly event.[/dim]",
+                title="[bold yellow]DETECTION QUEUE[/bold yellow]",
+                border_style="yellow",
             )
 
-        lines = []
-        lines.append("[bold yellow]┌─────────────────────────────────────┐[/bold yellow]")
-        lines.append("[bold yellow]│ RECENT ANOMALY DETECTIONS           │[/bold yellow]")
-        lines.append("[bold yellow]└─────────────────────────────────────┘[/bold yellow]")
-        lines.append("")
+        table = RichTable(expand=True, box=None, show_edge=False, pad_edge=False)
+        table.add_column("SEV", no_wrap=True)
+        table.add_column("LAST", no_wrap=True)
+        table.add_column("DST IP", no_wrap=True, style="cyan")
+        table.add_column("TYPES", no_wrap=True)
+        table.add_column("N", justify="right")
+        table.add_column("SCORE", justify="right")
+        table.add_column("ORG", no_wrap=True, overflow="ellipsis", max_width=24)
 
-        # Severity icons and colors
-        severity_styles = {
-            'CRITICAL': ('[bold red]', '🔴', 'CRITICAL'),
-            'HIGH': ('[bold yellow]', '🟠', 'HIGH'),
-            'MEDIUM': ('[yellow]', '🟡', 'MEDIUM'),
-            'LOW': ('[green]', '🟢', 'LOW'),
-            'INFO': ('[dim]', 'ℹ️', 'INFO'),
-        }
+        counts: Dict[str, int] = {}
+        for row in self.anomalies:
+            sev = str(row.get("severity") or "INFO").upper()
+            counts[sev] = counts.get(sev, 0) + 1
+            style, glyph, _ = SEVERITY_STYLE.get(sev, ("dim", "·", 0))
+            last = row.get("last_seen") or 0
+            time_str = datetime.fromtimestamp(float(last)).strftime("%H:%M:%S") if last else "--:--:--"
+            badges = " ".join(
+                f"[{DETECTION_BADGES[t][1]}]{DETECTION_BADGES[t][0]}[/]"
+                for t in row.get("types", []) if t in DETECTION_BADGES
+            )
+            score = float(row.get("score") or 0)
+            table.add_row(
+                f"[{style}]{glyph} {sev}[/]",
+                f"[dim]{time_str}[/]",
+                row.get("dst_ip") or "?",
+                badges,
+                str(row.get("count", 0)),
+                f"[{threat_style(score)}]{score:.2f}[/]",
+                row.get("org") or "",
+            )
 
-        # Show last 5 anomalies
-        for idx, anomaly in enumerate(self.anomalies[:5]):
-            anomaly_type = anomaly.get('anomaly_type', 'unknown')
-            severity = anomaly.get('severity', 'MEDIUM').upper()
-            score = float(anomaly.get('anomaly_score', 0) or 0)
-            ip = anomaly.get('dst_ip', 'Unknown')[:15]
-            message = (anomaly.get('message') or anomaly_type)[:30]
-            timestamp = anomaly.get('timestamp', 0)
-
-            style, icon, label = severity_styles.get(severity, ('[dim]', '○', 'UNKNOWN'))
-
-            # Time formatting
-            if timestamp:
-                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
-            else:
-                time_str = "--:--:--"
-
-            lines.append(f"{icon} {style}{label:8s}[/] [{time_str}]")
-            lines.append(f"   {style}{anomaly_type:12s}[/] {score:.2f}")
-            lines.append(f"   [cyan]{ip}[/cyan]")
-            lines.append(f"   [dim]{message}[/dim]")
-            lines.append("")
-
-        # Summary statistics
-        critical_count = sum(1 for a in self.anomalies if a.get('severity', '').upper() == 'CRITICAL')
-        high_count = sum(1 for a in self.anomalies if a.get('severity', '').upper() == 'HIGH')
-
-        lines.append("[bold yellow]═════════════════════════════════════[/bold yellow]")
-        lines.append("")
-        lines.append("[bold]ANOMALY SUMMARY:[/bold]")
-        lines.append(f"  [bold red]Critical:[/bold red] {critical_count}")
-        lines.append(f"  [bold yellow]High:[/bold yellow] {high_count}")
-        lines.append(f"  [dim]Total:[/dim] {len(self.anomalies)}")
-
-        content = "\n".join(lines)
+        beacons = sum(1 for row in self.anomalies if "beaconing" in row.get("types", []))
+        summary = Text.from_markup(
+            f"[bold red]CRIT {counts.get('CRITICAL', 0)}[/]  "
+            f"[bold yellow]HIGH {counts.get('HIGH', 0)}[/]  "
+            f"[yellow]MED {counts.get('MEDIUM', 0)}[/]  "
+            f"[dim]destinations {len(self.anomalies)}[/]  "
+            f"[bold yellow]beacons {beacons}[/]"
+        )
+        legend = Text.from_markup(f"[dim]{BADGE_LEGEND}[/dim]")
         return Panel(
-            content,
-            title="[bold yellow]⚡ ANOMALY ALERTS[/bold yellow]",
-            border_style="yellow"
+            Group(table, summary, legend),
+            title="[bold yellow]DETECTION QUEUE[/bold yellow]",
+            border_style="yellow",
         )
 
 
@@ -2339,8 +2162,12 @@ class CobaltCommandPalette(ModalScreen):
             "commands": [
                 ("M",   "m",      "toggle_mode_panel",        "Mode Panel",
                  "Toggle device / network topology view"),
-                ("A",   "a",      "toggle_anomalies",         "Anomaly Alerts",
-                 "Toggle live anomaly detection panel"),
+                ("A",   "a",      "toggle_anomalies",         "Detection Queue",
+                 "Toggle the queue of recorded detections, grouped by destination"),
+                ("L",   "l",      "open_detections_log",      "Detections Log",
+                 "Filterable log of recorded detections; export to JSONL or CSV"),
+                ("S",   "s",      "cycle_sort",               "Sort Connections",
+                 "Toggle connection table order: time or risk"),
                 ("O",   "o",      "toggle_org_intel",         "Org Intel",
                  "Toggle organization intelligence panel"),
                 ("C",   "c",      "toggle_graphs",            "Graph Analytics",
@@ -2433,7 +2260,7 @@ class CobaltCommandPalette(ModalScreen):
             f"  [dim]│[/dim]"
             f"  [bright_white]⚡ CONNECTIONS: {total:,}[/bright_white]"
             f"  [dim]│[/dim]"
-            f"  [{threat_color}]{threat_icon} THREATS: {high_threat}[/{threat_color}]"
+            f"  [{threat_color}]{threat_icon} ALERT-LEVEL: {high_threat}[/{threat_color}]"
             f"  [dim]│[/dim]"
             f"  [bright_white]⬡ DEVICES: {devices}[/bright_white]"
         )
@@ -2536,7 +2363,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         Binding("r",      "refresh",          "Refresh"),
         Binding("ctrl+p", "command_palette",  "⌨  Commands", priority=True),
         # ── Full command set (hidden from footer — accessible via palette) ─
-        Binding("a",      "toggle_anomalies",          "Anomaly Alerts",       show=False),
+        Binding("a",      "toggle_anomalies",          "Detection Queue",      show=False),
         Binding("o",      "toggle_org_intel",           "Org Intel",            show=False),
         Binding("g",      "toggle_globe",               "Globe",                show=False),
         Binding("i",      "cycle_intel_map",             "Intel Map",            show=False),
@@ -2548,6 +2375,8 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         Binding("escape", "close_modal",                 "Close",                show=False),
         Binding("?",      "command_palette",             "Commands",             show=False),
         Binding("p",      "toggle_pivot",                "Pivot IP",             show=False),
+        Binding("l",      "open_detections_log",         "Detections Log",       show=False),
+        Binding("s",      "cycle_sort",                  "Sort Connections",     show=False),
     ]
 
     CSS = """
@@ -2636,28 +2465,6 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         padding: 1 0 0 1;
     }
 
-    #detail_modal {
-        display: none;
-        layer: modal;
-        dock: top;
-        margin: 2 4;
-    }
-
-    #detail_modal.visible {
-        display: block;
-    }
-
-    #modal_backdrop {
-        display: none;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.7);
-        layer: backdrop;
-    }
-
-    #modal_backdrop.visible {
-        display: block;
-    }
     """
 
     # Activity spinners for live feel
@@ -2675,13 +2482,12 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.threat_posture_panel = None
         self.globe_panel = None
         self.connection_table = None
+        self._toast_last_id = None
         self.mode_specific_panel = None
         self.anomaly_panel = None
         self.org_intel_panel = None
         self.graph_panel = None
         self.pivot_panel = None
-        self.detail_modal = None
-        self.modal_backdrop = None
 
         # Track previous org counts for trend calculation
         self._previous_org_counts = {}
@@ -2712,7 +2518,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 yield self.mode_specific_panel
 
                 # Anomaly panel (hidden by default, toggle with 'a')
-                self.anomaly_panel = AnomalyAlertPanel(id="anomaly_panel")
+                self.anomaly_panel = DetectionQueuePanel(id="anomaly_panel")
                 yield self.anomaly_panel
 
                 # Organization Intel panel (hidden by default, toggle with 'o')
@@ -2728,10 +2534,6 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 yield self.pivot_panel
 
         # Detail modal (hidden by default, shown on row click)
-        self.modal_backdrop = Static(id="modal_backdrop")
-        yield self.modal_backdrop
-        self.detail_modal = ConnectionDetailModal(id="detail_modal")
-        yield self.detail_modal
 
         yield Footer()
 
@@ -2809,14 +2611,19 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             # Calculate threat statistics
             threat_scores = [float(c.get('threat_score', 0) or 0) for c in connections]
             current_threat = (sum(threat_scores) / len(threat_scores)) if threat_scores else 0
-            high_threat_count = sum(1 for t in threat_scores if t >= 0.7)
+            high_threat_count = sum(1 for t in threat_scores if t >= get_alert_threshold())
 
-            # Get top 3 threat connections for radar graphs
-            top_threats = sorted(
-                connections,
-                key=lambda c: float(c.get('threat_score', 0) or 0),
-                reverse=True
-            )[:3]
+            # Top 3 threat destinations (one row per ip:port, so repeats don't crowd the list)
+            top_threats = []
+            seen_destinations = set()
+            for conn in sorted(connections, key=lambda c: float(c.get('threat_score', 0) or 0), reverse=True):
+                key = (conn.get('dst_ip'), conn.get('dst_port'))
+                if key in seen_destinations:
+                    continue
+                seen_destinations.add(key)
+                top_threats.append(conn)
+                if len(top_threats) == 3:
+                    break
 
             # Update threat posture panel (SOC Summary)
             if self.threat_posture_panel:
@@ -2858,7 +2665,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 baseline_threats = threat_scores[:len(threat_scores)//3] if threat_scores else []
                 baseline = sum(baseline_threats) / len(baseline_threats) if baseline_threats else 0.15
 
-                # Inline org_type count for C2 infra fingerprint
+                # Inline org_type count for elevated-risk org fingerprint
                 org_type_counts = {}
                 for c in connections:
                     ot = (c.get('dst_org_type') or 'unknown').lower()
@@ -2880,6 +2687,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                     'protocols': protocols,
                     'org_type_counts': org_type_counts,
                     'org_type_baseline': self._previous_org_counts.copy(),
+                    'detections': self.data_manager.get_detection_counts(window_s=3600),
                 }
 
             # Update connection table
@@ -2904,15 +2712,10 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 self.mode_specific_panel.topology_data = self._build_topology(connections, devices)
                 self.mode_specific_panel.devices = devices
 
-            # Fetch and update anomalies
+            # Detection queue: recorded detections only (no values derived from scores)
             if self.anomaly_panel:
-                anomalies = self.data_manager.get_anomalies(limit=10) if hasattr(self.data_manager, 'get_anomalies') else []
-
-                # If no anomalies from events table, generate from high-threat connections
-                if not anomalies and high_threat_count > 0:
-                    anomalies = self._generate_anomalies_from_threats(connections)
-
-                self.anomaly_panel.anomalies = anomalies
+                self.anomaly_panel.anomalies = self.data_manager.get_detection_queue()
+            self._notify_new_detections()
 
             # Update organization intel panel
             if self.org_intel_panel:
@@ -3076,45 +2879,6 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
 
         return dict(heatmap)
 
-    def _generate_anomalies_from_threats(self, connections: List[Dict]) -> List[Dict]:
-        """
-        Generate anomaly-like data from high-threat connections.
-        Used when no events exist in database to provide visual feedback.
-        """
-        anomalies = []
-        for conn in connections:
-            threat = float(conn.get('threat_score', 0) or 0)
-            if threat >= 0.5:
-                # Determine severity and type based on threat score and other factors
-                if threat >= 0.8:
-                    severity = 'CRITICAL'
-                    anomaly_type = 'high_threat'
-                elif threat >= 0.7:
-                    severity = 'HIGH'
-                    anomaly_type = 'elevated_risk'
-                else:
-                    severity = 'MEDIUM'
-                    anomaly_type = 'suspicious'
-
-                # Check for consensus uncertainty
-                if conn.get('high_uncertainty', False):
-                    anomaly_type = 'consensus_uncertain'
-                    severity = 'HIGH'
-
-                anomalies.append({
-                    'timestamp': conn.get('timestamp', time.time()),
-                    'anomaly_type': anomaly_type,
-                    'anomaly_score': threat,
-                    'severity': severity,
-                    'dst_ip': conn.get('dst_ip', 'Unknown'),
-                    'message': f"{conn.get('dst_org', 'Unknown')} - {conn.get('dst_org_type', 'unknown')}",
-                })
-
-                if len(anomalies) >= 10:
-                    break
-
-        return anomalies
-
     def _build_topology(self, connections: List[Dict], devices: List[Dict]) -> Dict:
         """Build device→destination topology with full flow details"""
         topology = defaultdict(lambda: {
@@ -3217,13 +2981,56 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
                 ),
             }
 
-        if self.detail_modal and self.modal_backdrop:
-            self.detail_modal.connection = connection
-            self.detail_modal.add_class("visible")
-            self.detail_modal.styles.display = "block"
-            self.modal_backdrop.add_class("visible")
-            self.modal_backdrop.styles.display = "block"
-            self.sub_title = f"Viewing details for {connection.get('dst_ip', 'Unknown')} - Press ESC to close"
+        self.push_screen(ConnectionIntelligenceModal(connection))
+        self.sub_title = f"Viewing details for {connection.get('dst_ip', 'Unknown')} - Press ESC to close"
+
+    def _notify_new_detections(self) -> None:
+        """
+        Toast newly recorded HIGH/CRITICAL detections, once each.
+
+        The first refresh only records a baseline so existing history does not flood the screen.
+        At most three toasts per refresh; the rest remain in the queue and the log.
+        """
+        if self._toast_last_id is None:
+            self._toast_last_id = self.data_manager.get_max_event_id()
+            return
+        new_rows = self.data_manager.get_detections_after(self._toast_last_id)
+        if not new_rows:
+            return
+        self._toast_last_id = new_rows[-1]["id"]
+        shown = 0
+        for row in new_rows:
+            sev = str(row.get("severity") or "").upper()
+            if severity_rank(sev) < severity_rank("HIGH") or shown >= 3:
+                continue
+            shown += 1
+            self.notify(
+                str(row.get("message") or row.get("event_type")),
+                title=f"{sev} detection",
+                severity="error" if sev == "CRITICAL" else "warning",
+                timeout=8,
+            )
+
+    def action_open_detections_log(self) -> None:
+        """Open the detections log; Enter there drills into the chosen destination"""
+        self.push_screen(
+            DetectionsLogScreen(self.data_manager, export_directory=getattr(self, "export_directory", "exports")),
+            callback=self._on_detections_log_closed,
+        )
+
+    def _on_detections_log_closed(self, connection) -> None:
+        if connection:
+            self._show_connection_detail(connection)
+
+    def action_cycle_sort(self) -> None:
+        """Toggle connection table order between time (newest first) and risk (highest first)"""
+        if not self.connection_table:
+            return
+        table = self.connection_table
+        table.sort_mode = "risk" if table.sort_mode == "time" else "time"
+        table.watch_connections(table.connections)
+        label = "risk (highest first)" if table.sort_mode == "risk" else "time (newest first)"
+        self.sub_title = f"Connections sorted by {label}"
 
     def action_focus_net_intel(self) -> None:
         """Focus the NET INTEL panel for keyboard scrolling"""
@@ -3232,16 +3039,7 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
             self.sub_title = "NET INTEL focused — ↑↓ PgUp/PgDn Home/End to scroll, ESC to unfocus"
 
     def action_close_modal(self) -> None:
-        """Close the detail modal or unfocus scrollable panels"""
-        if self.detail_modal and self.modal_backdrop:
-            modal_visible = self.detail_modal.has_class("visible")
-            if modal_visible:
-                self.detail_modal.remove_class("visible")
-                self.detail_modal.styles.display = "none"
-                self.modal_backdrop.remove_class("visible")
-                self.modal_backdrop.styles.display = "none"
-                self.sub_title = "Modal closed"
-                return
+        """Unfocus scrollable panels"""
         # Unfocus any focused scrollable panel back to the app
         self.screen.set_focus(None)
         self.sub_title = ""
@@ -3260,15 +3058,20 @@ class CobaltGraphDashboardEnhanced(UnifiedDashboard):
         self.sub_title = "Showing Anomaly Alerts (press 'm' for devices, 'o' for org intel)"
 
     def action_toggle_globe(self) -> None:
-        """Toggle globe animation pause/resume"""
-        if self.globe_panel:
-            # Toggle animation state by controlling the update timer
-            if hasattr(self, '_globe_paused') and self._globe_paused:
-                self._globe_paused = False
-                self.sub_title = "Globe animation resumed"
-            else:
-                self._globe_paused = True
-                self.sub_title = "Globe animation paused"
+        """Pause or resume the animation of the map currently shown"""
+        if not self.globe_panel:
+            return
+        panel = self.globe_panel
+        active = {
+            "flat": panel.world_map,
+            "rotating": panel.enhanced_globe,
+            "simple": panel.simple_globe,
+        }.get(panel._current_map_type)
+        if active is None:
+            self.sub_title = "No animated map is shown"
+            return
+        paused = active.toggle_pause()
+        self.sub_title = "Map animation paused" if paused else "Map animation resumed"
 
     def action_cycle_intel_map(self) -> None:
         """Cycle through intel map visualization types (flat/rotating/simple)"""

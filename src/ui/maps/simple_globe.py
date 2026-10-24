@@ -198,7 +198,7 @@ class SimpleGlobe(BaseMap):
         critical = sum(1 for t in self._simple_threats if t.level >= 0.8)
         unknown_part = f" | Unk:{int_to_roman(self._unknown_count)}" if self._unknown_count > 0 else ""
 
-        footer = f"\n[dim]Static view | Threats: {threat_count} | Critical: {critical}{unknown_part}[/dim]"
+        footer = f"\n[dim]Static view | Mapped threats: {threat_count} | Critical: {critical}{unknown_part}[/dim]"
         content.append(footer)
 
         return Panel(

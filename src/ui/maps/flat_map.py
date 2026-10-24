@@ -236,7 +236,7 @@ class FlatWorldMap(BaseMap):
             "[dim]Map rendering unavailable[/dim]",
             "",
             f"Status: {self.get_status_text()}",
-            f"Threats: {len(self.threats)}",
+            f"Mapped threats: {len(self.threats)}",
         ]
 
         if self._unknown_count > 0:

@@ -369,9 +369,12 @@ class BaseMap(ABC):
         """
         stats = self.get_stats()
         unknown_part = f" | Unk:{int_to_roman(stats['unknown'])}" if stats['unknown'] > 0 else ""
+        if stats['total'] == 0:
+            return "No mappable threats (connections need a location to appear here)"
 
+        paused_part = " | [PAUSED]" if self.paused else ""
         return (
-            f"Threats: {stats['total']} | "
+            f"Mapped threats: {stats['total']} | "
             f"Critical: {stats['critical']} | "
-            f"High: {stats['high']}{unknown_part}"
+            f"High: {stats['high']}{unknown_part}{paused_part}"
         )

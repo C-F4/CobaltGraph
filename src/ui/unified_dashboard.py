@@ -21,6 +21,9 @@ import traceback
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Callable, Any
+
+from src.utils.thresholds import get_alert_threshold
+from src.ui.theme import SEVERITY_ORDER, severity_rank
 import time
 from abc import ABC, abstractmethod
 
@@ -187,7 +190,7 @@ class DataManager:
             total = safe_count(total_results)
 
             # High threat count
-            threat_query = "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
+            threat_query = f"SELECT COUNT(*) as count FROM connections WHERE threat_score >= {get_alert_threshold()}"
             threat_results = self.execute_query(threat_query)
             high_threat = safe_count(threat_results)
 
@@ -238,6 +241,133 @@ class DataManager:
         except Exception as e:
             logger.debug(f"Error fetching events: {e}")
             return []
+
+    # ------------------------------------------------------------------
+    # Detection queries: rows the pipeline recorded in the events table
+    # ------------------------------------------------------------------
+
+    DETECTION_TYPES = ("anomaly", "high_threat", "consensus_uncertain", "beaconing", "dga_like")
+
+    def get_detection_queue(self, window_s: int = 86400, limit: int = 15) -> List[Dict]:
+        """
+        Recorded detections grouped by destination, most urgent first.
+
+        Each row: dst_ip, severity, sev_rank, count, first_seen, last_seen, score, org, types.
+        """
+        cutoff = time.time() - window_s
+        placeholders = ",".join("?" * len(self.DETECTION_TYPES))
+        rows = self.execute_query(
+            "SELECT event_type, severity, dst_ip, threat_score, org_name, timestamp "
+            "FROM events "
+            f"WHERE timestamp > ? AND dst_ip IS NOT NULL AND event_type IN ({placeholders}) "
+            "ORDER BY timestamp DESC LIMIT 5000",
+            (cutoff, *self.DETECTION_TYPES),
+        )
+
+        groups: Dict[str, Dict] = {}
+        for r in rows:
+            ip = r["dst_ip"]
+            group = groups.get(ip)
+            if group is None:
+                group = groups[ip] = {
+                    "dst_ip": ip,
+                    "severity": "INFO",
+                    "sev_rank": -1,
+                    "count": 0,
+                    "first_seen": r["timestamp"],
+                    "last_seen": r["timestamp"],
+                    "score": 0.0,
+                    "org": r["org_name"] or "",
+                    "types": [],
+                }
+            group["count"] += 1
+            group["first_seen"] = min(group["first_seen"], r["timestamp"])
+            group["last_seen"] = max(group["last_seen"], r["timestamp"])
+            rank = severity_rank(r["severity"])
+            if rank > group["sev_rank"]:
+                group["sev_rank"] = rank
+                group["severity"] = (r["severity"] or "INFO").upper()
+            group["score"] = max(group["score"], float(r["threat_score"] or 0))
+            if not group["org"] and r["org_name"]:
+                group["org"] = r["org_name"]
+            if r["event_type"] not in group["types"]:
+                group["types"].append(r["event_type"])
+
+        ordered = sorted(groups.values(), key=lambda g: (g["sev_rank"], g["last_seen"]), reverse=True)
+        return ordered[:limit]
+
+    def get_detection_counts(self, window_s: int = 3600) -> Dict[str, int]:
+        """Distinct destinations per detection type within the window (posture panel)."""
+        cutoff = time.time() - window_s
+        placeholders = ",".join("?" * len(self.DETECTION_TYPES))
+        rows = self.execute_query(
+            "SELECT event_type, COUNT(DISTINCT dst_ip) AS n FROM events "
+            f"WHERE timestamp > ? AND event_type IN ({placeholders}) GROUP BY event_type",
+            (cutoff, *self.DETECTION_TYPES),
+        )
+        return {r["event_type"]: r["n"] for r in rows}
+
+    def query_events(
+        self,
+        min_severity: Optional[str] = None,
+        event_type: Optional[str] = None,
+        ip: Optional[str] = None,
+        since: Optional[float] = None,
+        order: str = "time",
+        limit: int = 500,
+    ) -> List[Dict]:
+        """Filtered events for the detections log. Only fixed SQL fragments are concatenated; values are bound."""
+        clauses: List[str] = []
+        params: List = []
+        if min_severity:
+            allowed = [s for s in SEVERITY_ORDER if severity_rank(s) >= severity_rank(min_severity)]
+            clauses.append(f"severity IN ({','.join('?' * len(allowed))})")
+            params.extend(allowed)
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if ip:
+            clauses.append("dst_ip LIKE ?")
+            params.append(f"%{ip}%")
+        if since is not None:
+            clauses.append("timestamp > ?")
+            params.append(since)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        severity_sort = (
+            "CASE severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 "
+            "WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END"
+        )
+        order_by = f"{severity_sort} DESC, timestamp DESC" if order == "severity" else "timestamp DESC"
+        rows = self.execute_query(
+            "SELECT id, timestamp, event_type, severity, message, source_ip AS src_ip, dst_ip, dst_port, "
+            "threat_score, org_name, metadata FROM events "
+            f"{where} ORDER BY {order_by} LIMIT ?",
+            (*params, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def get_max_event_id(self) -> int:
+        """Highest events.id so far (baseline for new-detection toasts)."""
+        rows = self.execute_query("SELECT COALESCE(MAX(id), 0) AS m FROM events", ())
+        return int(rows[0]["m"]) if rows else 0
+
+    def get_detections_after(self, last_id: int, limit: int = 20) -> List[Dict]:
+        """Detection rows recorded after last_id, oldest first."""
+        placeholders = ",".join("?" * len(self.DETECTION_TYPES))
+        rows = self.execute_query(
+            "SELECT id, timestamp, event_type, severity, message, dst_ip, threat_score, org_name "
+            f"FROM events WHERE id > ? AND event_type IN ({placeholders}) ORDER BY id ASC LIMIT ?",
+            (last_id, *self.DETECTION_TYPES, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def get_latest_connection(self, dst_ip: str) -> Optional[Dict]:
+        """Newest connection row for a destination (drill-down from the log)."""
+        rows = self.execute_query(
+            "SELECT * FROM connections WHERE dst_ip = ? ORDER BY timestamp DESC LIMIT 1",
+            (dst_ip,),
+        )
+        return dict(rows[0]) if rows else None
 
     def get_anomalies(self, limit: int = 10) -> List[Dict]:
         """
@@ -575,7 +705,7 @@ class UnifiedDashboard(App):
                    threat_score, dst_org, dst_org_type, org_trust_score,
                    dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor,
                    confidence, high_uncertainty, scoring_method,
-                   score_statistical, score_rule_based, score_ml_based, score_organization,
+                   score_statistical, score_rule_based, score_heuristic, score_neural_net, score_organization,
                    anomaly_score, score_spread,
                    verification_status, verification_reason, verification_confidence,
                    triangulation_score, triangulation_sources
@@ -590,7 +720,7 @@ class UnifiedDashboard(App):
                    threat_score, dst_org, dst_org_type, org_trust_score,
                    dst_country, dst_lat, dst_lon, hop_count, os_fingerprint, dst_asn, device_vendor,
                    confidence, high_uncertainty, scoring_method,
-                   score_statistical, score_rule_based, score_ml_based, score_organization,
+                   score_statistical, score_rule_based, score_heuristic, score_neural_net, score_organization,
                    anomaly_score, score_spread,
                    verification_status, verification_reason, verification_confidence,
                    triangulation_score, triangulation_sources
@@ -699,12 +829,12 @@ class UnifiedDashboard(App):
         # High threat count
         if self._refresh_timestamp is not None:
             threat_result = self.data_manager.execute_query(
-                "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7 AND timestamp > ?",
+                f"SELECT COUNT(*) as count FROM connections WHERE threat_score >= {get_alert_threshold()} AND timestamp > ?",
                 ts_params
             )
         else:
             threat_result = self.data_manager.execute_query(
-                "SELECT COUNT(*) as count FROM connections WHERE threat_score >= 0.7"
+                f"SELECT COUNT(*) as count FROM connections WHERE threat_score >= {get_alert_threshold()}"
             )
         self.stats['high_threat_count'] = safe_count(threat_result)
 
@@ -781,7 +911,7 @@ class UnifiedDashboard(App):
         if self.threat_posture_panel:
             threats = [c.get('threat_score', 0) or 0 for c in connections]
             current_threat = sum(threats) / len(threats) if threats else 0
-            high_count = sum(1 for t in threats if t >= 0.7)
+            high_count = sum(1 for t in threats if t >= get_alert_threshold())
 
             # Get top 3 threat connections for radar graphs
             top_threats = sorted(
@@ -906,7 +1036,7 @@ class UnifiedDashboard(App):
             self.recent_connections.append(conn_dict)
 
             # Update stats in real-time
-            if conn_dict.get('threat_score', 0) >= 0.7:
+            if conn_dict.get('threat_score', 0) >= get_alert_threshold():
                 self.stats['high_threat_count'] += 1
             self.stats['total_connections'] += 1
             self.stats['last_update'] = time.time()
@@ -969,7 +1099,7 @@ class UnifiedDashboard(App):
     def _refresh_graph_analytics(self) -> None:
         """
         Periodic graph analytics computation (called every 30s).
-        Computes PageRank centrality, threat clusters, attack paths, and ASN rankings.
+        Computes PageRank centrality, threat clusters, high-threat graph paths, and ASN rankings.
         Results are cached for the connection intelligence modal.
         """
         if not self.threat_analytics:
@@ -977,8 +1107,12 @@ class UnifiedDashboard(App):
 
         try:
             # Feed recent connections to the analytics engine
-            connections = list(self.recent_connections)
-            for conn in connections[-50:]:  # Process last 50 connections
+            # recent_connections mixes DB order (newest first) with live appends; sort by time
+            connections = sorted(
+                self.recent_connections,
+                key=lambda c: c.get('timestamp') if isinstance(c.get('timestamp'), (int, float)) else 0,
+            )
+            for conn in connections[-50:]:  # Most recent 50, oldest first for the analytics engine
                 try:
                     self.threat_analytics.process_connection(
                         src_ip=conn.get('src_ip', ''),
@@ -1116,7 +1250,7 @@ class UnifiedDashboard(App):
                 'scorer_history': {
                     'statistical': [],
                     'rule_based': [],
-                    'ml_based': [],
+                    'heuristic': [],
                     'organization': [],
                 },
                 'agreement_rate': 1.0,
