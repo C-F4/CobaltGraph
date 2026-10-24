@@ -127,3 +127,6 @@ tools/*
 # ML model state files (may encode patterns from real captured traffic)
 models/*
 !models/.gitkeep
+
+# Runtime exports (any location)
+*.jsonl
