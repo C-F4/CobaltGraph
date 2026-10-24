@@ -130,3 +130,6 @@ models/*
 
 # Runtime exports (any location)
 *.jsonl
+
+# Backup copies of source or data (not source)
+backups/

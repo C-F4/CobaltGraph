@@ -80,20 +80,22 @@ fi
 
 echo ""
 
-# Database check
+# Database check (the database the application writes, relative to this script)
 echo -e "${GREEN}Database:${NC}"
-if [ -f "/home/user/CobaltGraph/cobaltgraph_minimal.db" ]; then
-    DB_SIZE=$(du -h /home/user/CobaltGraph/cobaltgraph_minimal.db | cut -f1)
-    DB_AGE=$(stat -c %Y /home/user/CobaltGraph/cobaltgraph_minimal.db)
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DB_FILE="$PROJECT_ROOT/database/cobaltgraph.db"
+if [ -f "$DB_FILE" ]; then
+    DB_SIZE=$(du -h "$DB_FILE" | cut -f1)
+    DB_AGE=$(stat -c %Y "$DB_FILE")
     NOW=$(date +%s)
     AGE_MIN=$(( (NOW - DB_AGE) / 60 ))
 
     echo -e "  💾 Size: ${BLUE}$DB_SIZE${NC}"
     echo -e "  🕐 Last modified: ${BLUE}${AGE_MIN}m ago${NC}"
 
-    # Count records
-    DB_COUNT=$(python3 -c "import sqlite3; conn=sqlite3.connect('/home/user/CobaltGraph/cobaltgraph_minimal.db'); print(conn.execute('SELECT COUNT(*) FROM connections').fetchone()[0])" 2>/dev/null)
-    echo -e "  📊 Total connections: ${BLUE}$DB_COUNT${NC}"
+    # Count records (read-only; the file may be owned by another user)
+    DB_COUNT=$(python3 -c "import sqlite3,sys; conn=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro', uri=True); print(conn.execute('SELECT COUNT(*) FROM connections').fetchone()[0])" "$DB_FILE" 2>/dev/null)
+    echo -e "  📊 Total connections: ${BLUE}${DB_COUNT:-unreadable}${NC}"
 else
     echo -e "  💾 Database: ${RED}NOT FOUND${NC}"
 fi
