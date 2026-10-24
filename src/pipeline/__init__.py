@@ -5,8 +5,7 @@ Clean, stage-based data processing pipeline for network intelligence.
 Replaces the monolithic DataPipeline with modular, testable stages.
 
 Architecture:
-    Packet (bidirectional) → ConnectionCorrelator → ValidationStage → EnrichmentStage
-                                                  → ScoringStage → AnalyticsStage → StorageStage
+    Packet (bidirectional) → ConnectionCorrelator → DataPipeline (core/orchestrator.py)
 
 Bidirectional Capture:
     - NetworkMonitor emits both outbound AND inbound packets
@@ -40,11 +39,6 @@ from .stages import (
     StageContext,
     CompositeStage,
     ConnectionCorrelator,
-    ValidationStage,
-    EnrichmentStage,
-    ScoringStage,
-    AnalyticsStage,
-    StorageStage,
 )
 
 __all__ = [
@@ -68,9 +62,4 @@ __all__ = [
     "StageContext",
     "CompositeStage",
     "ConnectionCorrelator",
-    "ValidationStage",
-    "EnrichmentStage",
-    "ScoringStage",
-    "AnalyticsStage",
-    "StorageStage",
 ]

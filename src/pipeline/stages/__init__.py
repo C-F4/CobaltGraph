@@ -1,28 +1,17 @@
 """
 Pipeline Stages
 
-Modular processing stages that replace the monolithic _process_connection() method.
-Each stage is responsible for one concern and can be tested independently.
+Only the stages the live pipeline uses remain here. ConnectionCorrelator turns
+bidirectional packets into connection events; DataPipeline (core/orchestrator.py)
+performs validation, enrichment, scoring, analytics and storage.
 """
 
 from .base import PipelineStage, StageContext, CompositeStage
 from .correlator import ConnectionCorrelator
-from .validation import ValidationStage
-from .enrichment import EnrichmentStage
-from .scoring import ScoringStage
-from .analytics import AnalyticsStage
-from .storage import StorageStage
 
 __all__ = [
-    # Base classes
     "PipelineStage",
     "StageContext",
     "CompositeStage",
-    # Concrete stages (in pipeline order)
-    "ConnectionCorrelator",  # First: correlate bidirectional packets
-    "ValidationStage",
-    "EnrichmentStage",
-    "ScoringStage",
-    "AnalyticsStage",
-    "StorageStage",
+    "ConnectionCorrelator",
 ]
