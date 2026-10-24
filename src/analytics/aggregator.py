@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Any
 
+from src.utils.thresholds import get_alert_threshold
+
 import math
 
 try:
@@ -312,7 +314,7 @@ class ThreatTimeSeries:
         ]
 
         # Add high threat count
-        high_threat = df[df["threat_score"] >= 0.7].resample(window).size()
+        high_threat = df[df["threat_score"] >= get_alert_threshold()].resample(window).size()
         resampled["high_threat_count"] = high_threat
 
         return resampled.reset_index()
@@ -689,7 +691,7 @@ class MetadataAggregator:
                 "max": float(self.time_series.df["threat_score"].max())
                     if not self.time_series.df.empty else 0,
                 "high_threat_count": int(
-                    (self.time_series.df["threat_score"] >= 0.7).sum()
+                    (self.time_series.df["threat_score"] >= get_alert_threshold()).sum()
                 ) if not self.time_series.df.empty else 0,
             },
             "trend": self.time_series.get_threat_trend(),

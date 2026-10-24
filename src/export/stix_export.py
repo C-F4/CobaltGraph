@@ -30,6 +30,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
+from src.utils.thresholds import get_alert_threshold
+
 logger = logging.getLogger(__name__)
 
 
@@ -318,7 +320,7 @@ class STIXExporter:
             STIXIndicator object
         """
         # Determine indicator type based on threat score
-        if threat_score >= 0.7:
+        if threat_score >= get_alert_threshold():
             indicator_type = "malicious-activity"
         elif threat_score >= 0.4:
             indicator_type = "anomalous-activity"
@@ -386,7 +388,7 @@ class STIXExporter:
         # Determine indicator type
         if is_dga:
             indicator_type = "malicious-activity"
-        elif threat_score >= 0.7:
+        elif threat_score >= get_alert_threshold():
             indicator_type = "malicious-activity"
         elif threat_score >= 0.4:
             indicator_type = "anomalous-activity"

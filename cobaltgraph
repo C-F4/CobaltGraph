@@ -331,6 +331,18 @@ from pathlib import Path
 from src.utils.heartbeat import heartbeat
 
 
+def _load_app_config() -> dict:
+    """Load config/cobaltgraph.conf so runtime settings (alert threshold, retention, exports) take effect."""
+    try:
+        from src.core.config import load_config
+        config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
+        return load_config(config_dir, verbose=False)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Config not loaded, using built-in defaults: {e}")
+        return {}
+
+
+
 class Colors:
     """ANSI color codes for terminal output"""
     RED = '\033[0;31m'
@@ -641,7 +653,7 @@ class CobaltGraphMain:
                     elif platform.system() == 'Linux':
                         logger.warning("Promiscuous mode not enabled - may miss subnet traffic")
 
-                    pipeline = DataPipeline({"database_path": self.db_path})
+                    pipeline = DataPipeline({**_load_app_config(), "database_path": self.db_path})
                     pipeline.initialize_components()
                     pipeline.start()
                     logger.info("DataPipeline initialized and started")
@@ -673,7 +685,7 @@ class CobaltGraphMain:
                     from src.capture.device_monitor import DeviceMonitor
                     from src.core.orchestrator import DataPipeline
 
-                    pipeline = DataPipeline({"database_path": self.db_path})
+                    pipeline = DataPipeline({**_load_app_config(), "database_path": self.db_path})
                     pipeline.initialize_components()
                     pipeline.start()
                     logger.info("DataPipeline initialized for device mode")
@@ -699,6 +711,8 @@ class CobaltGraphMain:
                 dashboard = dashboard_class(mode=self.mode)
             except TypeError:
                 dashboard = dashboard_class()
+            # Detections Log exports honour the configured export_directory
+            dashboard.export_directory = _load_app_config().get("export_directory", "exports")
 
             dashboard.run()
 

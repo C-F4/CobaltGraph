@@ -31,6 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 from functools import lru_cache
 from threading import Lock
 from typing import Callable, Dict, List, Optional, Tuple
+from src.utils.thresholds import get_alert_threshold
 
 from .bft_consensus import BFTConsensus
 from .ml_scorer import HeuristicScorer
@@ -479,6 +480,7 @@ class ConsensusThreatScorer:
         domain_trust = None
         dga_detected = False
         domain_asn_mismatch = False
+        asn_reputation = None
 
         for assessment in valid_assessments:
             features = assessment.features or {}
@@ -491,10 +493,11 @@ class ConsensusThreatScorer:
             # OrganizationScorer provides domain_asn_mismatch
             if assessment.scorer_id == "organization":
                 domain_asn_mismatch = features.get("domain_asn_mismatch", False)
+                asn_reputation = features.get("asn_reputation")
 
         details = {
             "source": "consensus",
-            "is_malicious": threat_score >= 0.7,
+            "is_malicious": threat_score >= get_alert_threshold(),
             "threat_score": threat_score,
             "confidence": consensus_result.confidence,
             "high_uncertainty": consensus_result.high_uncertainty,
@@ -526,6 +529,8 @@ class ConsensusThreatScorer:
             "domain_trust": domain_trust,
             "dga_detected": dga_detected,
             "domain_asn_mismatch": domain_asn_mismatch,
+            # ASN reputation from the organization scorer (e.g. 'infrastructure', 'trusted')
+            "asn_reputation": asn_reputation,
         }
 
         # Cache the result for future lookups

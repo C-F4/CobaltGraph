@@ -464,39 +464,54 @@ class ConfigLoader:
             logger.warning(error_msg)
             return
 
+        # Section names are matched case-insensitively: the README and sample file
+        # use lowercase ([virustotal]) while the original code expected [VirusTotal].
+        sections = {name.lower(): name for name in parser.sections()}
+
+        def section(name):
+            return sections.get(name.lower())
+
         # AbuseIPDB
-        if parser.has_section("AbuseIPDB"):
+        if section("AbuseIPDB"):
+            name = section("AbuseIPDB")
             self.config["abuseipdb_api_key"] = parser.get(
-                "AbuseIPDB", "api_key", fallback=self.defaults["abuseipdb_api_key"]
+                name, "api_key", fallback=self.defaults["abuseipdb_api_key"]
             )
             self.config["abuseipdb_enabled"] = parser.getboolean(
-                "AbuseIPDB", "enabled", fallback=self.defaults["abuseipdb_enabled"]
+                name, "enabled", fallback=bool(self.config["abuseipdb_api_key"])
             )
             self.config["abuseipdb_cache_ttl"] = parser.getint(
-                "AbuseIPDB", "cache_ttl", fallback=self.defaults["abuseipdb_cache_ttl"]
+                name, "cache_ttl", fallback=self.defaults["abuseipdb_cache_ttl"]
             )
             self.config["abuseipdb_confidence_threshold"] = parser.getint(
-                "AbuseIPDB",
+                name,
                 "confidence_threshold",
                 fallback=self.defaults["abuseipdb_confidence_threshold"],
             )
 
         # VirusTotal
-        if parser.has_section("VirusTotal"):
+        if section("VirusTotal"):
+            name = section("VirusTotal")
             self.config["virustotal_api_key"] = parser.get(
-                "VirusTotal", "api_key", fallback=self.defaults["virustotal_api_key"]
+                name, "api_key", fallback=self.defaults["virustotal_api_key"]
             )
             self.config["virustotal_enabled"] = parser.getboolean(
-                "VirusTotal", "enabled", fallback=self.defaults["virustotal_enabled"]
+                name, "enabled", fallback=bool(self.config["virustotal_api_key"])
             )
             self.config["virustotal_cache_ttl"] = parser.getint(
-                "VirusTotal", "cache_ttl", fallback=self.defaults["virustotal_cache_ttl"]
+                name, "cache_ttl", fallback=self.defaults["virustotal_cache_ttl"]
             )
             self.config["virustotal_malicious_threshold"] = parser.getint(
-                "VirusTotal",
+                name,
                 "malicious_threshold",
                 fallback=self.defaults["virustotal_malicious_threshold"],
             )
+
+        # GreyNoise and AlienVault OTX: only the API key is consumed (orchestrator.py reads these)
+        if section("GreyNoise") and parser.get(section("GreyNoise"), "api_key", fallback=""):
+            self.config["greynoise_api_key"] = parser.get(section("GreyNoise"), "api_key")
+        if section("AlienVault_OTX") and parser.get(section("AlienVault_OTX"), "api_key", fallback=""):
+            self.config["alienvault_otx_api_key"] = parser.get(section("AlienVault_OTX"), "api_key")
 
         # ThreatFeed
         if parser.has_section("ThreatFeed"):
@@ -551,8 +566,9 @@ class ConfigLoader:
 
     def _validate_authentication(self):
         """Validate authentication credentials meet security standards (SEC-004 PATCH)"""
-        if not self.config["enable_auth"]:
-            return  # Auth disabled, skip validation
+        # Auth is not consumed by any runtime path; skip validation unless explicitly enabled
+        if not self.config.get("enable_auth", False):
+            return
 
         password = self.config["auth_password"]
         username = self.config["auth_username"]

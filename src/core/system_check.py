@@ -248,25 +248,25 @@ class SystemChecker:
             heartbeat.mark_offline("database", f"Check failed: {e}")
 
     def _check_directories(self):
-        """Ensure required directories exist"""
+        """Report on required directories. Missing ones are warned about, not created silently."""
         required_dirs = ["logs", "exports", "data", "config"]
 
         for dir_name in required_dirs:
             dir_path = self.project_root / dir_name
-            try:
-                dir_path.mkdir(parents=True, exist_ok=True)
+            if dir_path.is_dir():
                 self.results.append(CheckResult(
                     name=f"Directory: {dir_name}",
                     passed=True,
                     message=f"{dir_name}/ ready ✓",
                     critical=True
                 ))
-            except Exception as e:
+            else:
+                # Non-critical: the application creates what it needs when it runs
                 self.results.append(CheckResult(
                     name=f"Directory: {dir_name}",
                     passed=False,
-                    message=f"Cannot create {dir_name}/: {e}",
-                    critical=True
+                    message=f"{dir_name}/ missing (warning; not created by the health check)",
+                    critical=False
                 ))
 
     def _check_network_capabilities(self):

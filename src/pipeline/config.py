@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 import os
 
+from src.utils.thresholds import get_alert_threshold
+
 
 @dataclass
 class EnrichmentConfig:
@@ -33,7 +35,7 @@ class ScoringConfig:
     """Configuration for threat scoring"""
     fallback_threat_score: float = 0.2
     fallback_confidence: float = 0.5
-    high_threat_threshold: float = 0.7
+    high_threat_threshold: float = field(default_factory=get_alert_threshold)
     medium_threat_threshold: float = 0.5
     low_threat_threshold: float = 0.3
 

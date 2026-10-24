@@ -20,6 +20,8 @@ from enum import Enum
 from threading import RLock
 from typing import Dict, List, Optional, Set, Any
 
+from src.utils.thresholds import get_alert_threshold
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +46,7 @@ class AlertCategory(Enum):
     IOC_MATCH = "IOC_MATCH"                  # Local IOC database match
     DGA_DETECTED = "DGA_DETECTED"            # Domain generation algorithm
     DOMAIN_MISMATCH = "DOMAIN_MISMATCH"      # Domain-ASN correlation failure
-    BEACONING = "BEACONING"                  # C2 beaconing pattern
+    BEACONING = "BEACONING"                  # Regular-interval pattern (possible beaconing)
     CORRELATED = "CORRELATED"                # Multiple correlated alerts
 
 
@@ -91,7 +93,10 @@ class AlertEngine:
     """
 
     # Alert thresholds
-    CRITICAL_THRESHOLD = 0.7       # Threat score for CRITICAL alerts
+    @property
+    def CRITICAL_THRESHOLD(self) -> float:
+        """Threat score for CRITICAL alerts (shared alert threshold)"""
+        return get_alert_threshold()
     WARNING_THRESHOLD = 0.4        # Threat score for WARNING alerts
     ANOMALY_THRESHOLD = 0.6        # Anomaly score threshold
     PORT_SCAN_THRESHOLD = 10       # Unique ports in short time
@@ -308,7 +313,7 @@ class AlertEngine:
                 category=AlertCategory.BEACONING,
                 severity=AlertSeverity.WARNING,
                 condition=lambda ctx: ctx.get("beaconing_detected", False),
-                message_template="Beaconing pattern to {dst_ip}: interval {beaconing_interval}s",
+                message_template="Regular-interval traffic to {dst_ip}: interval {beaconing_interval}s",
                 auto_dismiss=False,
                 cooldown_seconds=600,
             ),

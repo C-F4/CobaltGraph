@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from threading import Lock, RLock
 from typing import Dict, List, Optional, Tuple, Any
 
+from src.utils.thresholds import get_alert_threshold
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,7 +139,10 @@ class IntelligenceAggregator:
     WINDOW_24HOUR = 86400
 
     # Risk thresholds
-    CRITICAL_THRESHOLD = 0.7
+    @property
+    def CRITICAL_THRESHOLD(self) -> float:
+        """Average threat at which a group is critical (shared alert threshold)"""
+        return get_alert_threshold()
     WARNING_THRESHOLD = 0.4
 
     def __init__(self, db_connection=None, cache_ttl: float = 5.0):
@@ -216,12 +221,12 @@ class IntelligenceAggregator:
                 cutoff = now - time_window
 
                 # Single optimized query for all metrics
-                cursor = self.db.conn.execute("""
+                cursor = self.db.conn.execute(f"""
                     SELECT
                         AVG(threat_score) as avg_threat,
                         COUNT(*) as total,
-                        COUNT(CASE WHEN threat_score > 0.7 THEN 1 END) as high,
-                        COUNT(CASE WHEN threat_score > 0.4 AND threat_score <= 0.7 THEN 1 END) as medium,
+                        COUNT(CASE WHEN threat_score > {get_alert_threshold()} THEN 1 END) as high,
+                        COUNT(CASE WHEN threat_score > 0.4 AND threat_score <= {get_alert_threshold()} THEN 1 END) as medium,
                         MAX(threat_score) as max_threat,
                         MIN(threat_score) as min_threat
                     FROM connections
@@ -579,12 +584,12 @@ class IntelligenceAggregator:
                 cutoff = time.time() - (window_minutes * 60)
 
                 # Time bucketing using SQLite
-                cursor = self.db.conn.execute("""
+                cursor = self.db.conn.execute(f"""
                     SELECT
                         CAST((timestamp / ?) AS INTEGER) * ? as bucket,
                         COUNT(*) as conn_count,
                         AVG(threat_score) as avg_threat,
-                        COUNT(CASE WHEN threat_score > 0.7 THEN 1 END) as high_threat_count,
+                        COUNT(CASE WHEN threat_score > {get_alert_threshold()} THEN 1 END) as high_threat_count,
                         COUNT(DISTINCT dst_ip) as unique_ips
                     FROM connections
                     WHERE timestamp > ?

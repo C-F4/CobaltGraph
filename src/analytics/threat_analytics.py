@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Dict, List, Optional, Tuple, Set, Any
 
+from src.utils.thresholds import get_alert_threshold
+
 import math
 
 try:
@@ -357,12 +359,15 @@ class ConnectionGraph:
             logger.warning(f"PageRank calculation failed: {e}")
             return []
 
-    def get_threat_clusters(self, threshold: float = 0.7) -> List[Set[str]]:
+    def get_threat_clusters(self, threshold: Optional[float] = None) -> List[Set[str]]:
         """
         Identify clusters of high-threat destinations
 
         Uses connected components on subgraph of high-threat nodes
         """
+        if threshold is None:
+            threshold = get_alert_threshold()
+
         # Filter to high-threat nodes
         high_threat_nodes = []
         for node in self.graph.nodes():
@@ -641,7 +646,7 @@ class ThreatAnalytics:
         hour = int(timestamp // 3600)
         self.hourly_stats[hour]["connections"] += 1
         self.hourly_stats[hour]["threat_sum"] += threat_score
-        if threat_score >= 0.7:
+        if threat_score >= get_alert_threshold():
             self.hourly_stats[hour]["high_threat"] += 1
 
         # Prune old hourly buckets (keep last week)
