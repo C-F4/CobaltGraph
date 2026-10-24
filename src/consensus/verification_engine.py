@@ -109,7 +109,7 @@ class VerificationEngine:
         confidence: float,
         score_statistical: Optional[float],
         score_rule_based: Optional[float],
-        score_ml_based: Optional[float],
+        score_heuristic: Optional[float],
         score_organization: Optional[float],
         score_spread: Optional[float],
         high_uncertainty: bool,
@@ -148,8 +148,8 @@ class VerificationEngine:
         if score_rule_based is not None:
             scores.append(score_rule_based)
             source_names.append("Rule-Based")
-        if score_ml_based is not None:
-            scores.append(score_ml_based)
+        if score_heuristic is not None:
+            scores.append(score_heuristic)
             source_names.append("ML Model")
         if score_organization is not None:
             scores.append(score_organization)
@@ -174,7 +174,7 @@ class VerificationEngine:
             hop_count=hop_count,
             score_statistical=score_statistical,
             score_rule_based=score_rule_based,
-            score_ml_based=score_ml_based,
+            score_heuristic=score_heuristic,
             score_organization=score_organization,
             spread=spread,
             anomaly_score=anomaly_score,
@@ -309,7 +309,7 @@ class VerificationEngine:
         hop_count: Optional[int],
         score_statistical: Optional[float],
         score_rule_based: Optional[float],
-        score_ml_based: Optional[float],
+        score_heuristic: Optional[float],
         score_organization: Optional[float],
         spread: float,
         anomaly_score: float,
@@ -397,15 +397,15 @@ class VerificationEngine:
         else:
             explanations["score_rule_based"] = "N/A: Rule engine awaiting initialization"
 
-        if score_ml_based is not None:
-            if score_ml_based >= 0.7:
-                explanations["score_ml_based"] = f"{score_ml_based:.2f}: ML model predicts high threat probability"
-            elif score_ml_based >= 0.4:
-                explanations["score_ml_based"] = f"{score_ml_based:.2f}: ML model indicates moderate concern"
+        if score_heuristic is not None:
+            if score_heuristic >= 0.7:
+                explanations["score_heuristic"] = f"{score_heuristic:.2f}: ML model predicts high threat probability"
+            elif score_heuristic >= 0.4:
+                explanations["score_heuristic"] = f"{score_heuristic:.2f}: ML model indicates moderate concern"
             else:
-                explanations["score_ml_based"] = f"{score_ml_based:.2f}: ML model predicts low threat"
+                explanations["score_heuristic"] = f"{score_heuristic:.2f}: ML model predicts low threat"
         else:
-            explanations["score_ml_based"] = "N/A: ML model requires training data"
+            explanations["score_heuristic"] = "N/A: heuristic score unavailable"
 
         if score_organization is not None:
             if score_organization >= 0.7:

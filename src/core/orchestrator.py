@@ -18,6 +18,7 @@ Modes:
 All modes receive data from the same pipeline ensuring consistency.
 """
 
+import json
 import logging
 import queue
 import signal
@@ -30,6 +31,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+from src.utils.thresholds import get_alert_threshold, set_alert_threshold
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +76,11 @@ class ConnectionEvent:
     # Individual scorer results (Dashboard Evolution)
     score_statistical: Optional[float] = None
     score_rule_based: Optional[float] = None
-    score_ml_based: Optional[float] = None
+    score_heuristic: Optional[float] = None
+    score_neural_net: Optional[float] = None
+    beaconing_detected: bool = False
+    beaconing_interval: Optional[float] = None
+    beaconing_jitter: Optional[float] = None
     score_organization: Optional[float] = None
     score_spread: Optional[float] = None
 
@@ -125,7 +132,11 @@ class ConnectionEvent:
             # Individual scorer results
             "score_statistical": self.score_statistical,
             "score_rule_based": self.score_rule_based,
-            "score_ml_based": self.score_ml_based,
+            "score_heuristic": self.score_heuristic,
+            "score_neural_net": self.score_neural_net,
+            "beaconing_detected": self.beaconing_detected,
+            "beaconing_interval": self.beaconing_interval,
+            "beaconing_jitter": self.beaconing_jitter,
             "score_organization": self.score_organization,
             "score_spread": self.score_spread,
             # AI Verification
@@ -206,6 +217,13 @@ class DataPipeline:
     def __init__(self, config: Optional[Dict] = None):
         self.config = config or {}
 
+        # Shared alert threshold: every decision site reads it via get_alert_threshold()
+        try:
+            set_alert_threshold(self.config.get("alert_threshold", 0.7))
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Invalid alert_threshold, using 0.7: {e}")
+            set_alert_threshold(0.7)
+
         # Pipeline queues for async processing
         self.input_queue: queue.Queue = queue.Queue(maxsize=1000)
         self.output_queue: queue.Queue = queue.Queue(maxsize=1000)
@@ -219,6 +237,10 @@ class DataPipeline:
         # Connection deduplication cache
         self._seen_connections: Dict[str, float] = {}  # ip:port -> timestamp
         self._dedup_lock = threading.Lock()
+
+        # Cooldown for detection rows: (event_type, dst_ip) -> last written timestamp
+        self._event_lock = threading.Lock()
+        self._event_last: Dict[Tuple[str, str], float] = {}
 
         # Event subscribers (UI modes subscribe here)
         self.subscribers: List[Callable[[ConnectionEvent], None]] = []
@@ -258,7 +280,7 @@ class DataPipeline:
         self.alienvault_otx = None  # AlienVault OTX community intel
 
         # Advanced detection analytics (Phase 4)
-        self.beaconing_detector = None  # C2 beaconing pattern detection
+        self.beaconing_detector = None  # Regular-interval (possible beaconing) timing
         self.connection_tracker = None  # TCP connection state tracking
         self.ja3_calculator = None  # JA3 TLS fingerprinting
 
@@ -311,6 +333,7 @@ class DataPipeline:
             from src.storage.database import Database
             db_path = self.config.get("database_path", "data/cobaltgraph.db")
             self.database = Database(db_path)
+            self.database.start_maintenance(self.config.get("retention_days", 30))
             logger.info(f"✅ Database initialized: {db_path}")
         except Exception as e:
             logger.warning(f"⚠️ Database unavailable: {e}")
@@ -428,7 +451,7 @@ class DataPipeline:
 
         # Advanced Detection Analytics (Phase 4)
 
-        # Beaconing Detector (C2 pattern detection)
+        # Beaconing Detector (regular-interval timing analysis)
         try:
             from src.analytics.beaconing_detector import BeaconingDetector
             # Get config values with safe fallback
@@ -441,7 +464,7 @@ class DataPipeline:
                 min_connections=min_conn,
                 max_jitter=max_jitter,
             )
-            logger.info("✅ BeaconingDetector initialized (C2 pattern detection)")
+            logger.info("✅ BeaconingDetector initialized (regular-interval timing analysis)")
         except Exception as e:
             self.beaconing_detector = None
             logger.warning(f"⚠️ BeaconingDetector unavailable: {e}")
@@ -662,6 +685,7 @@ class DataPipeline:
                                     "os_fingerprint": hop_data.os_fingerprint if hop_data else None,
                                     # Mark as hop-data update to bypass deduplication
                                     "_is_hop_update": has_hop_data,
+                                    "new_flow": not has_hop_data,
                                 }
                             else:
                                 # It's a dict (device event passed through)
@@ -707,6 +731,42 @@ class DataPipeline:
 
             except Exception as e:
                 logger.error(f"Pipeline dispatch error: {e}")
+
+    EVENT_COOLDOWN = 300.0  # seconds before the same (event type, destination) is recorded again
+
+    def _record_detection(self, event_type: str, severity: str, dst_ip: str, message: str,
+                          src_ip: Optional[str] = None, dst_port: Optional[int] = None,
+                          threat_score: Optional[float] = None, org_name: Optional[str] = None,
+                          metadata: Optional[str] = None) -> bool:
+        """
+        Write a detection row to the events table.
+
+        One row per (event_type, destination) per EVENT_COOLDOWN seconds, so a persistent
+        destination cannot flood the queue. Returns True when a row was written.
+        """
+        if not self.database:
+            return False
+
+        now = time.time()
+        key = (event_type, dst_ip)
+        with self._event_lock:
+            if now - self._event_last.get(key, 0.0) < self.EVENT_COOLDOWN:
+                return False
+            self._event_last[key] = now
+            if len(self._event_last) > 10000:
+                cutoff = now - self.EVENT_COOLDOWN
+                self._event_last = {k: v for k, v in self._event_last.items() if v > cutoff}
+
+        try:
+            self.database.add_event(
+                event_type=event_type, message=message, severity=severity,
+                src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port,
+                threat_score=threat_score, org_name=org_name, metadata=metadata,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to record {event_type} event for {dst_ip}: {e}")
+            return False
+        return True
 
     def _is_duplicate(self, dst_ip: str, dst_port: int) -> bool:
         """Check if connection is duplicate within dedup window"""
@@ -906,6 +966,14 @@ class DataPipeline:
         # These should bypass deduplication as they contain valuable response TTL data
         is_hop_update = raw_conn.get("_is_hop_update", False)
 
+        # Timing tap: record every new flow BEFORE dedup. Dedup suppresses same ip:port repeats
+        # for 60 s, which would otherwise hide the inter-arrival times the detector needs.
+        if self.beaconing_detector and not is_hop_update and raw_conn.get("new_flow", True):
+            try:
+                self.beaconing_detector.record_connection(dst_ip, timestamp, dst_port=dst_port)
+            except Exception as e:
+                logger.debug(f"Beacon record failed for {dst_ip}: {e}")
+
         # Check for duplicate (avoid redundant processing)
         # Skip dedup for hop updates - they provide bidirectional capture data
         if not is_hop_update and self._is_duplicate(dst_ip, dst_port):
@@ -989,6 +1057,7 @@ class DataPipeline:
                     "dst_port": dst_port,
                     "protocol": protocol,
                     "timestamp": timestamp,
+                    "new_flow": raw_conn.get("new_flow", True),
                     "ttl": raw_conn.get("ttl", 0),
                     # Protocol enrichment data for scorers
                     "dns_query": dns_query,
@@ -1107,24 +1176,19 @@ class DataPipeline:
                         message = f"{anomaly_type.upper()}: {dst_ip} (score: {anomaly_score:.2f})"
 
                         # Store anomaly event in database for dashboard retrieval
-                        if self.database:
-                            try:
-                                import json
-                                self.database.add_event(
-                                    event_type="anomaly",
-                                    severity=severity,
-                                    message=message,
-                                    src_ip=src_ip,
-                                    dst_ip=dst_ip,
-                                    dst_port=dst_port,
-                                    threat_score=anomaly_score,
-                                    metadata=json.dumps({
-                                        'anomaly_type': anomaly_type,
-                                        'factors': anomaly.get("factors", []),
-                                    })
-                                )
-                            except Exception as e:
-                                logger.debug(f"Failed to store anomaly event: {e}")
+                        self._record_detection(
+                            event_type="anomaly",
+                            severity=severity,
+                            dst_ip=dst_ip,
+                            message=message,
+                            src_ip=src_ip,
+                            dst_port=dst_port,
+                            threat_score=anomaly_score,
+                            metadata=json.dumps({
+                                'anomaly_type': anomaly_type,
+                                'factors': anomaly.get("factors", []),
+                            }),
+                        )
 
                         # Post anomaly event to dashboard UIEventHandler
                         try:
@@ -1164,94 +1228,6 @@ class DataPipeline:
             except Exception:
                 pass
 
-        # Stage 5: Storage
-        if self.database:
-            try:
-                self.database.add_connection({
-                    "timestamp": timestamp,
-                    "src_ip": src_ip,
-                    "src_mac": raw_conn.get("src_mac"),
-                    "dst_ip": dst_ip,
-                    "dst_port": dst_port,
-                    "protocol": protocol,
-                    "threat_score": threat_score,
-                    "dst_country": geo_data.get("country"),
-                    "dst_lat": geo_data.get("latitude"),
-                    "dst_lon": geo_data.get("longitude"),
-                    "dst_hostname": geo_data.get("hostname"),
-                    "device_vendor": raw_conn.get("device_vendor"),
-                    "dst_asn": asn_data.get("dst_asn"),
-                    "dst_asn_name": asn_data.get("dst_asn_name"),
-                    "dst_org": asn_data.get("dst_org"),
-                    "dst_org_type": asn_data.get("dst_org_type"),
-                    "dst_cidr": consensus_details.get("dst_cidr"),
-                    "hop_count": asn_data.get("hop_count"),
-                    "ttl_observed": asn_data.get("ttl_observed"),
-                    "ttl_initial": consensus_details.get("ttl_initial"),
-                    "os_fingerprint": asn_data.get("os_fingerprint"),
-                    "org_trust_score": asn_data.get("org_trust_score"),
-                    # Scoring metadata for dashboard display
-                    "confidence": confidence,
-                    "high_uncertainty": high_uncertainty,
-                    "scoring_method": scoring_method,
-                    # Individual scorer results (Dashboard Evolution)
-                    "score_statistical": consensus_details.get("score_statistical"),
-                    "score_rule_based": consensus_details.get("score_rule_based"),
-                    "score_ml_based": consensus_details.get("score_ml_based"),
-                    "score_organization": consensus_details.get("score_organization"),
-                    "score_spread": consensus_details.get("score_spread"),
-                    "anomaly_score": anomaly_score if anomaly_score > 0 else None,
-                })
-            except Exception as e:
-                logger.debug(f"Database storage failed: {e}")
-
-            # Also update device record with connection threat score
-            src_mac = raw_conn.get("src_mac")
-            if src_mac:
-                try:
-                    self.database.upsert_device(
-                        mac=src_mac,
-                        ip=src_ip,
-                        vendor=raw_conn.get("device_vendor"),
-                        packet_type="connection",
-                        threat_score=threat_score
-                    )
-                except Exception:
-                    pass
-
-            # Log high-threat events for dashboard anomaly panel
-            if threat_score >= 0.7:
-                try:
-                    severity = "CRITICAL" if threat_score >= 0.85 else "HIGH"
-                    org_name = asn_data.get("dst_org", "Unknown")
-                    self.database.add_event(
-                        event_type="high_threat",
-                        severity=severity,
-                        message=f"High threat: {dst_ip}:{dst_port} ({org_name})",
-                        src_ip=src_ip,
-                        dst_ip=dst_ip,
-                        dst_port=dst_port,
-                        threat_score=threat_score,
-                        org_name=org_name
-                    )
-                except Exception:
-                    pass
-
-            # Log uncertain consensus for dashboard
-            if high_uncertainty:
-                try:
-                    self.database.add_event(
-                        event_type="consensus_uncertain",
-                        severity="MEDIUM",
-                        message=f"Uncertain consensus: {dst_ip}:{dst_port} (spread too high)",
-                        src_ip=src_ip,
-                        dst_ip=dst_ip,
-                        dst_port=dst_port,
-                        threat_score=threat_score
-                    )
-                except Exception:
-                    pass
-
         # Stage 6: Export
         if self.exporter and scoring_method == "consensus":
             try:
@@ -1282,7 +1258,7 @@ class DataPipeline:
                     confidence=confidence,
                     score_statistical=consensus_details.get("score_statistical"),
                     score_rule_based=consensus_details.get("score_rule_based"),
-                    score_ml_based=consensus_details.get("score_ml_based"),
+                    score_heuristic=consensus_details.get("score_heuristic"),
                     score_organization=consensus_details.get("score_organization"),
                     score_spread=consensus_details.get("score_spread"),
                     high_uncertainty=high_uncertainty,
@@ -1311,6 +1287,132 @@ class DataPipeline:
         dga_detected = consensus_details.get("dga_detected", False)
         domain_asn_mismatch = consensus_details.get("domain_asn_mismatch", False)
 
+        # Stage 5: Storage and detection rows. Runs after verification and domain
+        # intelligence so every column is populated when the row is written.
+        beacon = {}
+        if self.beaconing_detector:
+            try:
+                beacon = self.beaconing_detector.get_beacon_data(dst_ip) or {}
+            except Exception as e:
+                logger.debug(f"Beacon analysis failed for {dst_ip}: {e}")
+        # Infrastructure ASNs (DNS/NTP/CA) poll on a schedule by design; do not flag them
+        beaconing_detected = bool(beacon) and consensus_details.get("asn_reputation") != "infrastructure"
+        beaconing_interval = beacon.get("interval_seconds") if beaconing_detected else None
+        beaconing_jitter = beacon.get("jitter_percent") if beaconing_detected else None
+        org_name = asn_data.get("dst_org") or "Unknown"
+        domain = dns_query or tls_sni
+        high_threshold = get_alert_threshold()
+
+        if self.database:
+            try:
+                self.database.add_connection({
+                    "timestamp": timestamp,
+                    "src_ip": src_ip,
+                    "src_mac": raw_conn.get("src_mac"),
+                    "dst_ip": dst_ip,
+                    "dst_port": dst_port,
+                    "protocol": protocol,
+                    "threat_score": threat_score,
+                    "dst_country": geo_data.get("country"),
+                    "dst_lat": geo_data.get("latitude"),
+                    "dst_lon": geo_data.get("longitude"),
+                    "dst_hostname": geo_data.get("hostname"),
+                    "device_vendor": raw_conn.get("device_vendor"),
+                    "dst_asn": asn_data.get("dst_asn"),
+                    "dst_asn_name": asn_data.get("dst_asn_name"),
+                    "dst_org": asn_data.get("dst_org"),
+                    "dst_org_type": asn_data.get("dst_org_type"),
+                    "dst_cidr": consensus_details.get("dst_cidr"),
+                    "hop_count": asn_data.get("hop_count"),
+                    "ttl_observed": asn_data.get("ttl_observed"),
+                    "ttl_initial": consensus_details.get("ttl_initial"),
+                    "os_fingerprint": asn_data.get("os_fingerprint"),
+                    "org_trust_score": asn_data.get("org_trust_score"),
+                    # Scoring metadata for dashboard display
+                    "confidence": confidence,
+                    "high_uncertainty": high_uncertainty,
+                    "scoring_method": scoring_method,
+                    # Individual scorer results
+                    "score_statistical": consensus_details.get("score_statistical"),
+                    "score_rule_based": consensus_details.get("score_rule_based"),
+                    "score_heuristic": consensus_details.get("score_heuristic"),
+                    "score_neural_net": consensus_details.get("score_neural_net"),
+                    "score_organization": consensus_details.get("score_organization"),
+                    "score_spread": consensus_details.get("score_spread"),
+                    "anomaly_score": anomaly_score if anomaly_score > 0 else None,
+                    # AI verification
+                    "verification_status": verification_status,
+                    "verification_reason": verification_reason,
+                    "verification_confidence": verification_confidence,
+                    "triangulation_score": triangulation_score,
+                    "triangulation_sources": triangulation_sources,
+                    # Protocol enrichment
+                    "dns_query": dns_query,
+                    "dns_query_type": dns_query_type,
+                    "tls_sni": tls_sni,
+                    "tls_version": tls_version,
+                    "tcp_state": tcp_state,
+                    "tcp_is_scan": tcp_is_scan,
+                    # Domain intelligence
+                    "domain_trust": domain_trust,
+                    "dga_detected": dga_detected,
+                    "domain_asn_mismatch": domain_asn_mismatch,
+                    # Regular-interval (possible beaconing) timing
+                    "beaconing_detected": beaconing_detected,
+                    "beaconing_interval": beaconing_interval,
+                    "beaconing_jitter": beaconing_jitter,
+                })
+            except Exception as e:
+                logger.warning(f"Database storage failed for {dst_ip}: {e}")
+
+            src_mac = raw_conn.get("src_mac")
+            if src_mac:
+                try:
+                    self.database.upsert_device(
+                        mac=src_mac,
+                        ip=src_ip,
+                        vendor=raw_conn.get("device_vendor"),
+                        packet_type="connection",
+                        threat_score=threat_score,
+                    )
+                except Exception as e:
+                    logger.debug(f"Device upsert failed for {src_mac}: {e}")
+
+        if threat_score >= high_threshold:
+            self._record_detection(
+                event_type="high_threat",
+                severity="CRITICAL" if threat_score >= max(0.85, high_threshold) else "HIGH",
+                message=f"High threat: {dst_ip}:{dst_port} ({org_name})",
+                src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port,
+                threat_score=threat_score, org_name=org_name,
+            )
+        if high_uncertainty:
+            self._record_detection(
+                event_type="consensus_uncertain",
+                severity="MEDIUM",
+                message=f"Uncertain consensus: {dst_ip}:{dst_port} (spread too high)",
+                src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port, threat_score=threat_score,
+            )
+        if beaconing_detected:
+            self._record_detection(
+                event_type="beaconing",
+                severity="HIGH" if threat_score >= high_threshold else "MEDIUM",
+                message=(f"Regular-interval traffic to {dst_ip}:{dst_port} "
+                         f"(interval {beaconing_interval or 0:.1f}s, jitter {beaconing_jitter or 0:.0f}%)"),
+                src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port,
+                threat_score=threat_score, org_name=org_name,
+                metadata=json.dumps(beacon, default=str),
+            )
+        if dga_detected:
+            self._record_detection(
+                event_type="dga_like",
+                severity="HIGH" if threat_score >= high_threshold else "MEDIUM",
+                message=f"DGA-like domain '{domain or 'unknown'}' for {dst_ip}:{dst_port}",
+                src_ip=src_ip, dst_ip=dst_ip, dst_port=dst_port,
+                threat_score=threat_score, org_name=org_name,
+                metadata=json.dumps({"domain": domain}),
+            )
+
         # Build final event
         return ConnectionEvent(
             timestamp=timestamp,
@@ -1338,7 +1440,11 @@ class DataPipeline:
             # Individual scorer results
             score_statistical=consensus_details.get("score_statistical"),
             score_rule_based=consensus_details.get("score_rule_based"),
-            score_ml_based=consensus_details.get("score_ml_based"),
+            score_heuristic=consensus_details.get("score_heuristic"),
+            score_neural_net=consensus_details.get("score_neural_net"),
+            beaconing_detected=beaconing_detected,
+            beaconing_interval=beaconing_interval,
+            beaconing_jitter=beaconing_jitter,
             score_organization=consensus_details.get("score_organization"),
             score_spread=consensus_details.get("score_spread"),
             # AI Verification

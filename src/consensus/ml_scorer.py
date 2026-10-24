@@ -627,7 +627,7 @@ class HeuristicScorer(ThreatScorer):
         self, dst_ip: str, threat_intel: Dict, geo_data: Dict, connection_metadata: Dict
     ) -> ScorerAssessment:
         """
-        ML-based assessment of threat level
+        Heuristic assessment of threat level
 
         Process:
         1. Extract numerical features

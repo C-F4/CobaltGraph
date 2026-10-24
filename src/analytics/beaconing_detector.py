@@ -2,7 +2,8 @@
 """
 CobaltGraph Beaconing Detector
 
-Detects Command & Control (C2) beaconing patterns in network traffic.
+Detects regular-interval (possible beaconing) connection timing. A heuristic: regular
+timing can also come from legitimate polling.
 Beaconing is characterized by regular, periodic connections to external hosts,
 often with small jitter to evade simple detection.
 
@@ -81,7 +82,7 @@ class ConnectionRecord:
 
 class BeaconingDetector:
     """
-    Detects C2-style beaconing patterns in network connections.
+    Detects regular-interval connection timing (possible beaconing) per destination.
 
     Algorithm:
     1. Record all connections to each destination IP
@@ -98,6 +99,8 @@ class BeaconingDetector:
     MAX_JITTER_PERCENT = 20.0     # Maximum jitter for beaconing
     MIN_INTERVAL_SECONDS = 10     # Minimum interval (filter out burst traffic)
     MAX_INTERVAL_SECONDS = 7200   # Maximum interval (2 hours)
+    MAX_TRACKED_IPS = 5000        # Bound memory: evict least recently seen destinations
+    MAX_ANALYSIS_RECORDS = 200    # Analyse only the most recent records (bounded cost per connection)
 
     # Analysis windows
     ANALYSIS_WINDOW = 3600        # 1 hour lookback for analysis
@@ -168,7 +171,11 @@ class BeaconingDetector:
         )
 
         with self._lock:
+            if dst_ip not in self._connections and len(self._connections) >= self.MAX_TRACKED_IPS:
+                self._evict_least_recent()
             self._connections[dst_ip].append(record)
+            # New data invalidates any cached verdict for this destination
+            self._result_cache.pop(dst_ip, None)
             self.stats["connections_recorded"] += 1
 
             # Update tracked IPs count
@@ -176,6 +183,15 @@ class BeaconingDetector:
 
             # Cleanup old records for this IP
             self._cleanup_ip(dst_ip)
+
+    def _evict_least_recent(self):
+        """Drop the destination whose newest record is oldest (caller holds the lock)"""
+        victim = min(
+            self._connections,
+            key=lambda ip: self._connections[ip][-1].timestamp if self._connections[ip] else 0.0,
+        )
+        del self._connections[victim]
+        self._result_cache.pop(victim, None)
 
     def _cleanup_ip(self, dst_ip: str):
         """Remove old connection records for an IP"""
@@ -200,23 +216,22 @@ class BeaconingDetector:
         Returns:
             BeaconingResult with analysis data
         """
-        # Check cache
-        if use_cache and dst_ip in self._result_cache:
-            result, cache_time = self._result_cache[dst_ip]
-            if time.time() - cache_time < self._cache_ttl:
-                return result
-
         with self._lock:
-            records = self._connections.get(dst_ip, [])
+            # Check cache
+            if use_cache and dst_ip in self._result_cache:
+                result, cache_time = self._result_cache[dst_ip]
+                if time.time() - cache_time < self._cache_ttl:
+                    return result
+
+            records = list(self._connections.get(dst_ip, []))[-self.MAX_ANALYSIS_RECORDS:]
 
         result = self._analyze_records(dst_ip, records)
 
-        # Update cache
-        self._result_cache[dst_ip] = (result, time.time())
-        self.stats["analyses_performed"] += 1
-
-        if result.is_beaconing:
-            self.stats["beacons_detected"] += 1
+        with self._lock:
+            self._result_cache[dst_ip] = (result, time.time())
+            self.stats["analyses_performed"] += 1
+            if result.is_beaconing:
+                self.stats["beacons_detected"] += 1
 
         return result
 

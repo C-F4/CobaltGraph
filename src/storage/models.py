@@ -60,7 +60,8 @@ class Connection:
     # Individual scorer results (Dashboard Evolution)
     score_statistical: Optional[float] = None   # Statistical scorer result
     score_rule_based: Optional[float] = None    # Rule-based scorer result
-    score_ml_based: Optional[float] = None      # ML model scorer result
+    score_heuristic: Optional[float] = None     # Hand-tuned feature-weight scorer result
+    score_neural_net: Optional[float] = None    # GRU scorer result (untrained until fed feedback)
     score_organization: Optional[float] = None  # Organization scorer result
     anomaly_score: Optional[float] = None       # Anomaly detection score
     score_spread: Optional[float] = None        # Max - min of scorer votes
@@ -101,7 +102,8 @@ class Connection:
             # Individual scorer results
             "score_statistical": self.score_statistical,
             "score_rule_based": self.score_rule_based,
-            "score_ml_based": self.score_ml_based,
+            "score_heuristic": self.score_heuristic,
+            "score_neural_net": self.score_neural_net,
             "score_organization": self.score_organization,
             "anomaly_score": self.anomaly_score,
             "score_spread": self.score_spread,

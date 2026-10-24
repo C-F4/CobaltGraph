@@ -6,7 +6,7 @@ Provides:
 - Statistical anomaly detection (pure Python with optional scipy acceleration)
 - Connection graph topology analysis (networkx)
 - Time-series aggregation and patterns (pure Python with optional pandas)
-- C2 beaconing detection
+- Regular-interval (possible beaconing) timing analysis
 - TCP connection state analysis
 - JA3 TLS fingerprinting
 """

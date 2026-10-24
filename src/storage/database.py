@@ -22,6 +22,7 @@ from collections import deque
 from contextlib import contextmanager
 
 from src.utils.errors import DatabaseError
+from src.utils.thresholds import get_alert_threshold
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class Database:
         "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score",
         "confidence", "high_uncertainty", "scoring_method",
         # Individual scorer results (Phase 1 - Dashboard Evolution)
-        "score_statistical", "score_rule_based", "score_ml_based", "score_organization",
+        "score_statistical", "score_rule_based", "score_organization",
         "anomaly_score", "score_spread",
         # AI Verification fields
         "verification_status", "verification_reason", "verification_confidence",
@@ -60,7 +61,10 @@ class Database:
         "dns_query", "dns_query_type", "tls_sni", "tls_version",
         "tcp_state", "tcp_is_scan",
         # Domain Intelligence fields
-        "domain_trust", "dga_detected", "domain_asn_mismatch"
+        "domain_trust", "dga_detected", "domain_asn_mismatch",
+        # Detection/recording fields
+        "score_heuristic", "score_neural_net",
+        "beaconing_detected", "beaconing_interval", "beaconing_jitter",
     ]
 
     # Maximum consecutive flush failures before dropping batch
@@ -257,7 +261,13 @@ class Database:
                         -- Domain Intelligence fields
                         domain_trust TEXT,
                         dga_detected INTEGER DEFAULT 0,
-                        domain_asn_mismatch INTEGER DEFAULT 0
+                        domain_asn_mismatch INTEGER DEFAULT 0,
+                        -- Detection/recording fields (heuristic + neural scores, regular-interval timing)
+                        score_heuristic REAL,
+                        score_neural_net REAL,
+                        beaconing_detected INTEGER DEFAULT 0,
+                        beaconing_interval REAL,
+                        beaconing_jitter REAL
                     )
                 """)
 
@@ -289,6 +299,14 @@ class Database:
 
                 self._migrate_schema()
 
+                try:
+                    self.conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_beacon "
+                        "ON connections(timestamp DESC) WHERE beaconing_detected = 1"
+                    )
+                except sqlite3.Error:
+                    pass
+
                 # Events table for logging and alerts
                 self.conn.execute("""
                     CREATE TABLE IF NOT EXISTS events (
@@ -312,6 +330,7 @@ class Database:
                     ("idx_event_time", "events(timestamp DESC)"),
                     ("idx_event_severity", "events(severity, timestamp DESC)"),
                     ("idx_event_type", "events(event_type, timestamp DESC)"),
+                    ("idx_event_dst", "events(dst_ip, timestamp DESC)"),
                 ]
 
                 for idx_name, idx_def in event_indexes:
@@ -404,6 +423,12 @@ class Database:
             ("domain_trust", "TEXT"),
             ("dga_detected", "INTEGER DEFAULT 0"),
             ("domain_asn_mismatch", "INTEGER DEFAULT 0"),
+            # Detection/recording fields
+            ("score_heuristic", "REAL"),
+            ("score_neural_net", "REAL"),
+            ("beaconing_detected", "INTEGER DEFAULT 0"),
+            ("beaconing_interval", "REAL"),
+            ("beaconing_jitter", "REAL"),
         ]
 
         cursor = self.conn.execute("PRAGMA table_info(connections)")
@@ -445,14 +470,19 @@ class Database:
         dramatically improving performance for common intelligence queries
         """
         try:
+            # Views bake the threshold in, so drop and recreate on every start
+            for view in ("threat_posture_5min", "org_intelligence_1hour", "geo_intelligence_1hour",
+                         "temporal_trends_1hour", "high_value_connections", "asn_intelligence_1hour"):
+                self.conn.execute(f"DROP VIEW IF EXISTS {view}")
+
             # Threat posture view - 5 minute window
-            self.conn.execute("""
-                CREATE VIEW IF NOT EXISTS threat_posture_5min AS
+            self.conn.execute(f"""
+                CREATE VIEW threat_posture_5min AS
                 SELECT
                     AVG(threat_score) as current_threat,
                     COUNT(*) as total_connections,
-                    COUNT(CASE WHEN threat_score > 0.7 THEN 1 END) as high_threats,
-                    COUNT(CASE WHEN threat_score > 0.4 AND threat_score <= 0.7 THEN 1 END) as medium_threats,
+                    COUNT(CASE WHEN threat_score > {get_alert_threshold()} THEN 1 END) as high_threats,
+                    COUNT(CASE WHEN threat_score > 0.4 AND threat_score <= {get_alert_threshold()} THEN 1 END) as medium_threats,
                     MAX(timestamp) as latest_timestamp,
                     MIN(timestamp) as earliest_timestamp
                 FROM connections
@@ -461,7 +491,7 @@ class Database:
 
             # Organization intelligence view - 1 hour window
             self.conn.execute("""
-                CREATE VIEW IF NOT EXISTS org_intelligence_1hour AS
+                CREATE VIEW org_intelligence_1hour AS
                 SELECT
                     dst_org,
                     dst_org_type,
@@ -481,7 +511,7 @@ class Database:
 
             # Geographic intelligence view - 1 hour window
             self.conn.execute("""
-                CREATE VIEW IF NOT EXISTS geo_intelligence_1hour AS
+                CREATE VIEW geo_intelligence_1hour AS
                 SELECT
                     dst_country,
                     COUNT(*) as conn_count,
@@ -498,13 +528,13 @@ class Database:
 
             # Temporal trends view - 1 minute buckets, last hour
             # Note: This is a template; actual queries will use parameterized time buckets
-            self.conn.execute("""
-                CREATE VIEW IF NOT EXISTS temporal_trends_1hour AS
+            self.conn.execute(f"""
+                CREATE VIEW temporal_trends_1hour AS
                 SELECT
                     CAST((timestamp / 60) AS INTEGER) * 60 as time_bucket,
                     COUNT(*) as conn_count,
                     AVG(threat_score) as avg_threat,
-                    COUNT(CASE WHEN threat_score > 0.7 THEN 1 END) as high_threat_count,
+                    COUNT(CASE WHEN threat_score > {get_alert_threshold()} THEN 1 END) as high_threat_count,
                     COUNT(DISTINCT dst_ip) as unique_ips
                 FROM connections
                 WHERE timestamp > (SELECT MAX(timestamp) FROM connections) - 3600
@@ -514,7 +544,7 @@ class Database:
 
             # High-value connections view - for alert generation
             self.conn.execute("""
-                CREATE VIEW IF NOT EXISTS high_value_connections AS
+                CREATE VIEW high_value_connections AS
                 SELECT
                     src_ip, src_mac, dst_ip, dst_port, dst_org, dst_org_type,
                     threat_score, timestamp, device_vendor,
@@ -527,7 +557,7 @@ class Database:
 
             # ASN intelligence view
             self.conn.execute("""
-                CREATE VIEW IF NOT EXISTS asn_intelligence_1hour AS
+                CREATE VIEW asn_intelligence_1hour AS
                 SELECT
                     dst_asn,
                     dst_asn_name,
@@ -601,7 +631,6 @@ class Database:
             # Individual scorer results (Phase 1 - Dashboard Evolution)
             conn_data.get("score_statistical"),
             conn_data.get("score_rule_based"),
-            conn_data.get("score_ml_based"),
             conn_data.get("score_organization"),
             conn_data.get("anomaly_score"),
             conn_data.get("score_spread"),
@@ -622,6 +651,12 @@ class Database:
             conn_data.get("domain_trust"),
             1 if conn_data.get("dga_detected") else 0,
             1 if conn_data.get("domain_asn_mismatch") else 0,
+            # Detection/recording fields
+            conn_data.get("score_heuristic"),
+            conn_data.get("score_neural_net"),
+            1 if conn_data.get("beaconing_detected") else 0,
+            conn_data.get("beaconing_interval"),
+            conn_data.get("beaconing_jitter"),
         )
 
     def _flush_batch(self):
@@ -775,7 +810,9 @@ class Database:
                            dst_org, dst_hostname, threat_score, timestamp, device_vendor,
                            COALESCE(protocol, 'TCP') as protocol,
                            dst_asn, dst_asn_name, dst_org_type, dst_cidr,
-                           ttl_observed, ttl_initial, hop_count, os_fingerprint, org_trust_score
+                           ttl_observed, ttl_initial, hop_count, os_fingerprint, org_trust_score,
+                           score_heuristic, score_neural_net,
+                           beaconing_detected, beaconing_interval, beaconing_jitter
                     FROM connections
                     ORDER BY timestamp DESC
                     LIMIT ?
@@ -786,7 +823,9 @@ class Database:
                     "dst_lat", "dst_lon", "dst_org", "dst_hostname", "threat_score",
                     "timestamp", "device_vendor", "protocol",
                     "dst_asn", "dst_asn_name", "dst_org_type", "dst_cidr",
-                    "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score"
+                    "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score",
+                    "score_heuristic", "score_neural_net",
+                    "beaconing_detected", "beaconing_interval", "beaconing_jitter"
                 ]
 
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -812,13 +851,13 @@ class Database:
 
         try:
             with self.lock:
-                cursor = self.conn.execute("""
+                cursor = self.conn.execute(f"""
                     SELECT
                         COUNT(*) as total,
                         AVG(threat_score) as avg_threat,
                         MAX(threat_score) as max_threat,
-                        SUM(CASE WHEN threat_score >= 0.7 THEN 1 ELSE 0 END) as high_threats,
-                        SUM(CASE WHEN threat_score >= 0.4 AND threat_score < 0.7 THEN 1 ELSE 0 END) as med_threats,
+                        SUM(CASE WHEN threat_score >= {get_alert_threshold()} THEN 1 ELSE 0 END) as high_threats,
+                        SUM(CASE WHEN threat_score >= 0.4 AND threat_score < {get_alert_threshold()} THEN 1 ELSE 0 END) as med_threats,
                         COUNT(DISTINCT dst_ip) as unique_ips,
                         COUNT(DISTINCT dst_asn) as unique_asns,
                         COUNT(DISTINCT dst_org_type) as org_types
@@ -972,6 +1011,17 @@ class Database:
 
         except sqlite3.Error as e:
             logger.error(f"Failed to log event: {e}")
+
+    def add_event(self, event_type: str, message: str, severity: str = "INFO",
+                  src_ip: str = None, dst_ip: str = None, dst_port: int = None,
+                  threat_score: float = None, org_name: str = None,
+                  rule_matched: str = None, metadata: str = None):
+        """Record an event. Keyword names match orchestrator call sites (src_ip maps to events.source_ip)."""
+        self.log_event(
+            event_type, message, severity=severity, source_ip=src_ip, dst_ip=dst_ip,
+            dst_port=dst_port, threat_score=threat_score, org_name=org_name,
+            rule_matched=rule_matched, metadata=metadata,
+        )
 
     def get_recent_events(self, limit: int = 100, severity: str = None,
                           event_type: str = None) -> List[Dict]:
@@ -1391,7 +1441,9 @@ class Database:
                     SELECT src_mac, src_ip, dst_ip, dst_port, dst_country, dst_lat, dst_lon,
                            dst_org, dst_hostname, threat_score, timestamp, device_vendor, protocol,
                            dst_asn, dst_asn_name, dst_org_type, dst_cidr,
-                           ttl_observed, ttl_initial, hop_count, os_fingerprint, org_trust_score
+                           ttl_observed, ttl_initial, hop_count, os_fingerprint, org_trust_score,
+                           score_heuristic, score_neural_net,
+                           beaconing_detected, beaconing_interval, beaconing_jitter
                     FROM connections
                     WHERE src_mac = ?
                     ORDER BY timestamp DESC
@@ -1403,7 +1455,9 @@ class Database:
                     "dst_lat", "dst_lon", "dst_org", "dst_hostname", "threat_score",
                     "timestamp", "device_vendor", "protocol",
                     "dst_asn", "dst_asn_name", "dst_org_type", "dst_cidr",
-                    "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score"
+                    "ttl_observed", "ttl_initial", "hop_count", "os_fingerprint", "org_trust_score",
+                    "score_heuristic", "score_neural_net",
+                    "beaconing_detected", "beaconing_interval", "beaconing_jitter"
                 ]
 
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -1442,9 +1496,77 @@ class Database:
         except sqlite3.Error as e:
             logger.error(f"Failed to update device activity: {e}")
 
+    def prune_connections(self, retention_days: int, batch_size: int = 2000,
+                          pause: float = 0.05) -> int:
+        """
+        Delete connection rows older than retention_days.
+
+        Deletes in small batches, committing each one and releasing the lock between
+        batches so live inserts are not blocked for long. No-op when retention_days <= 0.
+
+        Returns the number of rows deleted.
+        """
+        if retention_days <= 0:
+            return 0
+
+        cutoff = time.time() - retention_days * 86400
+        total = 0
+        while True:
+            with self.lock:
+                cursor = self.conn.execute(
+                    "DELETE FROM connections WHERE id IN "
+                    "(SELECT id FROM connections WHERE timestamp < ? LIMIT ?)",
+                    (cutoff, batch_size),
+                )
+                deleted = cursor.rowcount
+                self.conn.commit()
+            total += deleted
+            if deleted < batch_size:
+                break
+            time.sleep(pause)
+
+        if total:
+            logger.info("Pruned %d connections older than %d days", total, retention_days)
+        return total
+
+    MAINTENANCE_FIRST_RUN_DELAY = 30.0   # seconds after start
+    MAINTENANCE_INTERVAL = 3600.0        # seconds between runs
+
+    def start_maintenance(self, retention_days: int):
+        """Start a daemon thread that enforces retention and checkpoints the WAL."""
+        if getattr(self, "_maintenance_thread", None) is not None:
+            return
+        self._maintenance_stop = threading.Event()
+
+        def _run():
+            delay = self.MAINTENANCE_FIRST_RUN_DELAY
+            while not self._maintenance_stop.wait(delay):
+                delay = self.MAINTENANCE_INTERVAL
+                try:
+                    self.prune_connections(retention_days)
+                    if retention_days > 0:
+                        self.cleanup_old_events(max_age_days=min(retention_days, 7))
+                    with self.lock:
+                        self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                except Exception as e:
+                    logger.warning(f"Retention maintenance failed: {e}")
+
+        self._maintenance_thread = Thread(target=_run, name="db-maintenance", daemon=True)
+        self._maintenance_thread.start()
+
+    def _stop_maintenance(self):
+        stop = getattr(self, "_maintenance_stop", None)
+        if stop is not None:
+            stop.set()
+        thread = getattr(self, "_maintenance_thread", None)
+        if thread is not None:
+            thread.join(timeout=2.0)
+            self._maintenance_thread = None
+
     def close(self):
         """Close database with final flush"""
         self._running = False
+        self._stop_maintenance()
 
         # Final flush
         self._flush_batch()
